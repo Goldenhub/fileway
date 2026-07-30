@@ -1,0 +1,74 @@
+---
+title: Getting Started
+description: Install and use BetterPush in your project
+---
+
+## Install
+
+```bash
+pnpm add @betterpush/core
+```
+
+Then add a driver:
+
+```bash
+pnpm add @betterpush/driver-local
+pnpm add @betterpush/driver-s3
+pnpm add @betterpush/driver-cloudinary
+```
+
+## Basic Usage
+
+```ts
+import { BetterPushClient } from "@betterpush/core";
+import { LocalDriver } from "@betterpush/driver-local";
+
+const client = new BetterPushClient({
+  driver: new LocalDriver({
+    directory: "./storage",
+    baseUrl: "https://cdn.example.com",
+  }),
+});
+
+const stream = new ReadableStream({
+  start(controller) {
+    controller.enqueue(new TextEncoder().encode("file content"));
+    controller.close();
+  },
+});
+
+const result = await client.upload(stream, {
+  filename: "readme.txt",
+  path: "docs",
+  mimeType: "text/plain",
+});
+
+console.log(result.id);
+console.log(result.url);
+console.log(result.path);
+console.log(result.size);
+```
+
+## Type Inference
+
+Each driver returns its own metadata shape:
+
+```ts
+import { LocalDriver } from "@betterpush/driver-local";
+import { S3Driver } from "@betterpush/driver-s3";
+
+const localClient = new BetterPushClient({
+  driver: new LocalDriver({ directory: "./storage" }),
+});
+
+const s3Client = new BetterPushClient({
+  driver: new S3Driver({ bucket: "my-bucket", region: "us-east-1" }),
+});
+
+const localResult = await localClient.upload(stream, { filename: "f.txt" });
+localResult.meta.localPath; // string
+
+const s3Result = await s3Client.upload(stream, { filename: "f.txt" });
+s3Result.meta.bucket; // string
+s3Result.meta.etag;   // string | undefined
+```

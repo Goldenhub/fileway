@@ -1,0 +1,62 @@
+---
+title: S3 Driver
+description: Upload files to S3-compatible storage
+---
+
+Uploads files to S3-compatible storage (AWS S3, Cloudflare R2, MinIO) using `FetchHttpHandler`.
+
+```ts
+import { BetterPushClient } from "@betterpush/core";
+import { S3Driver } from "@betterpush/driver-s3";
+
+const client = new BetterPushClient({
+  driver: new S3Driver({
+    bucket: "my-bucket",
+    region: "us-east-1",
+    credentials: {
+      accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
+      secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
+    },
+  }),
+});
+
+const result = await client.upload(stream, {
+  filename: "report.pdf",
+  path: "invoices/2024",
+  mimeType: "application/pdf",
+});
+
+console.log(result.meta.bucket);
+console.log(result.meta.etag);
+```
+
+## Cloudflare R2
+
+```ts
+const client = new BetterPushClient({
+  driver: new S3Driver({
+    bucket: "my-bucket",
+    endpoint: "https://<accountid>.r2.cloudflarestorage.com",
+    region: "auto",
+  }),
+});
+```
+
+## Config
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `bucket` | `string` | — | S3 bucket name |
+| `region` | `string` | `"us-east-1"` | AWS region |
+| `credentials` | `object` | — | `{ accessKeyId, secretAccessKey }` |
+| `endpoint` | `string` | AWS default | Custom endpoint (R2, MinIO) |
+| `baseUrl` | `string` | auto-derived | Base URL for generated URLs |
+
+## Metadata
+
+`S3Driver implements BaseDriver<{ bucket: string; etag?: string }>`
+
+| Field | Type | Description |
+|---|---|---|
+| `meta.bucket` | `string` | S3 bucket name |
+| `meta.etag` | `string \| undefined` | S3 ETag from upload |

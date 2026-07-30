@@ -1,0 +1,50 @@
+---
+title: Welcome
+description: Get started with BetterPush
+---
+
+# BetterPush
+
+**Runtime-agnostic file storage engine for the JavaScript/TypeScript ecosystem.**
+
+Unify cloud and local file storage behind a single, edge-compatible, type-safe API.
+
+## Quick Example
+
+```ts
+import { BetterPushClient } from "@betterpush/core";
+import { LocalDriver } from "@betterpush/driver-local";
+
+const client = new BetterPushClient({
+  driver: new LocalDriver({ directory: "./uploads" }),
+});
+
+const result = await client.upload(stream, { filename: "avatar.png" });
+console.log(result.url);
+```
+
+## Available Drivers
+
+<Cards>
+  <Card
+    title="Local"
+    icon="folder"
+    href="/docs/drivers/driver-local"
+  >
+    Local filesystem storage via native Node.js streams.
+  </Card>
+  <Card
+    title="S3"
+    icon="cloud"
+    href="/docs/drivers/driver-s3"
+  >
+    AWS S3 and Cloudflare R2 via FetchHttpHandler.
+  </Card>
+  <Card
+    title="Cloudinary"
+    icon="image"
+    href="/docs/drivers/driver-cloudinary"
+  >
+    Cloudinary media CDN via pure fetch + Web Crypto.
+  </Card>
+</Cards>

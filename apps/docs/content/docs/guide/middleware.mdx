@@ -1,0 +1,123 @@
+---
+title: Middleware
+description: Transform streams and hook into upload lifecycle
+---
+
+Middleware lets you intercept and transform file uploads before they reach the driver, and trigger actions after uploads complete.
+
+## Interface
+
+```ts
+interface MiddlewareHook {
+  beforeUpload?: (
+    stream: ReadableStream<Uint8Array>,
+    options: UploadOptions,
+  ) => Promise<
+    | { stream?: ReadableStream<Uint8Array>; options?: UploadOptions }
+    | void
+  >;
+  afterUpload?: (
+    result: UploadResult<Record<string, unknown>>,
+  ) => Promise<void>;
+}
+```
+
+## beforeUpload
+
+Runs before the driver receives the stream. You can replace the stream (e.g. compress, encrypt, validate) or modify upload options (e.g. inject metadata, rewrite filenames).
+
+Return `{ stream }`, `{ options }`, both, or `undefined` to pass through unchanged.
+
+```ts
+import { BetterPushClient, MiddlewareHook } from "@betterpush/core";
+
+const sizeLimit: MiddlewareHook = {
+  async beforeUpload(stream, options) {
+    const reader = stream.getReader();
+    const chunks: Uint8Array[] = [];
+    let total = 0;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      total += value.length;
+    }
+
+    if (total > 10 * 1024 * 1024) {
+      throw new Error("File exceeds 10MB limit");
+    }
+
+    return {
+      stream: new ReadableStream({
+        start(controller) {
+          for (const chunk of chunks) controller.enqueue(chunk);
+          controller.close();
+        },
+      }),
+    };
+  },
+};
+```
+
+## afterUpload
+
+Runs after the driver returns a successful upload result. Useful for logging, webhook calls, database indexing, or cache invalidation.
+
+```ts
+const logger: MiddlewareHook = {
+  async afterUpload(result) {
+    console.log(`Uploaded ${result.path} (${result.size} bytes)`);
+  },
+};
+```
+
+## Usage
+
+Pass middleware via the `middlewares` array in the client config:
+
+```ts
+const client = new BetterPushClient({
+  driver: new LocalDriver({ directory: "./uploads" }),
+  middlewares: [sizeLimit, logger],
+});
+
+await client.upload(stream, { filename: "report.pdf" });
+// → beforeUpload runs first (size check)
+// → driver uploads
+// → afterUpload runs (log)
+```
+
+Middleware runs in the order they are defined. All `beforeUpload` hooks execute first (in order), then the driver upload, then all `afterUpload` hooks (in order).
+
+## Example: Metadata Injection
+
+```ts
+const injectMeta: MiddlewareHook = {
+  beforeUpload(_stream, options) {
+    const timestamp = Date.now().toString();
+    return {
+      options: {
+        ...options,
+        metadata: {
+          ...options.metadata,
+          uploadedAt: timestamp,
+        },
+      },
+    };
+  },
+};
+```
+
+## Example: Stream Compression
+
+```ts
+import { BetterPushClient, MiddlewareHook } from "@betterpush/core";
+
+const compressor: MiddlewareHook = {
+  async beforeUpload(stream) {
+    const compressed = stream.pipeThrough(new CompressionStream("gzip"));
+    return { stream: compressed };
+  },
+};
+```

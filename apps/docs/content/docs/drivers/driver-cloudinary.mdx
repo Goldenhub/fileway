@@ -1,0 +1,52 @@
+---
+title: Cloudinary Driver
+description: Upload files to Cloudinary media CDN
+---
+
+Uploads files to Cloudinary using pure `fetch`, `FormData`, and Web Crypto signatures. Zero Node dependencies — works on any runtime.
+
+```ts
+import { BetterPushClient } from "@betterpush/core";
+import { CloudinaryDriver } from "@betterpush/driver-cloudinary";
+
+const client = new BetterPushClient({
+  driver: new CloudinaryDriver({
+    cloudName: "my-cloud",
+    apiKey: process.env.CLOUDINARY_API_KEY!,
+    apiSecret: process.env.CLOUDINARY_API_SECRET!,
+  }),
+});
+
+const result = await client.upload(stream, {
+  filename: "avatar.png",
+  path: "users/profiles",
+});
+
+console.log(result.meta.publicId);
+console.log(result.meta.secureUrl);
+console.log(result.meta.width, result.meta.height);
+```
+
+## Config
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `cloudName` | `string` | — | Cloudinary cloud name |
+| `apiKey` | `string` | — | Cloudinary API key |
+| `apiSecret` | `string` | — | Cloudinary API secret |
+| `defaultFolder` | `string` | — | Default upload folder |
+
+## Metadata
+
+`CloudinaryDriver implements BaseDriver<CloudinaryMeta>`
+
+| Field | Type | Description |
+|---|---|---|
+| `meta.publicId` | `string` | Cloudinary public ID |
+| `meta.version` | `number` | Asset version |
+| `meta.format` | `string` | File format |
+| `meta.resourceType` | `"image" \| "video" \| "raw"` | Resource type |
+| `meta.bytes` | `number` | File size |
+| `meta.secureUrl` | `string` | HTTPS URL |
+| `meta.width` | `number \| undefined` | Image width |
+| `meta.height` | `number \| undefined` | Image height |

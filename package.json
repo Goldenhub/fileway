@@ -1,0 +1,17 @@
+{
+  "name": "betterpush",
+  "version": "0.0.1",
+  "private": true,
+  "description": "",
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=10.0.0"
+  },
+  "scripts": {
+    "build": "pnpm --filter \"@betterpush/*\" run build",
+    "test": "pnpm --filter \"@betterpush/*\" run test"
+  },
+  "devDependencies": {
+    "@edge-runtime/vm": "catalog:"
+  }
+}

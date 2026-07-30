@@ -1,0 +1,15 @@
+packages:
+  - "packages/*"
+  - "apps/*"
+
+allowBuilds:
+  esbuild: true
+  sharp: true
+
+# Leverage pnpm catalogs to manage shared tool versions centrally
+catalog:
+  typescript: "^5.5.0"
+  tsup: "^8.0.0"
+  vitest: "^1.6.0"
+  "@types/node": "^20.0.0"
+  "@edge-runtime/vm": "^5.0.0"

@@ -1,0 +1,97 @@
+@import "tailwindcss";
+@import "fumadocs-ui/css/neutral.css";
+@import "fumadocs-ui/css/preset.css";
+
+@theme {
+  --font-sans: var(--font-sans), ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: var(--font-mono), ui-monospace, "JetBrains Mono", "Fira Code", monospace;
+}
+
+/* Override fumadocs primary to amber (always dark) */
+:root {
+  --color-fd-primary: rgb(255, 178, 36);
+  color-scheme: dark;
+}
+
+/* Landing page theme variables */
+.landing-page {
+  --lp-bg: #09090b;
+  --lp-surface: #0d0e12;
+  --lp-card-bg: #121318;
+  --lp-border: #27272a;
+  --lp-muted: #a1a1aa;
+  --lp-accent: #ffb224;
+  --lp-accent-dim: rgba(255, 178, 36, 0.1);
+  --lp-text: #ffffff;
+  --lp-grid: rgba(255, 255, 255, 0.03);
+  --lp-glass: rgba(9, 9, 11, 0.3);
+}
+
+/* Subtle background grid */
+.landing-page .grid-bg {
+  background-image:
+    linear-gradient(var(--lp-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--lp-grid) 1px, transparent 1px);
+  background-size: 60px 60px;
+}
+
+/* Glow effects */
+.glow-accent {
+  box-shadow: 0 0 20px rgba(255, 178, 36, 0.15), 0 0 60px rgba(255, 178, 36, 0.05);
+}
+
+.glow-border-accent {
+  border-color: rgba(255, 178, 36, 0.3);
+}
+
+.gradient-border {
+  position: relative;
+}
+
+.gradient-border::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(135deg, var(--lp-accent), transparent);
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+}
+
+@keyframes nav-gradient-rotate {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.nav-gradient-glow {
+  position: relative;
+  overflow: hidden;
+}
+
+.nav-gradient-glow::before {
+  content: "";
+  position: absolute;
+  inset: -50%;
+  background: conic-gradient(from 0deg, transparent, var(--lp-accent), transparent 40%, var(--lp-accent) 60%, transparent);
+  animation: nav-gradient-rotate 6s linear infinite;
+  pointer-events: none;
+  opacity: 0.6;
+}
+
+/* Hide fumadocs sidebar on landing page */
+body:has(.landing-page) [class*="sidebar"] {
+  display: none;
+}
+
+body {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}

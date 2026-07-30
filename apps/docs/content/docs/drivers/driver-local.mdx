@@ -1,0 +1,40 @@
+---
+title: Local Driver
+description: Store files on the local filesystem
+---
+
+Stores files on the local filesystem using Node.js streams.
+
+```ts
+import { BetterPushClient } from "@betterpush/core";
+import { LocalDriver } from "@betterpush/driver-local";
+
+const client = new BetterPushClient({
+  driver: new LocalDriver({
+    directory: "/var/data/uploads",
+    baseUrl: "https://cdn.example.com/files",
+  }),
+});
+
+const result = await client.upload(stream, {
+  filename: "photo.jpg",
+  path: "users/123/avatars",
+});
+
+// result.meta.localPath -> absolute path on disk
+```
+
+## Config
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `directory` | `string` | — | Root directory for stored files |
+| `baseUrl` | `string` | `file://{directory}` | Base URL for generated URLs |
+
+## Metadata
+
+`LocalDriver implements BaseDriver<{ localPath: string }>`
+
+| Field | Type | Description |
+|---|---|---|
+| `meta.localPath` | `string` | Absolute path to the file on disk |

@@ -1,0 +1,25 @@
+{
+  "name": "@betterpush/core",
+  "version": "0.0.1",
+  "type": "module",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "worker": "./dist/index.js",
+      "deno": "./dist/index.js",
+      "bun": "./dist/index.js",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "typescript": "catalog:",
+    "tsup": "catalog:",
+    "vitest": "catalog:"
+  }
+}
