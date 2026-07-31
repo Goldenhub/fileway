@@ -1,6 +1,6 @@
 {
   "name": "fileway",
-  "version": "0.0.5",
+  "version": "0.1.0",
   "private": true,
   "description": "Runtime-agnostic file storage engine for JavaScript/TypeScript: one standard API for every storage provider and runtime, with zero core dependencies.",
   "packageManager": "pnpm@11.11.0",

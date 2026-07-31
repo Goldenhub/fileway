@@ -190,8 +190,8 @@ bun run quickstart.ts
 Deno resolves the same packages straight from npm:
 
 ```ts
-import { FilewayClient } from "npm:@fileway/core@0.0.5";
-import { LocalDriver } from "npm:@fileway/driver-local@0.0.5";
+import { FilewayClient } from "npm:@fileway/core@0.1.0";
+import { LocalDriver } from "npm:@fileway/driver-local@0.1.0";
 
 const client = new FilewayClient({
   driver: new LocalDriver({ directory: "./storage" }),
