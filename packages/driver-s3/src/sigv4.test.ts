@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildCanonicalQueryString, createStreamingBody, sign, signChunk, signStreamingRequest } from "./sigv4.js";
+import { buildCanonicalQueryString, createStreamingBody, presignUrl, sign, signChunk, signStreamingRequest } from "./sigv4.js";
 
 describe("buildCanonicalQueryString", () => {
   const cred = {
@@ -43,6 +43,36 @@ describe("buildCanonicalQueryString", () => {
 
     expect(withQuery.authorization).toBeDefined();
     expect(withQuery.authorization).not.toBe(withoutQuery.authorization);
+  });
+});
+
+describe("presignUrl", () => {
+  it("matches the AWS documented presigned-URL example", async () => {
+    const cred = {
+      accessKeyId: "AKIAIOSFODNN7EXAMPLE",
+      secretAccessKey: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+      region: "us-east-1",
+      service: "s3",
+    };
+    const date = new Date("2013-05-24T00:00:00Z");
+
+    const { queryString, expiresAt } = await presignUrl(
+      "/test.txt",
+      "examplebucket.s3.amazonaws.com",
+      cred,
+      date,
+      86400,
+    );
+
+    expect(queryString).toBe(
+      "X-Amz-Algorithm=AWS4-HMAC-SHA256" +
+        "&X-Amz-Credential=AKIAIOSFODNN7EXAMPLE%2F20130524%2Fus-east-1%2Fs3%2Faws4_request" +
+        "&X-Amz-Date=20130524T000000Z" +
+        "&X-Amz-Expires=86400" +
+        "&X-Amz-SignedHeaders=host" +
+        "&X-Amz-Signature=aeeed9bbccd4d02ee5c0109b86d86835f995330da4c265957d157751f604d404",
+    );
+    expect(expiresAt).toBe(date.getTime() + 86400 * 1000);
   });
 });
 

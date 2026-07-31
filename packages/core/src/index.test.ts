@@ -40,6 +40,9 @@ describe("FilewayClient", () => {
       delete: vi.fn(async () => true),
       getUrl: vi.fn(async (path: string) => `https://example.com${path}`),
       get: vi.fn(async () => new ReadableStream<Uint8Array>()),
+      getPresignedUrl: vi.fn(async (_path: string, options?: { expiresIn?: number }) =>
+        `https://example.com/signed?expiresIn=${options?.expiresIn ?? 3600}`,
+      ),
     };
   };
 
@@ -113,6 +116,26 @@ describe("FilewayClient", () => {
 
     expect(driver.get).toHaveBeenCalledWith("/uploads/test.txt");
     expect(stream).toBeInstanceOf(ReadableStream);
+  });
+
+  it("should call driver.getPresignedUrl", async () => {
+    const driver = createMockDriver();
+    const client = new FilewayClient({ driver });
+
+    const url = await client.getPresignedUrl("/uploads/test.txt", { expiresIn: 600 });
+
+    expect(driver.getPresignedUrl).toHaveBeenCalledWith("/uploads/test.txt", { expiresIn: 600 });
+    expect(url).toBe("https://example.com/signed?expiresIn=600");
+  });
+
+  it("should throw when the driver does not support presigned URLs", async () => {
+    const driver = createMockDriver();
+    delete driver.getPresignedUrl;
+    const client = new FilewayClient({ driver });
+
+    await expect(client.getPresignedUrl("/uploads/test.txt")).rejects.toThrow(
+      "driver mock does not support presigned URLs",
+    );
   });
 
   it("should forward an abort signal to the driver", async () => {

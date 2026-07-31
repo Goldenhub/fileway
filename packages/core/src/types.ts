@@ -33,6 +33,12 @@ export interface UploadResult<TMeta extends Record<string, unknown>> {
   meta: TMeta;
 }
 
+export interface PresignedUrlOptions {
+  /** Lifetime of the URL in seconds. Bounds are driver-specific
+   * (e.g. S3 allows 1..604800). Defaults to 3600 when omitted. */
+  expiresIn?: number;
+}
+
 export interface BaseDriver<TMeta extends Record<string, unknown> = Record<string, unknown>> {
   name: string;
   upload(
@@ -46,6 +52,11 @@ export interface BaseDriver<TMeta extends Record<string, unknown> = Record<strin
    * Throws when `path` does not exist.
    */
   get(path: string): Promise<ReadableStream<Uint8Array>>;
+  /**
+   * Returns a time-limited, signed URL granting read access to `path`.
+   * Optional: drivers that cannot presign (e.g. LocalDriver) omit it.
+   */
+  getPresignedUrl?(path: string, options?: PresignedUrlOptions): Promise<string>;
 }
 
 export interface MiddlewareHook {

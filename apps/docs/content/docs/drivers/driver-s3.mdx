@@ -113,6 +113,19 @@ const bytes = new Uint8Array(await new Response(stream).arrayBuffer());
 
 Throws with the HTTP status on failure (e.g. 404 when the object does not exist).
 
+## Presigned URLs
+
+Generate a time-limited, SigV4-signed download link so anyone — even with no credentials — can fetch the object until it expires:
+
+```ts
+const url = await client.getPresignedUrl("uploads/report.pdf", { expiresIn: 900 });
+// https://bucket.s3.us-east-1.amazonaws.com/uploads/report.pdf?X-Amz-Algorithm=...
+```
+
+- `expiresIn` defaults to `3600` (1 hour) and must be an integer in `1..604800` (AWS's 7-day cap); invalid values throw a `ValidationError`.
+- Signing runs entirely with Web Crypto and your configured `credentials` — no network call and no SDK. Only the `host` header is signed with an `UNSIGNED-PAYLOAD` hash, so the URL works from any plain `fetch` or browser `<a href>`.
+- Works with `endpoint`/`forcePathStyle` too, e.g. MinIO, which validates SigV4 presigning.
+
 ## MinIO
 
 ```ts

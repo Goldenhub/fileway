@@ -1,6 +1,6 @@
-import type { BaseDriver, UploadOptions, UploadResult } from "@fileway/core";
+import type { BaseDriver, PresignedUrlOptions, UploadOptions, UploadResult } from "@fileway/core";
 import { validateUploadOptions, ValidationError, urlEncodePath, abortError } from "@fileway/core";
-import { buildCanonicalQueryString, createStreamingBody, sign, signStreamingRequest, sha256 } from "./sigv4.js";
+import { buildCanonicalQueryString, createStreamingBody, presignUrl, sign, signStreamingRequest, sha256 } from "./sigv4.js";
 
 const randomUUID = () => globalThis.crypto.randomUUID();
 const SERVICE = "s3";
@@ -10,6 +10,10 @@ const SHA256_EMPTY = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b78
 const SINGLE_PUT_MAX = 5 * 1024 ** 3;
 const DEFAULT_PART_SIZE = 8 * 1024 * 1024;
 const MIN_PART_SIZE = 5 * 1024 * 1024;
+const PRESIGN_DEFAULT_EXPIRY = 3600;
+// AWS caps presigned URLs at 7 days.
+const PRESIGN_MIN_EXPIRY = 1;
+const PRESIGN_MAX_EXPIRY = 604800;
 
 export interface S3DriverConfig {
   bucket: string;
@@ -407,6 +411,33 @@ export class S3Driver implements BaseDriver<{ bucket: string; etag?: string }> {
 
   async getUrl(path: string): Promise<string> {
     return `${this.baseUrl}/${urlEncodePath(path)}`;
+  }
+
+  /**
+   * Returns a time-limited SigV4-presigned GET URL for `path`, so a file can
+   * be downloaded by anyone with the link (and no credentials) until `expiresIn`
+   * seconds pass. `expiresIn` must be an integer in 1..604800 (AWS's 7-day cap);
+   * defaults to 3600.
+   */
+  async getPresignedUrl(path: string, options?: PresignedUrlOptions): Promise<string> {
+    const expiresIn = options?.expiresIn ?? PRESIGN_DEFAULT_EXPIRY;
+    if (!Number.isInteger(expiresIn) || expiresIn < PRESIGN_MIN_EXPIRY || expiresIn > PRESIGN_MAX_EXPIRY) {
+      throw new ValidationError(
+        `expiresIn must be an integer between ${PRESIGN_MIN_EXPIRY} and ${PRESIGN_MAX_EXPIRY} seconds`,
+      );
+    }
+
+    const cred = getCredentials(this.config);
+    const { url, canonicalPath, host } = buildEndpoint(this.config, path);
+    const { queryString } = await presignUrl(
+      canonicalPath,
+      host,
+      { ...cred, region: this.config.region!, service: SERVICE },
+      new Date(),
+      expiresIn,
+    );
+
+    return `${url}?${queryString}`;
   }
 
   async get(path: string): Promise<ReadableStream<Uint8Array>> {

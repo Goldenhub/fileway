@@ -125,6 +125,30 @@ describeEnv("S3Driver integration against MinIO", () => {
     await client.delete(result.path);
   });
 
+  it("downloads a file via a presigned URL without credentials", async () => {
+    const bytes = new TextEncoder().encode("presigned-content");
+    const result = await client.upload(
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(bytes);
+          controller.close();
+        },
+      }),
+      { filename: "presigned.txt", path: "uploads" },
+    );
+
+    const signedUrl = await client.getPresignedUrl(result.path, { expiresIn: 300 });
+    expect(signedUrl).toContain("X-Amz-Signature=");
+    expect(signedUrl).toContain("X-Amz-Expires=300");
+
+    // A plain, unauthenticated GET on the signed URL must work.
+    const res = await fetch(signedUrl);
+    expect(res.ok).toBe(true);
+    expect(new Uint8Array(await res.arrayBuffer())).toEqual(bytes);
+
+    await client.delete(result.path);
+  });
+
   it("keeps filenames unique across uploads", async () => {
     const upload = () =>
       client.upload(

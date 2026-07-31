@@ -323,11 +323,12 @@ const cloudinary = new CloudinaryDriver({
 
 Returns `UploadResult<TMeta>` — `{ id, url, path, size, meta }` where `meta` is inferred from the driver.
 
-### `client.get(path)` / `client.delete(path)` / `client.getUrl(path)`
+### `client.get(path)` / `client.delete(path)` / `client.getUrl(path)` / `client.getPresignedUrl(path, options)`
 
 - `get(path)` returns a WHATWG `ReadableStream<Uint8Array>` for streaming the stored file back — pull-based with backpressure, never buffered whole. Throws when `path` does not exist.
 - `delete(path)` returns `Promise<boolean>`.
 - `getUrl(path)` returns the public URL for a stored path.
+- `getPresignedUrl(path, { expiresIn })` returns a time-limited, SigV4-signed download URL (S3 only, since it needs signing credentials). `expiresIn` defaults to `3600` seconds and must be an integer in `1..604800` (AWS's 7-day cap); invalid values throw a `ValidationError`. Drivers that cannot presign throw a clear error.
 
 ---
 
@@ -340,9 +341,9 @@ Returns `UploadResult<TMeta>` — `{ id, url, path, size, meta }` where `meta` i
 - [x] Streaming downloads — `get(path)` returns a `ReadableStream<Uint8Array>` on every driver
 - [x] Upload cancellation — `options.signal` on every driver; aborted uploads reject with `AbortError` (Local cleans up partial files, S3 aborts multipart sessions)
 - [x] Upload progress — `options.onProgress` reports bytes streamed on every driver, with exact final totals when `size` is known
+- [x] Presigned URLs — `getPresignedUrl(path, { expiresIn })` issues time-limited, SigV4-signed download links for S3 (works with MinIO/R2 endpoints)
 - [ ] Stream transformation in `beforeUpload` middlewares
 - [ ] Retries with exponential backoff and classified errors
-- [ ] Presigned (signed) URL support for downloads
 
 **Planned drivers:** Cloudflare R2 (native), Google Cloud Storage, Backblaze B2, Azure Blob Storage, DigitalOcean Spaces (S3-compatible).
 

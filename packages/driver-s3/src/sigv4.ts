@@ -2,6 +2,7 @@ import { ValidationError } from "@fileway/core";
 
 const SHA256_EMPTY = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
 const STREAMING_AWS4_HMAC_SHA256_PAYLOAD = "STREAMING-AWS4-HMAC-SHA256-PAYLOAD";
+const UNSIGNED_PAYLOAD = "UNSIGNED-PAYLOAD";
 
 export function iso8601(date: Date): string {
   return date.toISOString().replace(/[:\-]|\.\d{3}/g, "");
@@ -108,6 +109,52 @@ export async function sign(method: string, path: string, headers: Record<string,
     "x-amz-date": amzDate,
     "x-amz-content-sha256": bodyHash,
     authorization: `AWS4-HMAC-SHA256 Credential=${cred.accessKeyId}/${scope}, SignedHeaders=${signedHeaders}, Signature=${signature}`,
+  };
+}
+
+export interface PresignedUrlResult {
+  /** Query string (including `X-Amz-Signature`) to append to the request URL. */
+  queryString: string;
+  /** Epoch milliseconds at which the URL expires. */
+  expiresAt: number;
+}
+
+/**
+ * Builds a SigV4 presigned (query-string-authenticated) URL for a request.
+ * Only the `host` header is signed and the payload is `UNSIGNED-PAYLOAD`, so
+ * the resulting URL grants access to a plain GET without any headers.
+ */
+export async function presignUrl(
+  path: string,
+  host: string,
+  cred: SigV4Credentials,
+  date: Date,
+  expiresIn: number,
+): Promise<PresignedUrlResult> {
+  const amzDate = iso8601(date);
+  const dateStr = dateStamp(date);
+  const scope = `${dateStr}/${cred.region}/${cred.service}/aws4_request`;
+
+  const query: Record<string, string> = {
+    "X-Amz-Algorithm": "AWS4-HMAC-SHA256",
+    "X-Amz-Credential": `${cred.accessKeyId}/${scope}`,
+    "X-Amz-Date": amzDate,
+    "X-Amz-Expires": String(expiresIn),
+    "X-Amz-SignedHeaders": "host",
+  };
+
+  const canonicalQuery = buildCanonicalQueryString(query);
+  const canonicalHeaders = `host:${host}\n`;
+  const canonicalRequest = ["GET", path, canonicalQuery, canonicalHeaders, "host", UNSIGNED_PAYLOAD].join("\n");
+  const canonicalHash = await sha256(canonicalRequest);
+
+  const stringToSign = ["AWS4-HMAC-SHA256", amzDate, scope, canonicalHash].join("\n");
+  const signingKey = await deriveKey(cred.secretAccessKey, dateStr, cred.region, cred.service);
+  const signature = hex(await hmac(signingKey, new TextEncoder().encode(stringToSign)));
+
+  return {
+    queryString: `${canonicalQuery}&X-Amz-Signature=${signature}`,
+    expiresAt: date.getTime() + expiresIn * 1000,
   };
 }
 

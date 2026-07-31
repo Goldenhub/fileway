@@ -4,7 +4,7 @@ export * from "./progress.js";
 
 export const version = "0.0.1";
 
-import { BaseDriver, FilewayConfig, UploadOptions } from "./types.js";
+import { BaseDriver, FilewayConfig, PresignedUrlOptions, UploadOptions } from "./types.js";
 import { withProgress } from "./progress.js";
 
 export class FilewayClient<const TConfig extends FilewayConfig<BaseDriver>> {
@@ -56,5 +56,15 @@ export class FilewayClient<const TConfig extends FilewayConfig<BaseDriver>> {
 
   get(path: string): Promise<ReadableStream<Uint8Array>> {
     return this.driver.get(path);
+  }
+
+  async getPresignedUrl(
+    path: string,
+    options?: PresignedUrlOptions,
+  ): Promise<string> {
+    if (!this.driver.getPresignedUrl) {
+      throw new Error(`driver ${this.driver.name} does not support presigned URLs`);
+    }
+    return this.driver.getPresignedUrl(path, options);
   }
 }

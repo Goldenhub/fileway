@@ -15,7 +15,7 @@ Fileway is intentionally minimal. This page documents exactly what each driver s
 | True streaming (no full buffering) | ✅ | ✅¹ | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> |
 | Multipart upload (large files) | <span style={{ color: "var(--color-fd-primary)" }}>—</span> | ✅ | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> |
 | Public URL retrieval (`getUrl`) | ✅ | ✅ | ✅ |
-| Pre-signed URLs | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> |
+| Pre-signed URLs | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> | ✅ | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> |
 | Download / read-back | ✅ | ✅ | ✅ |
 | User metadata (`options.metadata`) | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> | ✅ | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> |
 | Result metadata (`result.meta`) | ✅ | ✅ | ✅ |
@@ -136,7 +136,17 @@ Returns a static public URL built from the driver's `baseUrl` (or an auto-derive
 
 ### Pre-signed URLs
 
-**In the works.** For private S3 buckets you currently cannot hand out `getUrl()` results — you would need temporary, credential-signed URLs. `getPresignedUrl` support is being added for `S3Driver`.
+`S3Driver.getPresignedUrl(path, { expiresIn })` returns a time-limited, SigV4-signed GET URL — anyone with the link can download the object without credentials until it expires. Hand these out for private buckets instead of `getUrl()` results, which assume a publicly readable bucket.
+
+```ts
+const url = await client.getPresignedUrl("uploads/report.pdf", { expiresIn: 900 });
+// https://bucket.s3.us-east-1.amazonaws.com/uploads/report.pdf?X-Amz-Algorithm=...
+```
+
+- `expiresIn` defaults to 3600 seconds (1 hour) and must be an integer in `1..604800` (AWS's 7-day cap); invalid values throw a `ValidationError`.
+- Signing is done entirely with Web Crypto + your configured credentials — no SDK, no network call. Only the `host` header is signed with an `UNSIGNED-PAYLOAD` hash, so the URL works in any browser or client.
+- Works with `endpoint`/`forcePathStyle` too (MinIO, R2, GCS-S3), as long as the endpoint validates SigV4 presigning (MinIO does).
+- Drivers that cannot presign (`LocalDriver`, `CloudinaryDriver`) omit the method — `FilewayClient.getPresignedUrl` throws a clear error in that case.
 
 ### Download / read-back (`get(path)`)
 
@@ -203,7 +213,7 @@ Each driver returns its own typed metadata:
 
 In the works and coming next:
 
-- Pre-signed URL generation (`getPresignedUrl`) for `S3Driver`
 - S3 object tagging and metadata read-back (`headObject`)
 - Metadata persistence for `LocalDriver` and `CloudinaryDriver`
 - TTL / expiration in `UploadOptions` and lifecycle rule management
+- Pre-signed URLs for `CloudinaryDriver` (signed CDN URLs with `expires_at`)

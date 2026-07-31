@@ -150,6 +150,41 @@ describe("S3Driver (AWS S3)", () => {
     expect(url).toBe("https://test-bucket.s3.us-east-1.amazonaws.com/test.txt");
   });
 
+  it("should presign a GET URL with the default 1h expiry", async () => {
+    const url = await driver.getPresignedUrl("test.txt");
+    expect(url.startsWith("https://test-bucket.s3.us-east-1.amazonaws.com/test.txt?")).toBe(true);
+
+    const query = new URL(url).searchParams;
+    expect(query.get("X-Amz-Algorithm")).toBe("AWS4-HMAC-SHA256");
+    expect(query.get("X-Amz-Credential")).toMatch(/^AKID\/\d{8}\/us-east-1\/s3\/aws4_request$/);
+    expect(query.get("X-Amz-Date")).toMatch(/^\d{8}T\d{6}Z$/);
+    expect(query.get("X-Amz-Expires")).toBe("3600");
+    expect(query.get("X-Amz-SignedHeaders")).toBe("host");
+    expect(query.get("X-Amz-Signature")).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it("should presign a URL with a custom expiry", async () => {
+    const url = await driver.getPresignedUrl("test.txt", { expiresIn: 300 });
+    expect(new URL(url).searchParams.get("X-Amz-Expires")).toBe("300");
+  });
+
+  it("should reject expiries outside 1..604800 seconds", async () => {
+    await expect(driver.getPresignedUrl("test.txt", { expiresIn: 0 })).rejects.toThrow(
+      /expiresIn must be an integer/,
+    );
+    await expect(driver.getPresignedUrl("test.txt", { expiresIn: 604801 })).rejects.toThrow(
+      /expiresIn must be an integer/,
+    );
+    await expect(driver.getPresignedUrl("test.txt", { expiresIn: 1.5 })).rejects.toThrow(
+      /expiresIn must be an integer/,
+    );
+  });
+
+  it("should presign a URL with a nested path without over-encoding it", async () => {
+    const url = await driver.getPresignedUrl("dir/sub/file name.txt");
+    expect(new URL(url).pathname).toBe("/dir/sub/file%20name.txt");
+  });
+
   it("should stream an object back with a GET request", async () => {
     const bytes = new TextEncoder().encode("file-content");
     const body = new ReadableStream<Uint8Array>({
@@ -538,6 +573,18 @@ describe("S3Driver with custom endpoint (MinIO)", () => {
   it("should generate a URL from endpoint", async () => {
     const url = await driver.getUrl("path/to/file.txt");
     expect(url).toBe("http://localhost:9000/my-bucket/path/to/file.txt");
+  });
+
+  it("should presign a URL against the custom endpoint", async () => {
+    const url = await driver.getPresignedUrl("path/to/file.txt", { expiresIn: 60 });
+    expect(url.startsWith("http://localhost:9000/my-bucket/path/to/file.txt?")).toBe(true);
+
+    const query = new URL(url).searchParams;
+    expect(query.get("X-Amz-Algorithm")).toBe("AWS4-HMAC-SHA256");
+    expect(query.get("X-Amz-Credential")).toMatch(/^minioadmin\/\d{8}\/us-east-1\/s3\/aws4_request$/);
+    expect(query.get("X-Amz-Expires")).toBe("60");
+    expect(query.get("X-Amz-SignedHeaders")).toBe("host");
+    expect(query.get("X-Amz-Signature")).toMatch(/^[0-9a-f]{64}$/);
   });
 });
 
