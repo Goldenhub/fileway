@@ -60,20 +60,33 @@ console.log(result.meta.width, result.meta.height);
 https://res.cloudinary.com/{cloudName}/{resourceType}/upload/v{version}/{publicId}
 ```
 
-The resource type (`image`, `video`, or `raw`) and version are tracked automatically from the upload response. Falls back to `image` without a version for public IDs that weren't uploaded through this driver instance.
+The resource type (`image`, `video`, or `raw`) and version are resolved in this order:
+
+1. **Explicit hint** — `getUrl(publicId, { resourceType, version })` skips all lookups.
+2. **Upload cache** — assets uploaded through this driver instance are tracked from the upload response.
+3. **Admin API lookup** — one `resources/search` request (Basic auth) for public IDs the instance hasn't seen, e.g. assets uploaded by another service or before a restart. The result is cached for subsequent calls, and the returned `secure_url` is used verbatim when available.
+4. **`image` default** — when nothing else matches, the URL is built assuming an image resource type.
+
+Because a Cloudinary public ID does not encode its resource type, `getUrl`/`delete` of a video or raw asset uploaded outside this instance would otherwise silently build an incorrect `/image/` URL or fail to delete. The Admin lookup resolves those cases without any caller cooperation.
 
 ## Download
 
-Stream an asset back from the CDN with `get(publicId)` — it fetches the asset's public URL and returns the response body as a WHATWG `ReadableStream<Uint8Array>`:
+Stream an asset back from the CDN with `get(publicId, options?)` — it fetches the asset's public URL and returns the response body as a WHATWG `ReadableStream<Uint8Array>`:
 
 ```ts
 const stream = await client.get(result.meta.publicId);
 const bytes = new Uint8Array(await new Response(stream).arrayBuffer());
 ```
 
+The optional `options` argument is the same `{ resourceType, version }` hint used by `getUrl`.
+
 `stream` is a WHATWG `ReadableStream<Uint8Array>`, so you can also pipe it straight to its destination (`stream.pipeTo(writable)`) with no buffering. Use `.arrayBuffer()`/`.blob()` for binary files — `.text()` would decode binary data as UTF-8 and corrupt it.
 
 Throws with the HTTP status on a non-2xx response (e.g. 404 for a missing asset).
+
+## Delete
+
+`delete(publicId, options?)` removes an asset via the Cloudinary Admin API, using the same resolution chain as `getUrl` to pick the correct `resource_type` path (`/resources/{type}/upload`). Returns `true` only when Cloudinary confirms the deletion, and `false` when the asset is unknown or the request fails.
 
 ## Cancellation
 
