@@ -2,6 +2,19 @@
 
 All notable changes to Fileway are documented here. Releases are cut from `main` via the [automated release workflow](.github/workflows/release.yml) with npm provenance (SLSA) attestation on every publish.
 
+## Upcoming — v1.0.0
+
+The first stable release. Target scope, tracked on the [roadmap](README.md#roadmap):
+
+- **Stable public API** — `UploadOptions`, `UploadResult<TMeta>`, `BaseDriver`, and `FilewayClient` lock in 1.0 semantics. Breaking changes become semver-major.
+- **True streaming uploads** — ✅ landed for S3: `aws-chunked` per-chunk SigV4 signing via `options.size`, plus bounded-memory multipart uploads for unknown sizes and very large objects.
+- **Upload cancellation** — ✅ landed for all drivers: `options.signal` rejects with `AbortError` and cleans up partial artifacts.
+- **Middleware stream transformation** — `beforeUpload` will be able to transform the stream itself, not just options.
+- **Operational hardening** — progress events ✅ landed (`options.onProgress`); classified error types ✅ landed (`StorageError` codes); retries with backoff still to come.
+- **Signed downloads** — ✅ landed for S3 (`getPresignedUrl`) and Cloudinary (signed delivery URLs).
+
+Expected: once the roadmap items above land and the API has gone through real-world feedback via [GitHub Discussions](https://github.com/Goldenhub/fileway/discussions).
+
 ## v0.1.0 — 2026-07-31
 
 - **Optional `logger` + `onError` callbacks** — `FilewayClient` config now accepts a dependency-free `logger` (`{ debug?, info?, warn?, error? }`) and an `onError(error, context)` hook, so you can plug in your own tooling (Pino, Sentry, Datadog) with a few lines and no adapter package. The logger receives `"<operation> started/succeeded"` `info` events (structured meta: `operation`, `path`, `filename`, `size`, `id`, `url`, `durationMs`) and `error` on failures — silent when omitted, and a throwing logger never breaks the operation it reports on. `onError` is awaited with the raw error plus `{ operation, durationMs, path, ... }` context before the error is rethrown; it is **skipped for aborts** (`AbortError` is cancellation, not failure) but fires for `ValidationError`/`config` errors, and a throwing `onError` never masks the original error. New exports: `Logger`, `LogLevel`, `Operation`, `ErrorContext` in `@fileway/core`.
@@ -17,19 +30,6 @@ All notable changes to Fileway are documented here. Releases are cut from `main`
 - **`@fileway/driver-s3`: multipart uploads** — unknown sizes and objects > 5 GiB now stream through a multipart upload (`CreateMultipartUpload` → `UploadPart` → `CompleteMultipartUpload`) into part-sized buffers (default `8 MiB`, minimum `5 MiB`), so peak memory stays bounded even without a declared size. Configurable via `partSize` and `forceMultipart`.
 - **`@fileway/driver-s3`: size-mismatch safety** — streams that end before/after the declared `size` abort the upload and throw a validation error instead of storing a corrupted object.
 - Launch docs: rewritten `README.md`, new `CHANGELOG.md`, and npm `keywords` on all four packages.
-
-## Upcoming — v1.0.0
-
-The first stable release. Target scope, tracked on the [roadmap](README.md#roadmap):
-
-- **Stable public API** — `UploadOptions`, `UploadResult<TMeta>`, `BaseDriver`, and `FilewayClient` lock in 1.0 semantics. Breaking changes become semver-major.
-- **True streaming uploads** — ✅ landed for S3: `aws-chunked` per-chunk SigV4 signing via `options.size`, plus bounded-memory multipart uploads for unknown sizes and very large objects.
-- **Upload cancellation** — ✅ landed for all drivers: `options.signal` rejects with `AbortError` and cleans up partial artifacts.
-- **Middleware stream transformation** — `beforeUpload` will be able to transform the stream itself, not just options.
-- **Operational hardening** — progress events ✅ landed (`options.onProgress`); classified error types ✅ landed (`StorageError` codes); retries with backoff still to come.
-- **Signed downloads** — ✅ landed for S3 (`getPresignedUrl`) and Cloudinary (signed delivery URLs).
-
-Expected: once the roadmap items above land and the API has gone through real-world feedback via [GitHub Discussions](https://github.com/Goldenhub/fileway/discussions).
 
 ## v0.0.5 — 2026-07-31
 
