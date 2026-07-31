@@ -1,5 +1,8 @@
 # @fileway/core
 
+[![npm version](https://img.shields.io/npm/v/@fileway/core?style=flat-square)](https://www.npmjs.com/package/@fileway/core)
+[![bundle size](https://img.shields.io/bundlephobia/minzip/@fileway/core?style=flat-square)](https://bundlephobia.com/package/@fileway/core)
+
 **Zero-dependency core of [Fileway](https://github.com/Goldenhub/fileway) — a runtime-agnostic file storage engine for JavaScript/TypeScript.**
 
 `@fileway/core` provides the `FilewayClient`, the `BaseDriver` contract, and shared validation. It has no runtime dependencies and only uses platform standards: `ReadableStream<Uint8Array>`, `fetch`, `TextEncoder`. It runs on Node.js, Bun, Deno, and edge runtimes.

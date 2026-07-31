@@ -1,5 +1,8 @@
 # @fileway/driver-s3
 
+[![npm version](https://img.shields.io/npm/v/@fileway/driver-s3?style=flat-square)](https://www.npmjs.com/package/@fileway/driver-s3)
+[![bundle size](https://img.shields.io/bundlephobia/minzip/@fileway/driver-s3?style=flat-square)](https://bundlephobia.com/package/@fileway/driver-s3)
+
 **S3 driver for [Fileway](https://github.com/Goldenhub/fileway) — AWS S3 and S3-compatible storage (MinIO, Cloudflare R2).**
 
 Implemented with `fetch` and hand-rolled SigV4 — no AWS SDK required, so it runs on Node.js, Bun, Deno, and edge runtimes.

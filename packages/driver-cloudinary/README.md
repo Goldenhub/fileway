@@ -1,5 +1,8 @@
 # @fileway/driver-cloudinary
 
+[![npm version](https://img.shields.io/npm/v/@fileway/driver-cloudinary?style=flat-square)](https://www.npmjs.com/package/@fileway/driver-cloudinary)
+[![bundle size](https://img.shields.io/bundlephobia/minzip/@fileway/driver-cloudinary?style=flat-square)](https://bundlephobia.com/package/@fileway/driver-cloudinary)
+
 **Cloudinary driver for [Fileway](https://github.com/Goldenhub/fileway) — uploads via `fetch` + `FormData`, no SDK.**
 
 Pure Web Platform APIs (`fetch`, `FormData`, `Blob`, Web Crypto for signing), so it runs on Node.js, Bun, Deno, and edge runtimes.

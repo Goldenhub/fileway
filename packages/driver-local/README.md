@@ -1,5 +1,8 @@
 # @fileway/driver-local
 
+[![npm version](https://img.shields.io/npm/v/@fileway/driver-local?style=flat-square)](https://www.npmjs.com/package/@fileway/driver-local)
+[![bundle size](https://img.shields.io/bundlephobia/minzip/@fileway/driver-local?style=flat-square)](https://bundlephobia.com/package/@fileway/driver-local)
+
 **Local filesystem driver for [Fileway](https://github.com/Goldenhub/fileway).**
 
 Stores uploads on disk using native Node.js streams. This is the only driver that streams files end-to-end without buffering the whole file in memory.
