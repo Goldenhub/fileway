@@ -9,9 +9,18 @@
   },
   "scripts": {
     "build": "pnpm --filter \"@betterpush/*\" run build",
-    "test": "pnpm --filter \"@betterpush/*\" run test"
+    "test": "pnpm --filter \"@betterpush/*\" run test",
+    "test:local": "npx tsx scripts/test-local.mjs",
+    "test:s3:aws": "npx tsx scripts/test-s3-aws.mjs",
+    "test:s3:minio": "npx tsx scripts/test-s3-minio.mjs",
+    "test:s3:r2": "npx tsx scripts/test-s3-r2.mjs",
+    "test:cloudinary": "npx tsx scripts/test-cloudinary.mjs"
   },
   "devDependencies": {
+    "@betterpush/core": "workspace:*",
+    "@betterpush/driver-cloudinary": "workspace:*",
+    "@betterpush/driver-local": "workspace:*",
+    "@betterpush/driver-s3": "workspace:*",
     "@edge-runtime/vm": "catalog:"
   }
 }

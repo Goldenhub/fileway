@@ -18,7 +18,7 @@ export function BentoGrid() {
     },
     {
       title: "True Web Streams",
-      desc: "Standard ReadableStream&lt;Uint8Array&gt; from upload to driver. No buffers, no memory spikes.",
+      desc: "Standard ReadableStream<Uint8Array> from upload to driver. No buffers, no memory spikes.",
       accent: "amber",
       content: null,
     },
@@ -74,15 +74,8 @@ export function BentoGrid() {
 
         <div className="mt-12 grid gap-4 md:grid-cols-3">
           {items.map((item, i) => (
-            <div
-              key={i}
-              className={`rounded-lg border p-6 transition-colors ${item.large ? "md:col-span-2 md:row-span-1" : ""}`}
-              style={{ borderColor: "var(--lp-border)", backgroundColor: "var(--lp-card-bg)" }}
-            >
-              <div
-                className="mb-3 inline-block rounded-md px-2.5 py-1 font-mono text-[10px] font-[600] uppercase tracking-[0.5px]"
-                style={{ backgroundColor: "var(--lp-accent-dim)", color: "var(--lp-accent)" }}
-              >
+            <div key={i} className={`rounded-lg border p-6 transition-colors ${item.large ? "md:col-span-2 md:row-span-1" : ""}`} style={{ borderColor: "var(--lp-border)", backgroundColor: "var(--lp-card-bg)" }}>
+              <div className="mb-3 inline-block rounded-md px-2.5 py-1 font-mono text-[10px] font-[600] uppercase tracking-[0.5px]" style={{ backgroundColor: "var(--lp-accent-dim)", color: "var(--lp-accent)" }}>
                 core
               </div>
               <h3 className="font-sans text-[17px] font-[600] tracking-[-0.3px]" style={{ color: "var(--lp-text)" }}>

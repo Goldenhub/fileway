@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { CodeBlock } from "../code-block";
 
 const drivers = [
   {
@@ -138,8 +139,8 @@ export function InteractiveDemo() {
               </p>
             </div>
             <div className="flex-1 p-5">
-              <pre className="overflow-x-auto font-mono text-[13px] leading-[1.7]" style={{ color: "var(--lp-text)" }}>
-                <code>{drivers[active]?.code}</code>
+              <pre className="overflow-x-auto font-mono text-[13px] leading-[1.7]">
+                <CodeBlock code={drivers[active]?.code ?? ""} />
               </pre>
             </div>
           </div>

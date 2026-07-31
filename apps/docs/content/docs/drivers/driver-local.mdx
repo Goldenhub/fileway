@@ -30,6 +30,7 @@ const result = await client.upload(stream, {
 |---|---|---|---|
 | `directory` | `string` | — | Root directory for stored files |
 | `baseUrl` | `string` | `file://{directory}` | Base URL for generated URLs |
+| `maxSizeBytes` | `number` | — | Maximum allowed upload size in bytes (stream aborted if exceeded) |
 
 ## Metadata
 
@@ -38,3 +39,12 @@ const result = await client.upload(stream, {
 | Field | Type | Description |
 |---|---|---|
 | `meta.localPath` | `string` | Absolute path to the file on disk |
+
+## Errors
+
+Throws `ValidationError` (from `@betterpush/core`) when:
+- `filename` is missing, contains path separators, or exceeds 255 characters
+- `path` is absolute or contains null bytes
+- `mimeType` is malformed
+- Upload size exceeds `maxSizeBytes`
+- Path traversal is detected (path escapes the configured `directory`)|

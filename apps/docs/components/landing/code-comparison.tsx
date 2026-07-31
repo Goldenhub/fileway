@@ -1,3 +1,5 @@
+import { CodeBlock } from "../code-block";
+
 export function CodeComparison() {
   return (
     <section className="py-20" style={{ backgroundColor: "var(--lp-bg)" }}>
@@ -26,8 +28,8 @@ export function CodeComparison() {
               </span>
             </div>
             <div className="p-5">
-              <pre className="overflow-x-auto font-mono text-[13px] leading-[1.7]" style={{ color: "var(--lp-muted)" }}>
-                <code>{`// AWS SDK v3 — 50+ lines per provider
+              <pre className="overflow-x-auto font-mono text-[13px] leading-[1.7]">
+                <CodeBlock dimmed code={`// AWS SDK v3 — 50+ lines per provider
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3"
 import { Readable } from "node:stream"
 
@@ -52,7 +54,7 @@ async function uploadToS3(
     console.error("S3 upload failed:", err)
     throw err
   }
-}`}</code>
+}`} />
               </pre>
             </div>
           </div>
@@ -70,8 +72,8 @@ async function uploadToS3(
               </span>
             </div>
             <div className="p-5">
-              <pre className="overflow-x-auto font-mono text-[13px] leading-[1.7]" style={{ color: "var(--lp-text)" }}>
-                <code>{`import { BetterPushClient } from "@betterpush/core"
+              <pre className="overflow-x-auto font-mono text-[13px] leading-[1.7]">
+                <CodeBlock code={`import { BetterPushClient } from "@betterpush/core"
 import { S3Driver } from "@betterpush/driver-s3"
 
 const client = new BetterPushClient({
@@ -86,7 +88,7 @@ const result = await client.upload(stream, {
   filename: "report.pdf",
 })
 
-console.log(result.url)  // Fully typed`}</code>
+console.log(result.url)  // Fully typed`} />
               </pre>
             </div>
           </div>

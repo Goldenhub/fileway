@@ -1,7 +1,8 @@
 import type { BaseDriver, UploadOptions, UploadResult } from "@betterpush/core";
+import { validateUploadOptions, ValidationError, urlEncodePath } from "@betterpush/core";
 import { createWriteStream } from "node:fs";
 import { mkdir, unlink } from "node:fs/promises";
-import { join, dirname } from "node:path";
+import { join, dirname, resolve, relative } from "node:path";
 import { Readable } from "node:stream";
 
 const randomUUID = () => globalThis.crypto.randomUUID();
@@ -9,27 +10,36 @@ const randomUUID = () => globalThis.crypto.randomUUID();
 export interface LocalDriverConfig {
   directory: string;
   baseUrl?: string;
+  maxSizeBytes?: number;
 }
 
 export class LocalDriver implements BaseDriver<{ localPath: string }> {
   readonly name = "local";
   private directory: string;
   private baseUrl: string;
+  private maxSizeBytes: number | undefined;
 
   constructor(config: LocalDriverConfig) {
     this.directory = config.directory;
     this.baseUrl = config.baseUrl ?? `file://${config.directory}`;
+    this.maxSizeBytes = config.maxSizeBytes;
   }
 
   async upload(
     stream: ReadableStream<Uint8Array>,
     options: UploadOptions,
   ): Promise<UploadResult<{ localPath: string }>> {
+    validateUploadOptions(options);
+
     const id = randomUUID();
     const ext = options.filename.includes(".") ? options.filename.split(".").pop()! : "";
     const filename = ext ? `${id}.${ext}` : id;
     const relativePath = options.path ? join(options.path, filename) : filename;
-    const fullPath = join(this.directory, relativePath);
+    const fullPath = resolve(join(this.directory, relativePath));
+
+    if (!fullPath.startsWith(resolve(this.directory))) {
+      throw new ValidationError("path escapes the configured storage directory");
+    }
 
     await mkdir(dirname(fullPath), { recursive: true });
 
@@ -40,6 +50,11 @@ export class LocalDriver implements BaseDriver<{ localPath: string }> {
       let bytes = 0;
       nodeStream.on("data", (chunk: Buffer) => {
         bytes += chunk.length;
+        if (this.maxSizeBytes !== undefined && bytes > this.maxSizeBytes) {
+          writeStream.destroy();
+          nodeStream.destroy();
+          reject(new ValidationError(`upload exceeds maxSizeBytes of ${this.maxSizeBytes}`));
+        }
       });
       nodeStream.pipe(writeStream);
       writeStream.on("finish", () => resolve(bytes));
@@ -47,9 +62,11 @@ export class LocalDriver implements BaseDriver<{ localPath: string }> {
       nodeStream.on("error", reject);
     });
 
+    const safePath = urlEncodePath(relativePath);
+
     return {
       id,
-      url: `${this.baseUrl}/${relativePath}`,
+      url: `${this.baseUrl}/${safePath}`,
       path: relativePath,
       size,
       meta: { localPath: fullPath },
@@ -58,7 +75,11 @@ export class LocalDriver implements BaseDriver<{ localPath: string }> {
 
   async delete(path: string): Promise<boolean> {
     try {
-      await unlink(join(this.directory, path));
+      const fullPath = resolve(join(this.directory, path));
+      if (!fullPath.startsWith(resolve(this.directory))) {
+        return false;
+      }
+      await unlink(fullPath);
       return true;
     } catch {
       return false;
@@ -66,6 +87,6 @@ export class LocalDriver implements BaseDriver<{ localPath: string }> {
   }
 
   async getUrl(path: string): Promise<string> {
-    return `${this.baseUrl}/${path}`;
+    return `${this.baseUrl}/${urlEncodePath(path)}`;
   }
 }

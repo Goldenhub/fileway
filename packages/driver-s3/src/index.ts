@@ -1,4 +1,5 @@
 import type { BaseDriver, UploadOptions, UploadResult } from "@betterpush/core";
+import { validateUploadOptions, urlEncodePath } from "@betterpush/core";
 import {
   S3Client,
   PutObjectCommand,
@@ -14,6 +15,7 @@ export interface S3DriverConfig {
   credentials?: { accessKeyId: string; secretAccessKey: string };
   baseUrl?: string;
   endpoint?: string;
+  forcePathStyle?: boolean;
 }
 
 export class S3Driver implements BaseDriver<{ bucket: string; etag?: string }> {
@@ -27,6 +29,7 @@ export class S3Driver implements BaseDriver<{ bucket: string; etag?: string }> {
       ...(config.region ? { region: config.region } : {}),
       ...(config.credentials ? { credentials: config.credentials } : {}),
       ...(config.endpoint ? { endpoint: config.endpoint } : {}),
+      ...(config.forcePathStyle !== undefined ? { forcePathStyle: config.forcePathStyle } : {}),
       requestHandler: new FetchHttpHandler(),
     });
     this.bucket = config.bucket;
@@ -37,6 +40,8 @@ export class S3Driver implements BaseDriver<{ bucket: string; etag?: string }> {
     stream: ReadableStream<Uint8Array>,
     options: UploadOptions,
   ): Promise<UploadResult<{ bucket: string; etag?: string }>> {
+    validateUploadOptions(options);
+
     const id = randomUUID();
     const ext = options.filename.includes(".")
       ? options.filename.split(".").pop()!
@@ -44,11 +49,28 @@ export class S3Driver implements BaseDriver<{ bucket: string; etag?: string }> {
     const filename = ext ? `${id}.${ext}` : id;
     const key = options.path ? `${options.path}/${filename}` : filename;
 
+    const reader = stream.getReader();
+    const chunks: Uint8Array[] = [];
+    let totalSize = 0;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      totalSize += value.byteLength;
+    }
+
+    const body = new Uint8Array(totalSize);
+    let offset = 0;
+    for (const chunk of chunks) {
+      body.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+
     const result = await this.client.send(
       new PutObjectCommand({
         Bucket: this.bucket,
         Key: key,
-        Body: stream,
+        Body: body,
         ContentType: options.mimeType,
         Metadata: options.metadata,
       }),
@@ -56,9 +78,9 @@ export class S3Driver implements BaseDriver<{ bucket: string; etag?: string }> {
 
     return {
       id,
-      url: `${this.baseUrl}/${key}`,
+      url: `${this.baseUrl}/${urlEncodePath(key)}`,
       path: key,
-      size: 0,
+      size: totalSize,
       meta: {
         bucket: this.bucket,
         ...(result.ETag ? { etag: result.ETag } : {}),
@@ -78,7 +100,7 @@ export class S3Driver implements BaseDriver<{ bucket: string; etag?: string }> {
   }
 
   async getUrl(path: string): Promise<string> {
-    return `${this.baseUrl}/${path}`;
+    return `${this.baseUrl}/${urlEncodePath(path)}`;
   }
 }
 

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Tab, Tabs } from "fumadocs-ui/components/tabs";
 
 export function Hero() {
   return (
@@ -49,21 +50,49 @@ export function Hero() {
           </a>
         </div>
 
-        <div className="mx-auto mt-16 max-w-[520px]">
-          <div className="overflow-hidden rounded-lg border gradient-border" style={{ borderColor: "var(--lp-border)", backgroundColor: "var(--lp-surface)" }}>
+        <div className="mx-auto mt-16 max-w-[560px]">
+          <div className="overflow-hidden rounded-lg border" style={{ borderColor: "var(--lp-border)", backgroundColor: "var(--lp-surface)" }}>
             <div className="flex items-center gap-[6px] px-4 py-2.5" style={{ borderBottom: "1px solid var(--lp-border)" }}>
               <div className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: "var(--lp-muted)" }} />
               <div className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: "var(--lp-muted)" }} />
               <div className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: "var(--lp-muted)" }} />
               <span className="ml-3 font-mono text-[11px] opacity-60" style={{ color: "var(--lp-muted)" }}>install.sh</span>
             </div>
-            <div className="p-5 text-left">
-              <div className="flex items-center gap-2">
-                <span className="font-mono text-[13px] opacity-50" style={{ color: "var(--lp-muted)" }}>$</span>
-                <code className="font-mono text-[14px]" style={{ color: "var(--lp-text)" }}>
-                  pnpm add @betterpush/core @betterpush/driver-s3
-                </code>
-              </div>
+            <div className="p-4 text-left [&_[role=tablist]]:mb-3 [&_[role=tablist]>button]:text-[12px] [&_[role=tablist]>button]:font-mono">
+              <Tabs id="hero-install" items={["npm", "pnpm", "yarn", "bun"]}>
+                <Tab value="npm">
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono text-[13px] opacity-50" style={{ color: "var(--lp-muted)" }}>$</span>
+                    <code className="font-mono text-[14px]" style={{ color: "var(--lp-text)" }}>
+                      npm install @betterpush/core @betterpush/driver-s3
+                    </code>
+                  </div>
+                </Tab>
+                <Tab value="pnpm">
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono text-[13px] opacity-50" style={{ color: "var(--lp-muted)" }}>$</span>
+                    <code className="font-mono text-[14px]" style={{ color: "var(--lp-text)" }}>
+                      pnpm add @betterpush/core @betterpush/driver-s3
+                    </code>
+                  </div>
+                </Tab>
+                <Tab value="yarn">
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono text-[13px] opacity-50" style={{ color: "var(--lp-muted)" }}>$</span>
+                    <code className="font-mono text-[14px]" style={{ color: "var(--lp-text)" }}>
+                      yarn add @betterpush/core @betterpush/driver-s3
+                    </code>
+                  </div>
+                </Tab>
+                <Tab value="bun">
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono text-[13px] opacity-50" style={{ color: "var(--lp-muted)" }}>$</span>
+                    <code className="font-mono text-[14px]" style={{ color: "var(--lp-text)" }}>
+                      bun add @betterpush/core @betterpush/driver-s3
+                    </code>
+                  </div>
+                </Tab>
+              </Tabs>
             </div>
           </div>
         </div>

@@ -61,29 +61,34 @@
   pointer-events: none;
 }
 
-@keyframes nav-gradient-rotate {
+/* Snake glow border animation */
+@keyframes snake {
   from {
-    transform: rotate(0deg);
+    stroke-dashoffset: 0;
   }
 
   to {
-    transform: rotate(360deg);
+    stroke-dashoffset: -1000;
   }
 }
 
-.nav-gradient-glow {
+.nav-snake-glow {
   position: relative;
-  overflow: hidden;
 }
 
-.nav-gradient-glow::before {
-  content: "";
-  position: absolute;
-  inset: -50%;
-  background: conic-gradient(from 0deg, transparent, var(--lp-accent), transparent 40%, var(--lp-accent) 60%, transparent);
-  animation: nav-gradient-rotate 6s linear infinite;
-  pointer-events: none;
-  opacity: 0.6;
+.nav-snake-glow .snake-rect-track {
+  fill: none;
+  stroke: rgba(255, 178, 36, 0.08);
+  stroke-width: 1;
+}
+
+.nav-snake-glow .snake-rect {
+  fill: none;
+  stroke: var(--lp-accent);
+  stroke-width: 1.5;
+  stroke-dasharray: 80 920;
+  pathLength: 1000;
+  animation: snake 3s linear infinite;
 }
 
 /* Hide fumadocs sidebar on landing page */

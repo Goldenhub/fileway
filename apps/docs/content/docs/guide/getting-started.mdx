@@ -5,17 +5,61 @@ description: Install and use BetterPush in your project
 
 ## Install
 
-```bash
-pnpm add @betterpush/core
-```
+<Tabs id="package-manager" items={["npm", "pnpm", "yarn", "bun"]}>
+  <Tab value="npm">
+    ```bash
+    npm install @betterpush/core
+    ```
+  </Tab>
+  <Tab value="pnpm">
+    ```bash
+    pnpm add @betterpush/core
+    ```
+  </Tab>
+  <Tab value="yarn">
+    ```bash
+    yarn add @betterpush/core
+    ```
+  </Tab>
+  <Tab value="bun">
+    ```bash
+    bun add @betterpush/core
+    ```
+  </Tab>
+</Tabs>
 
-Then add a driver:
+Then add the drivers you need:
 
-```bash
-pnpm add @betterpush/driver-local
-pnpm add @betterpush/driver-s3
-pnpm add @betterpush/driver-cloudinary
-```
+<Tabs id="package-manager-drivers" items={["npm", "pnpm", "yarn", "bun"]}>
+  <Tab value="npm">
+    ```bash
+    npm install @betterpush/driver-local
+    npm install @betterpush/driver-s3
+    npm install @betterpush/driver-cloudinary
+    ```
+  </Tab>
+  <Tab value="pnpm">
+    ```bash
+    pnpm add @betterpush/driver-local
+    pnpm add @betterpush/driver-s3
+    pnpm add @betterpush/driver-cloudinary
+    ```
+  </Tab>
+  <Tab value="yarn">
+    ```bash
+    yarn add @betterpush/driver-local
+    yarn add @betterpush/driver-s3
+    yarn add @betterpush/driver-cloudinary
+    ```
+  </Tab>
+  <Tab value="bun">
+    ```bash
+    bun add @betterpush/driver-local
+    bun add @betterpush/driver-s3
+    bun add @betterpush/driver-cloudinary
+    ```
+  </Tab>
+</Tabs>
 
 ## Basic Usage
 
@@ -48,6 +92,44 @@ console.log(result.url);
 console.log(result.path);
 console.log(result.size);
 ```
+
+## API Reference
+
+### `delete(path)`
+
+Deletes a file from the storage backend.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `path` | `string` | The file path (as returned by `upload()`) |
+
+**Returns:** `Promise<boolean>` — `true` if the file existed and was deleted, `false` if it didn't exist.
+
+**Behavior across drivers:**
+
+| Driver | Behavior |
+|--------|----------|
+| `LocalDriver` | Removes the file from disk. Returns `false` if file doesn't exist. Throws if path traverses outside the configured directory. |
+| `S3Driver` | Deletes the object from the bucket. Returns `true` regardless of whether the object existed (S3 delete is idempotent). |
+| `CloudinaryDriver` | Calls the Cloudinary Destroy API. Returns `true` on success. |
+
+### `getUrl(path)`
+
+Returns a public URL for a stored file.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `path` | `string` | The file path (as returned by `upload()`) |
+
+**Returns:** `Promise<string>`
+
+**Behavior across drivers:**
+
+| Driver | Behavior |
+|--------|----------|
+| `LocalDriver` | Returns `<baseUrl>/<path>`. Defaults to `file://<directory>/<path>`. Set `baseUrl` in production (e.g. `"https://cdn.example.com"`). |
+| `S3Driver` | Returns the object URL in the configured bucket (virtual-hosted or path-style based on `forcePathStyle`). |
+| `CloudinaryDriver` | Returns the CDN URL based on the public ID, resource type, and version. |
 
 ## Type Inference
 

@@ -26,6 +26,18 @@ importers:
 
   .:
     devDependencies:
+      '@betterpush/core':
+        specifier: workspace:*
+        version: link:packages/core
+      '@betterpush/driver-cloudinary':
+        specifier: workspace:*
+        version: link:packages/driver-cloudinary
+      '@betterpush/driver-local':
+        specifier: workspace:*
+        version: link:packages/driver-local
+      '@betterpush/driver-s3':
+        specifier: workspace:*
+        version: link:packages/driver-s3
       '@edge-runtime/vm':
         specifier: 'catalog:'
         version: 5.0.0

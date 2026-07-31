@@ -1,4 +1,5 @@
 export * from "./types.js";
+export * from "./validation.js";
 
 export const version = "0.0.1";
 

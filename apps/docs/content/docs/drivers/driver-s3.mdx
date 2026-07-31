@@ -30,6 +30,23 @@ console.log(result.meta.bucket);
 console.log(result.meta.etag);
 ```
 
+## MinIO
+
+```ts
+const client = new BetterPushClient({
+  driver: new S3Driver({
+    bucket: "my-bucket",
+    endpoint: "http://localhost:9000",
+    region: "us-east-1",
+    forcePathStyle: true,
+    credentials: {
+      accessKeyId: process.env.MINIO_ACCESS_KEY!,
+      secretAccessKey: process.env.MINIO_SECRET_KEY!,
+    },
+  }),
+});
+```
+
 ## Cloudflare R2
 
 ```ts
@@ -38,6 +55,13 @@ const client = new BetterPushClient({
     bucket: "my-bucket",
     endpoint: "https://<accountid>.r2.cloudflarestorage.com",
     region: "auto",
+    credentials: {
+      accessKeyId: process.env.R2_ACCESS_KEY_ID!,
+      secretAccessKey: process.env.R2_SECRET_ACCESS_KEY!,
+    },
+    // Public URL for browser-accessible files (dev URL or custom domain):
+    baseUrl: "https://pub-<hash>.r2.dev",                // development
+    // baseUrl: "https://cdn.yourdomain.com",             // production
   }),
 });
 ```
@@ -50,7 +74,8 @@ const client = new BetterPushClient({
 | `region` | `string` | `"us-east-1"` | AWS region |
 | `credentials` | `object` | — | `{ accessKeyId, secretAccessKey }` |
 | `endpoint` | `string` | AWS default | Custom endpoint (R2, MinIO) |
-| `baseUrl` | `string` | auto-derived | Base URL for generated URLs |
+| `forcePathStyle` | `boolean` | `false` | Use path-style URLs (`endpoint/bucket`) instead of virtual-hosted (`bucket.endpoint`). Required for MinIO. |
+| `baseUrl` | `string` | auto-derived | Base URL for generated URLs. For R2, set to the public dev URL or custom domain for browser-accessible links |
 
 ## Metadata
 
@@ -60,3 +85,10 @@ const client = new BetterPushClient({
 |---|---|---|
 | `meta.bucket` | `string` | S3 bucket name |
 | `meta.etag` | `string \| undefined` | S3 ETag from upload |
+
+## Errors
+
+Throws `ValidationError` (from `@betterpush/core`) when:
+- `filename` is missing, contains path separators, or exceeds 255 characters
+- `path` is absolute or contains null bytes
+- `mimeType` is malformed|
