@@ -2,12 +2,19 @@
 
 All notable changes to Fileway are documented here. Releases are cut from `main` via the [automated release workflow](.github/workflows/release.yml) with npm provenance (SLSA) attestation on every publish.
 
+## Unreleased
+
+- **`@fileway/driver-s3`: bounded-memory streaming uploads** — pass `options.size` (≤ 5 GiB) and the payload is uploaded as a SigV4 `aws-chunked` body (`STREAMING-AWS4-HMAC-SHA256-PAYLOAD`); chunks are signed lazily as the stream is read, so memory stays constant regardless of file size.
+- **`@fileway/driver-s3`: multipart uploads** — unknown sizes and objects > 5 GiB now stream through a multipart upload (`CreateMultipartUpload` → `UploadPart` → `CompleteMultipartUpload`) into part-sized buffers (default `8 MiB`, minimum `5 MiB`), so peak memory stays bounded even without a declared size. Configurable via `partSize` and `forceMultipart`.
+- **`@fileway/driver-s3`: size-mismatch safety** — streams that end before/after the declared `size` abort the upload and throw a validation error instead of storing a corrupted object.
+- Launch docs: rewritten `README.md`, new `CHANGELOG.md`, and npm `keywords` on all four packages.
+
 ## Upcoming — v1.0.0
 
 The first stable release. Target scope, tracked on the [roadmap](README.md#roadmap):
 
 - **Stable public API** — `UploadOptions`, `UploadResult<TMeta>`, `BaseDriver`, and `FilewayClient` lock in 1.0 semantics. Breaking changes become semver-major.
-- **True streaming uploads** — S3 multipart with per-chunk SigV4 signing (`STREAMING-AWS4-HMAC-SHA256-PAYLOAD`), so large files stream without buffering.
+- **True streaming uploads** — ✅ landed for S3: `aws-chunked` per-chunk SigV4 signing via `options.size`, plus bounded-memory multipart uploads for unknown sizes and very large objects.
 - **Middleware stream transformation** — `beforeUpload` will be able to transform the stream itself, not just options.
 - **Operational hardening** — progress events, retries with backoff, and classified error types across all drivers.
 - **Signed downloads** — presigned URLs for S3 and Cloudinary assets.

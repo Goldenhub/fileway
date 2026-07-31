@@ -40,8 +40,20 @@ const result = await client.upload(stream, {
 | `region`            | `string`                             | AWS region (default `us-east-1`)               |
 | `credentials`       | `{ accessKeyId, secretAccessKey }`   | AWS credentials (required)                     |
 | `endpoint`          | `string`                             | Custom endpoint for MinIO / R2                 |
-| `forcePathStyle`    | `boolean`                            | Reserved for future path-style requests        |
+| `forcePathStyle`    | `boolean`                            | Use path-style URLs (`endpoint/bucket/...`) — required for MinIO |
 | `baseUrl`           | `string`                             | Public base URL (e.g. R2 custom domain)        |
+| `partSize`          | `number`                             | Multipart part size in bytes (default `8 MiB`, minimum `5 MiB`) |
+| `forceMultipart`    | `boolean`                            | Always use multipart uploads, regardless of size |
+
+## Upload strategy
+
+The driver picks the S3 upload strategy automatically from `options.size`:
+
+- **Known size ≤ 5 GiB** — single `PUT` with a SigV4 `aws-chunked` body; chunks are signed lazily as the stream is read, so memory stays constant.
+- **Unknown size** — multipart upload (`CreateMultipartUpload` → `UploadPart` → `CompleteMultipartUpload`) that reads the stream into part-sized buffers (default `8 MiB`), so peak memory stays bounded.
+- **Size > 5 GiB** — multipart upload, since a single `PUT` cannot exceed 5 GiB.
+
+If the stream ends before or after a declared `size`, the upload is aborted and throws a validation error — nothing is stored.
 
 ## MinIO
 
@@ -49,6 +61,7 @@ const result = await client.upload(stream, {
 new S3Driver({
   bucket: "my-bucket",
   endpoint: "http://localhost:9000",
+  forcePathStyle: true,
   credentials: { accessKeyId: "minioadmin", secretAccessKey: "minioadmin" },
 });
 ```

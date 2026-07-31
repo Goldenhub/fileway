@@ -10,7 +10,7 @@ Fileway is intentionally minimal. This page documents exactly what each driver s
 | Capability | `LocalDriver` | `S3Driver` | `CloudinaryDriver` |
 |------------|:---:|:---:|:---:|
 | Upload via `ReadableStream` | ✅ | ✅ | ✅ |
-| True streaming (no full buffering) | ✅ | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> |
+| True streaming (no full buffering) | ✅ | ✅¹ | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> |
 | Public URL retrieval (`getUrl`) | ✅ | ✅ | ✅ |
 | Pre-signed URLs | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> |
 | Download / read-back | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> |
@@ -20,7 +20,7 @@ Fileway is intentionally minimal. This page documents exactly what each driver s
 | TTL / expiration | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> |
 | Lifecycle rules | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> |
 
-Legend: **✅** supported today · <span style={{ color: "var(--color-fd-primary)" }}>✕</span> not yet supported (in the works).
+Legend: **✅** supported today · **¹** S3 always streams with bounded memory: `aws-chunked` when the size is known, multipart when it is not (see below) · <span style={{ color: "var(--color-fd-primary)" }}>✕</span> not yet supported (in the works).
 
 ## Uploads & Streaming
 
@@ -46,10 +46,21 @@ const result = await client.upload(stream, {
 | Driver | Behavior |
 |--------|----------|
 | `LocalDriver` | **True streaming.** The web stream is piped to disk via Node.js streams with backpressure. Memory usage stays constant regardless of file size. Enforces `maxSizeBytes` while streaming. |
-| `S3Driver` | **Buffers the full file** into memory to compute the SHA-256 payload hash, then issues a single `PUT`. Large files use memory proportional to file size. The `aws-chunked` streaming encoder exists in the codebase but is not yet wired into `upload()`. |
+| `S3Driver` | **Streams with bounded memory, always.** With `options.size` (≤ 5 GiB) the payload is sent as a SigV4 `aws-chunked` body whose chunks are signed lazily as they are read (backpressure preserved, zero buffering). Without a known size — or beyond 5 GiB — the driver falls back to a multipart upload, reading the stream into part-sized buffers (default 8 MiB, minimum 5 MiB), so peak memory stays bounded. |
 | `CloudinaryDriver` | **Buffers the full file** into a `Blob` for the multipart upload. Enforces `maxSizeBytes`. |
 
-**In the works:** bounded-memory `aws-chunked` streaming uploads for `S3Driver`. If you need bounded memory today, chunk your stream at the caller.
+When the size is known, pass it to unlock the leanest (single-request) streaming path:
+
+```ts
+const result = await client.upload(stream, {
+  filename: "report.pdf",
+  path: "invoices/2024",
+  mimeType: "application/pdf",
+  size: bytes,
+});
+```
+
+Without `size`, `S3Driver` still streams with bounded memory via a multipart upload. If the stream ends before or after the declared size, the upload is aborted and fails with a validation error instead of silently storing a corrupted object.
 
 ## Retrieval & Pre-signed URLs
 
@@ -119,7 +130,6 @@ Each driver returns its own typed metadata:
 
 In the works and coming next:
 
-- `aws-chunked` streaming uploads for `S3Driver` (bounded memory)
 - Pre-signed URL generation (`getPresignedUrl`) for `S3Driver`
 - Download / stream-back API across drivers
 - S3 object tagging and metadata read-back (`headObject`)

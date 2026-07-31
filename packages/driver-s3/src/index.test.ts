@@ -15,6 +15,43 @@ function okResponse(etag?: string): Response {
   });
 }
 
+function mockMultipart(opts?: { completeEtag?: string }) {
+  const completeEtag = opts?.completeEtag ?? '"final-etag"';
+  mockFetch.mockImplementation((input: string | URL, init?: RequestInit) => {
+    const url = String(input);
+    const method = init?.method ?? "GET";
+    if (url.includes("?uploads=")) {
+      return Promise.resolve(
+        new Response(
+          "<InitiateMultipartUploadResult><UploadId>upload-id-123</UploadId></InitiateMultipartUploadResult>",
+          { status: 200 },
+        ),
+      );
+    }
+    if (url.includes("uploadId=")) {
+      if (method === "PUT") {
+        return Promise.resolve(new Response(null, { status: 200, headers: { etag: '"part-etag"' } }));
+      }
+      if (method === "POST") {
+        return Promise.resolve(
+          new Response(
+            `<CompleteMultipartUploadResult><ETag>${completeEtag}</ETag></CompleteMultipartUploadResult>`,
+            { status: 200 },
+          ),
+        );
+      }
+      if (method === "DELETE") {
+        return Promise.resolve(new Response(null, { status: 204 }));
+      }
+    }
+    if (method === "PUT") {
+      // Plain single PUT (empty-stream fallback) or other PUTs.
+      return Promise.resolve(new Response(null, { status: 200, headers: { etag: '"empty-etag"' } }));
+    }
+    return Promise.resolve(new Response(null, { status: 500, statusText: "unexpected call" }));
+  });
+}
+
 describe("S3Driver (AWS S3)", () => {
   let driver: S3Driver;
 
@@ -27,7 +64,7 @@ describe("S3Driver (AWS S3)", () => {
   });
 
   it("should upload a stream", async () => {
-    mockFetch.mockResolvedValue(okResponse('"abc123"'));
+    mockMultipart({ completeEtag: '"abc123"' });
 
     const stream = new ReadableStream({
       start(controller) {
@@ -42,18 +79,31 @@ describe("S3Driver (AWS S3)", () => {
     expect(result.path).toMatch(/\.txt$/);
     expect(result.meta.bucket).toBe("test-bucket");
     expect(result.meta.etag).toBe('"abc123"');
-    expect(mockFetch).toHaveBeenCalledTimes(1);
+    expect(result.size).toBe(4);
 
-    const [url, opts] = mockFetch.mock.calls[0]!;
-    expect(url).toContain("test-bucket.s3.us-east-1.amazonaws.com");
-    expect(opts.method).toBe("PUT");
-    expect(opts.headers["authorization"]).toBeDefined();
-    expect(opts.headers["x-amz-content-sha256"]).toBeDefined();
-    expect(opts.headers["x-amz-date"]).toBeDefined();
+    // Unknown size → multipart: create → part → complete.
+    expect(mockFetch).toHaveBeenCalledTimes(3);
+
+    const [createUrl, createOpts] = mockFetch.mock.calls[0]!;
+    expect(String(createUrl)).toContain("?uploads=");
+    expect(createOpts.method).toBe("POST");
+    expect(createOpts.headers["authorization"]).toBeDefined();
+    expect(createOpts.headers["x-amz-content-sha256"]).toBeDefined();
+    expect(createOpts.headers["x-amz-date"]).toBeDefined();
+
+    const [, partOpts] = mockFetch.mock.calls[1]!;
+    expect(partOpts.method).toBe("PUT");
+    expect(new TextDecoder().decode(partOpts.body as Uint8Array)).toBe("data");
+
+    const [, completeOpts] = mockFetch.mock.calls[2]!;
+    expect(completeOpts.method).toBe("POST");
+    expect(new TextDecoder().decode(completeOpts.body as Uint8Array)).toContain(
+      "<CompleteMultipartUpload>",
+    );
   });
 
   it("should upload with metadata", async () => {
-    mockFetch.mockResolvedValue(okResponse());
+    mockMultipart();
 
     const stream = new ReadableStream({
       start(controller) {
@@ -67,9 +117,14 @@ describe("S3Driver (AWS S3)", () => {
       metadata: { userId: "42", source: "mobile" },
     });
 
-    const [, opts] = mockFetch.mock.calls[0]!;
-    expect(opts.headers["x-amz-meta-userid"]).toBe("42");
-    expect(opts.headers["x-amz-meta-source"]).toBe("mobile");
+    // Object metadata lives on the CreateMultipartUpload request, not the parts.
+    const [createUrl, createOpts] = mockFetch.mock.calls[0]!;
+    expect(String(createUrl)).toContain("?uploads=");
+    expect(createOpts.headers["x-amz-meta-userid"]).toBe("42");
+    expect(createOpts.headers["x-amz-meta-source"]).toBe("mobile");
+
+    const [, partOpts] = mockFetch.mock.calls[1]!;
+    expect(partOpts.headers["x-amz-meta-userid"]).toBeUndefined();
   });
 
   it("should delete an object", async () => {
@@ -138,8 +193,8 @@ describe("S3Driver streaming upload (known size)", () => {
     expect(result.size).toBe(payload.byteLength);
   });
 
-  it("should fall back to a buffered PUT when size is unknown", async () => {
-    mockFetch.mockResolvedValue(okResponse());
+  it("should use multipart when size is unknown", async () => {
+    mockMultipart();
 
     const stream = new ReadableStream<Uint8Array>({
       start(controller) {
@@ -148,13 +203,129 @@ describe("S3Driver streaming upload (known size)", () => {
       },
     });
 
-    await driver.upload(stream, { filename: "b.txt" });
+    const result = await driver.upload(stream, { filename: "b.txt" });
 
-    const [, opts] = mockFetch.mock.calls[0]!;
-    expect(opts.headers["x-amz-content-sha256"]).toMatch(/^[0-9a-f]{64}$/);
-    expect(opts.headers["content-encoding"]).toBeUndefined();
-    expect(opts.headers["content-length"]).toBe("8");
-    expect(opts.body).toBeInstanceOf(Uint8Array);
+    expect(result.size).toBe(8);
+    const [createUrl] = mockFetch.mock.calls[0]!;
+    expect(String(createUrl)).toContain("?uploads=");
+
+    const [, partOpts] = mockFetch.mock.calls[1]!;
+    expect(partOpts.method).toBe("PUT");
+    expect(new TextDecoder().decode(partOpts.body as Uint8Array)).toBe("buffered");
+  });
+});
+
+describe("S3Driver multipart upload", () => {
+  let driver: S3Driver;
+
+  beforeEach(() => {
+    driver = new S3Driver({
+      bucket: "test-bucket",
+      region: "us-east-1",
+      credentials: { accessKeyId: "AKID", secretAccessKey: "secret" },
+    });
+  });
+
+  it("splits a payload larger than partSize into signed parts", async () => {
+    driver = new S3Driver({
+      bucket: "test-bucket",
+      region: "us-east-1",
+      credentials: { accessKeyId: "AKID", secretAccessKey: "secret" },
+      partSize: 5 * 1024 * 1024,
+      forceMultipart: true,
+    });
+    mockMultipart();
+
+    const payload = new Uint8Array(6 * 1024 * 1024);
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(payload);
+        controller.close();
+      },
+    });
+
+    const result = await driver.upload(stream, {
+      filename: "big.bin",
+      size: payload.byteLength,
+    });
+
+    expect(result.size).toBe(payload.byteLength);
+    expect(mockFetch).toHaveBeenCalledTimes(4); // create, part 1, part 2, complete
+
+    const [, part1Opts] = mockFetch.mock.calls[1]!;
+    expect((part1Opts.body as Uint8Array).byteLength).toBe(5 * 1024 * 1024);
+    expect(String(mockFetch.mock.calls[1]![0])).toContain("partNumber=1&uploadId=upload-id-123");
+
+    const [, part2Opts] = mockFetch.mock.calls[2]!;
+    expect((part2Opts.body as Uint8Array).byteLength).toBe(1024 * 1024);
+
+    const [, completeOpts] = mockFetch.mock.calls[3]!;
+    const xml = new TextDecoder().decode(completeOpts.body as Uint8Array);
+    expect(xml).toContain('<Part><PartNumber>1</PartNumber><ETag>"part-etag"</ETag></Part>');
+    expect(xml).toContain('<Part><PartNumber>2</PartNumber><ETag>"part-etag"</ETag></Part>');
+  });
+
+  it("routes >5 GiB uploads to multipart and aborts on size mismatch", async () => {
+    mockMultipart();
+
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.close();
+      },
+    });
+
+    await expect(
+      driver.upload(stream, { filename: "huge.bin", size: 6 * 1024 ** 3 }),
+    ).rejects.toThrow(/expected 6442450944/);
+
+    // create + abort, no complete
+    const methods = mockFetch.mock.calls.map((c) => (c[1] as RequestInit).method);
+    expect(methods).toEqual(["POST", "DELETE"]);
+  });
+
+  it("aborts multipart when the declared size is wrong", async () => {
+    driver = new S3Driver({
+      bucket: "test-bucket",
+      region: "us-east-1",
+      credentials: { accessKeyId: "AKID", secretAccessKey: "secret" },
+      partSize: 5 * 1024 * 1024,
+      forceMultipart: true,
+    });
+    mockMultipart();
+
+    const payload = new Uint8Array(6 * 1024 * 1024);
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(payload);
+        controller.close();
+      },
+    });
+
+    await expect(
+      driver.upload(stream, { filename: "wrong.bin", size: 100 }),
+    ).rejects.toThrow(/expected 100/);
+
+    const methods = mockFetch.mock.calls.map((c) => (c[1] as RequestInit).method);
+    expect(methods).toEqual(["POST", "PUT", "DELETE"]);
+  });
+
+  it("falls back to a single empty PUT for an empty stream", async () => {
+    mockMultipart();
+
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.close();
+      },
+    });
+
+    const result = await driver.upload(stream, { filename: "empty.bin" });
+    expect(result.size).toBe(0);
+
+    const methods = mockFetch.mock.calls.map((c) => (c[1] as RequestInit).method);
+    expect(methods).toEqual(["POST", "DELETE", "PUT"]);
+
+    const [, putOpts] = mockFetch.mock.calls[2]!;
+    expect((putOpts.body as Uint8Array).byteLength).toBe(0);
   });
 });
 
@@ -217,7 +388,7 @@ describe("S3Driver with custom endpoint (MinIO)", () => {
   });
 
   it("should upload to the custom endpoint", async () => {
-    mockFetch.mockResolvedValue(okResponse());
+    mockMultipart();
 
     const stream = new ReadableStream({
       start(controller) {
@@ -229,7 +400,7 @@ describe("S3Driver with custom endpoint (MinIO)", () => {
     const result = await driver.upload(stream, { filename: "f.txt" });
 
     const [url] = mockFetch.mock.calls[0]!;
-    expect(url).toBe(`http://localhost:9000/my-bucket/${result.path}`);
+    expect(url).toBe(`http://localhost:9000/my-bucket/${result.path}?uploads=`);
     expect(url).toContain("localhost:9000");
     expect(url).toContain("my-bucket");
   });

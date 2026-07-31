@@ -3,7 +3,7 @@ title: S3 Driver
 description: Upload files to S3-compatible storage
 ---
 
-Uploads files to S3-compatible storage (AWS S3, Cloudflare R2, MinIO) using `FetchHttpHandler`.
+Uploads files to S3-compatible storage (AWS S3, Cloudflare R2, MinIO) with pure `fetch` and hand-rolled SigV4 — no AWS SDK required, so it runs on Node.js, Bun, Deno, and edge runtimes.
 
 ```ts
 import { FilewayClient } from "@fileway/core";
@@ -24,11 +24,32 @@ const result = await client.upload(stream, {
   filename: "report.pdf",
   path: "invoices/2024",
   mimeType: "application/pdf",
+  size: bytes,
 });
 
 console.log(result.meta.bucket);
 console.log(result.meta.etag);
 ```
+
+## Upload strategy
+
+The driver picks the S3 upload strategy automatically from `options.size`:
+
+- **Known size ≤ 5 GiB** — a single `PUT` with a SigV4 `aws-chunked` body. Each chunk is signed lazily as the stream is read, so memory stays constant regardless of file size.
+- **Unknown size** — a multipart upload (`CreateMultipartUpload` → `UploadPart` → `CompleteMultipartUpload`). The stream is read into part-sized buffers (default 8 MiB, minimum 5 MiB), so peak memory is bounded and the file is never buffered whole.
+- **Size > 5 GiB** — multipart upload, because a single `PUT` cannot exceed 5 GiB.
+
+Pass `options.size` when you know it to take the leanest path:
+
+```ts
+const result = await client.upload(fileStream, {
+  filename: "video.mp4",
+  size: fileSize,
+});
+```
+
+- If the stream ends before or after the declared `size`, the driver aborts the upload and throws a validation error — a truncated or oversized object is never stored.
+- Use `partSize` to tune the multipart chunk size, and `forceMultipart` to always go through multipart.
 
 ## MinIO
 
@@ -38,7 +59,7 @@ const client = new FilewayClient({
     bucket: "my-bucket",
     endpoint: "http://localhost:9000",
     region: "us-east-1",
-    forcePathStyle: true,
+    forcePathStyle: true, // required for MinIO
     credentials: {
       accessKeyId: process.env.MINIO_ACCESS_KEY!,
       secretAccessKey: process.env.MINIO_SECRET_KEY!,
@@ -76,6 +97,8 @@ const client = new FilewayClient({
 | `endpoint` | `string` | AWS default | Custom endpoint (R2, MinIO) |
 | `forcePathStyle` | `boolean` | `false` | Use path-style URLs (`endpoint/bucket`) instead of virtual-hosted (`bucket.endpoint`). Required for MinIO. |
 | `baseUrl` | `string` | auto-derived | Base URL for generated URLs. For R2, set to the public dev URL or custom domain for browser-accessible links |
+| `partSize` | `number` | `8 MiB` | Multipart part size in bytes (clamped to a 5 MiB minimum) |
+| `forceMultipart` | `boolean` | `false` | Always use multipart uploads, regardless of size |
 
 ## Metadata
 

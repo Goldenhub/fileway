@@ -1,5 +1,50 @@
 import { describe, it, expect } from "vitest";
-import { createStreamingBody, signChunk, signStreamingRequest } from "./sigv4.js";
+import { buildCanonicalQueryString, createStreamingBody, sign, signChunk, signStreamingRequest } from "./sigv4.js";
+
+describe("buildCanonicalQueryString", () => {
+  const cred = {
+    accessKeyId: "AKID",
+    secretAccessKey: "secret",
+    region: "us-east-1",
+    service: "s3",
+  };
+  const date = new Date("2026-07-31T12:00:00.000Z");
+
+  it("sorts keys and URI-encodes keys and values", () => {
+    expect(buildCanonicalQueryString({ z: "1", a: "hello world" })).toBe("a=hello%20world&z=1");
+  });
+
+  it("emits an empty value for subresource markers like uploads", () => {
+    expect(buildCanonicalQueryString({ uploads: "" })).toBe("uploads=");
+  });
+
+  it("encodes reserved characters in values", () => {
+    expect(buildCanonicalQueryString({ uploadId: "abc/def=1" })).toBe("uploadId=abc%2Fdef%3D1");
+  });
+
+  it("signs a request with the query string folded into the canonical request", async () => {
+    const withQuery = await sign(
+      "POST",
+      "/bucket/key",
+      { host: "s3.example.com" },
+      "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      cred,
+      date,
+      { uploads: "" },
+    );
+    const withoutQuery = await sign(
+      "POST",
+      "/bucket/key",
+      { host: "s3.example.com" },
+      "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      cred,
+      date,
+    );
+
+    expect(withQuery.authorization).toBeDefined();
+    expect(withQuery.authorization).not.toBe(withoutQuery.authorization);
+  });
+});
 
 describe("createStreamingBody", () => {
   const cred = {

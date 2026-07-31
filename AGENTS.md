@@ -132,11 +132,11 @@ export class FilewayClient<const TConfig extends FilewayConfig> {
 
 - [x] **Audit Node imports** — All `node:*` imports eliminated from universal packages (`core`, `driver-cloudinary`, `driver-s3`). Only `driver-local` retains `node:fs`/`node:path`/`node:stream`.
 - [x] **Refactor `driver-cloudinary`** — Replaced `cloudinary` SDK + `Readable.fromWeb()` with pure `fetch` + `FormData` + `crypto.subtle.digest("SHA-1")`. Zero deps beyond `@fileway/core`.
-- [x] **Refactor `driver-s3`** — Replaced `@aws-sdk/lib-storage` + `Readable.fromWeb()` with `FetchHttpHandler` + `PutObjectCommand`. Streams sent directly as `Body` (WHATWG ReadableStream).
+- [x] **Refactor `driver-s3`** — Replaced `@aws-sdk/lib-storage` + `Readable.fromWeb()` with pure `fetch` + Web Crypto. SigV4 is hand-rolled; streams are sent directly as WHATWG `ReadableStream` bodies.
 - [x] **Remove edge duplicates** — `driver-cloudinary-edge` and `driver-s3-edge` deleted; their functionality is now in the universal `driver-cloudinary` and `driver-s3`.
 - [x] **Conditional exports** — All packages declare `worker`, `deno`, `bun`, `import`, `require` in `exports` map.
 - [x] **Edge-runtime tests** — `@fileway/core` and `@fileway/driver-cloudinary` run vitest with `environment: "edge-runtime"` via `@edge-runtime/vm`.
-- [x] **All builds & tests pass** — 23 tests across 4 packages.
+- [x] **All builds & tests pass** — 40 unit tests across 4 packages, plus 5 S3 integration tests against MinIO.
 
 ## Current Packages
 
@@ -144,7 +144,7 @@ export class FilewayClient<const TConfig extends FilewayConfig> {
 |---|---|---|---|
 | `@fileway/core` | None | Universal | 5 |
 | `@fileway/driver-local` | `node:fs`, `node:path`, `node:stream` | Node.js, Bun | 5 |
-| `@fileway/driver-s3` | None (uses AWS SDK v3 via FetchHttpHandler) | Universal | 5 |
+| `@fileway/driver-s3` | None (pure fetch + Web Crypto SigV4) | Universal | 22 |
 | `@fileway/driver-cloudinary` | None | Universal | 8 |
 
 ## Relevant Files
@@ -153,7 +153,7 @@ export class FilewayClient<const TConfig extends FilewayConfig> {
 - `packages/core/src/types.ts`: core interfaces (BaseDriver, UploadOptions, UploadResult, MiddlewareHook, FilewayConfig)
 - `packages/core/src/index.ts`: FilewayClient class
 - `packages/driver-local/src/index.ts`: LocalDriver (node:fs)
-- `packages/driver-s3/src/index.ts`: S3Driver (AWS SDK v3 + FetchHttpHandler)
+- `packages/driver-s3/src/index.ts`: S3Driver (pure fetch + Web Crypto SigV4, aws-chunked streaming + multipart)
 - `packages/driver-cloudinary/src/index.ts`: CloudinaryDriver (pure fetch, FormData, Web Crypto)
 - `apps/docs/`: Fumadocs + Next.js 16 documentation site
 - `pnpm-workspace.yaml`: workspace config, catalog

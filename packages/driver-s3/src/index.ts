@@ -1,9 +1,15 @@
 import type { BaseDriver, UploadOptions, UploadResult } from "@fileway/core";
-import { validateUploadOptions, urlEncodePath } from "@fileway/core";
-import { createStreamingBody, sign, signStreamingRequest, sha256 } from "./sigv4.js";
+import { validateUploadOptions, ValidationError, urlEncodePath } from "@fileway/core";
+import { buildCanonicalQueryString, createStreamingBody, sign, signStreamingRequest, sha256 } from "./sigv4.js";
 
 const randomUUID = () => globalThis.crypto.randomUUID();
 const SERVICE = "s3";
+const SHA256_EMPTY = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+
+// A single PUT is capped at 5 GiB; larger objects must go through multipart.
+const SINGLE_PUT_MAX = 5 * 1024 ** 3;
+const DEFAULT_PART_SIZE = 8 * 1024 * 1024;
+const MIN_PART_SIZE = 5 * 1024 * 1024;
 
 export interface S3DriverConfig {
   bucket: string;
@@ -12,16 +18,22 @@ export interface S3DriverConfig {
   baseUrl?: string;
   endpoint?: string;
   forcePathStyle?: boolean;
+  /** Multipart part size in bytes. Default 8 MiB, clamped to a 5 MiB minimum. */
+  partSize?: number;
+  /** Force multipart for every upload, regardless of size. */
+  forceMultipart?: boolean;
 }
 
 export class S3Driver implements BaseDriver<{ bucket: string; etag?: string }> {
   readonly name = "s3";
   private config: Required<Pick<S3DriverConfig, "region">> & S3DriverConfig;
   private baseUrl: string;
+  private partSize: number;
 
   constructor(config: S3DriverConfig) {
     this.config = { region: "us-east-1", ...config };
     this.baseUrl = config.baseUrl ?? resolveBaseUrl(this.config);
+    this.partSize = Math.max(config.partSize ?? DEFAULT_PART_SIZE, MIN_PART_SIZE);
   }
 
   async upload(
@@ -37,9 +49,6 @@ export class S3Driver implements BaseDriver<{ bucket: string; etag?: string }> {
     const filename = ext ? `${id}.${ext}` : id;
     const key = options.path ? `${options.path}/${filename}` : filename;
 
-    const now = new Date();
-    const { url, canonicalPath, host } = buildEndpoint(this.config, key);
-
     const cred = getCredentials(this.config);
 
     const metaHeaders = options.metadata
@@ -53,97 +62,63 @@ export class S3Driver implements BaseDriver<{ bucket: string; etag?: string }> {
 
     const typeHeader = options.mimeType ?? "application/octet-stream";
 
+    // Multipart: unknown size (memory-safe without buffering the whole file),
+    // sizes beyond the 5 GiB single-PUT cap, or when explicitly requested.
+    const useMultipart =
+      options.size === undefined || options.size > SINGLE_PUT_MAX || this.config.forceMultipart === true;
+
+    if (useMultipart) {
+      return this.multipartUpload(stream, {
+        id,
+        key,
+        metaHeaders,
+        typeHeader,
+        cred,
+        ...(options.size !== undefined ? { expectedSize: options.size } : {}),
+      });
+    }
+
     // Streaming path: the caller knows the size, so we can sign and stream the
     // body chunk-by-chunk (aws-chunked) without ever buffering the file.
-    if (options.size !== undefined) {
-      const { headers: sigHeaders, seedSignature, signingKey, scope, amzDate } = await signStreamingRequest(
-        "PUT",
-        canonicalPath,
-        {
-          host,
-          "content-type": typeHeader,
-          ...metaHeaders,
-        },
-        options.size,
-        { ...cred, region: this.config.region!, service: SERVICE },
-        now,
-      );
+    // `useMultipart` is false here, which guarantees `options.size` is defined.
+    const knownSize = options.size!;
+    const now = new Date();
+    const { url, canonicalPath, host } = buildEndpoint(this.config, key);
 
-      const response = await fetch(url, {
+    const { headers: sigHeaders, seedSignature, signingKey, scope, amzDate } = await signStreamingRequest(
+      "PUT",
+      canonicalPath,
+      {
+        host,
+        "content-type": typeHeader,
+        ...metaHeaders,
+      },
+      knownSize,
+      { ...cred, region: this.config.region!, service: SERVICE },
+      now,
+    );
+
+    const bodyError: { current?: Error } = {};
+    let response: Response;
+    try {
+      response = await fetch(url, {
         method: "PUT",
         headers: {
           ...sigHeaders,
           ...metaHeaders,
           "content-type": typeHeader,
         },
-        body: createStreamingBody(stream, options.size, seedSignature, amzDate, scope, signingKey),
+        body: createStreamingBody(stream, knownSize, seedSignature, amzDate, scope, signingKey, bodyError),
         // Node's fetch (undici) requires `duplex: "half"` for stream bodies;
         // other runtimes ignore it.
         duplex: "half",
       } as RequestInit);
-
-      if (!response.ok) {
-        const body = await response.text().catch(() => "");
-        throw new Error(`S3 upload failed: ${response.status} ${response.statusText}${body ? ` — ${body}` : ""}`);
-      }
-
-      const etag = response.headers.get("etag") ?? undefined;
-
-      return {
-        id,
-        url: `${this.baseUrl}/${urlEncodePath(key)}`,
-        path: key,
-        size: options.size,
-        meta: {
-          bucket: this.config.bucket,
-          ...(etag ? { etag } : {}),
-        },
-      };
+    } catch (err) {
+      // An errored body (e.g. size mismatch) surfaces as a generic `fetch
+      // failed`; rethrow the specific ValidationError when present.
+      if (bodyError.current) throw bodyError.current;
+      throw err;
     }
-
-    // Buffered path: size unknown, so hash the whole payload for a single PUT.
-    const reader = stream.getReader();
-    const chunks: Uint8Array[] = [];
-    let totalSize = 0;
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      chunks.push(value);
-      totalSize += value.byteLength;
-    }
-
-    const fullBody = new Uint8Array(totalSize);
-    let offset = 0;
-    for (const chunk of chunks) {
-      fullBody.set(chunk, offset);
-      offset += chunk.byteLength;
-    }
-
-    const payloadHash = await sha256(fullBody);
-
-    const sigHeaders = await sign(
-      "PUT",
-      canonicalPath,
-      {
-        "host": host,
-        "content-type": typeHeader,
-        ...metaHeaders,
-      },
-      payloadHash,
-      { ...cred, region: this.config.region!, service: SERVICE },
-      now,
-    );
-
-    const response = await fetch(url, {
-      method: "PUT",
-      headers: {
-        ...sigHeaders,
-        ...metaHeaders,
-        "content-type": typeHeader,
-        "content-length": String(totalSize),
-      },
-      body: fullBody,
-    });
 
     if (!response.ok) {
       const body = await response.text().catch(() => "");
@@ -156,12 +131,217 @@ export class S3Driver implements BaseDriver<{ bucket: string; etag?: string }> {
       id,
       url: `${this.baseUrl}/${urlEncodePath(key)}`,
       path: key,
-      size: totalSize,
+      size: knownSize,
       meta: {
         bucket: this.config.bucket,
         ...(etag ? { etag } : {}),
       },
     };
+  }
+
+  private async multipartUpload(
+    stream: ReadableStream<Uint8Array>,
+    args: {
+      id: string;
+      key: string;
+      metaHeaders: Record<string, string>;
+      typeHeader: string;
+      cred: { accessKeyId: string; secretAccessKey: string };
+      expectedSize?: number;
+    },
+  ): Promise<UploadResult<{ bucket: string; etag?: string }>> {
+    const { id, key, metaHeaders, typeHeader, expectedSize } = args;
+    const cred = { ...args.cred, region: this.config.region!, service: SERVICE };
+    const now = new Date();
+
+    // 1. CreateMultipartUpload — object metadata and content-type live here.
+    const create = buildEndpoint(this.config, key, { uploads: "" });
+    const createHeaders = await sign(
+      "POST",
+      create.canonicalPath,
+      { host: create.host, "content-type": typeHeader, ...metaHeaders },
+      SHA256_EMPTY,
+      cred,
+      now,
+      { uploads: "" },
+    );
+    const createRes = await fetch(create.url, {
+      method: "POST",
+      headers: { ...createHeaders, ...metaHeaders, "content-type": typeHeader },
+    });
+    if (!createRes.ok) {
+      const body = await createRes.text().catch(() => "");
+      throw new Error(`S3 multipart create failed: ${createRes.status} ${createRes.statusText}${body ? ` — ${body}` : ""}`);
+    }
+    const uploadId = extractXml(await createRes.text(), "UploadId");
+    if (!uploadId) {
+      throw new Error("S3 multipart create returned no UploadId");
+    }
+
+    const abort = () => this.abortMultipart(key, uploadId, cred, now);
+
+    // 2. UploadPart — stream into one part-sized buffer at a time, so peak
+    // memory is bounded by `partSize` regardless of file size.
+    const reader = stream.getReader();
+    let buffer: Uint8Array[] = [];
+    let bufferedLen = 0;
+    let totalBytes = 0;
+    let partNumber = 1;
+    const parts: { partNumber: number; etag: string }[] = [];
+
+    const uploadPart = async (bytes: Uint8Array) => {
+      const part = buildEndpoint(this.config, key, { partNumber: String(partNumber), uploadId });
+      const partSig = await sign(
+        "PUT",
+        part.canonicalPath,
+        { host: part.host },
+        await sha256(bytes),
+        cred,
+        now,
+        { partNumber: String(partNumber), uploadId },
+      );
+      const res = await fetch(part.url, {
+        method: "PUT",
+        headers: { ...partSig, "content-length": String(bytes.byteLength) },
+        body: bytes as BodyInit,
+      });
+      if (!res.ok) {
+        await abort();
+        throw new Error(`S3 multipart part ${partNumber} failed: ${res.status} ${res.statusText}`);
+      }
+      const etag = res.headers.get("etag");
+      parts.push({ partNumber: partNumber++, etag: etag ?? `"${await sha256(bytes)}"` });
+    };
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      totalBytes += value.byteLength;
+      buffer.push(value);
+      bufferedLen += value.byteLength;
+
+      if (bufferedLen >= this.partSize) {
+        const merged = concatBytes(buffer, bufferedLen);
+        await uploadPart(merged.subarray(0, this.partSize));
+        const rest = merged.subarray(this.partSize);
+        buffer = rest.byteLength > 0 ? [rest] : [];
+        bufferedLen = rest.byteLength;
+      }
+    }
+
+    if (expectedSize !== undefined && totalBytes !== expectedSize) {
+      await abort();
+      throw new ValidationError(`stream delivered ${totalBytes} bytes, expected ${expectedSize}`);
+    }
+
+    if (parts.length === 0 && bufferedLen === 0) {
+      // An empty stream can't be represented as a zero-part multipart upload;
+      // abort it and fall back to a single empty PUT.
+      await abort();
+      return this.singlePut(id, key, new Uint8Array(0), metaHeaders, typeHeader, args.cred);
+    }
+
+    if (bufferedLen > 0) {
+      await uploadPart(concatBytes(buffer, bufferedLen));
+    }
+
+    // 3. CompleteMultipartUpload.
+    const complete = buildEndpoint(this.config, key, { uploadId });
+    const xmlBytes = new TextEncoder().encode(buildCompleteXml(parts));
+    const completeHeaders = await sign(
+      "POST",
+      complete.canonicalPath,
+      { host: complete.host },
+      await sha256(xmlBytes),
+      cred,
+      now,
+      { uploadId },
+    );
+    const completeRes = await fetch(complete.url, {
+      method: "POST",
+      headers: { ...completeHeaders, "content-type": "application/xml" },
+      body: xmlBytes,
+    });
+    if (!completeRes.ok) {
+      await abort();
+      throw new Error(`S3 multipart complete failed: ${completeRes.status} ${completeRes.statusText}`);
+    }
+    const etag = extractXml(await completeRes.text(), "ETag");
+
+    return {
+      id,
+      url: `${this.baseUrl}/${urlEncodePath(key)}`,
+      path: key,
+      size: totalBytes,
+      meta: {
+        bucket: this.config.bucket,
+        ...(etag ? { etag } : {}),
+      },
+    };
+  }
+
+  private async singlePut(
+    id: string,
+    key: string,
+    bytes: Uint8Array,
+    metaHeaders: Record<string, string>,
+    typeHeader: string,
+    baseCred: { accessKeyId: string; secretAccessKey: string },
+  ): Promise<UploadResult<{ bucket: string; etag?: string }>> {
+    const cred = { ...baseCred, region: this.config.region!, service: SERVICE };
+    const now = new Date();
+    const { url, canonicalPath, host } = buildEndpoint(this.config, key);
+    const payloadHash = await sha256(bytes);
+    const sigHeaders = await sign(
+      "PUT",
+      canonicalPath,
+      { host, "content-type": typeHeader, ...metaHeaders },
+      payloadHash,
+      cred,
+      now,
+    );
+
+    const response = await fetch(url, {
+      method: "PUT",
+      headers: {
+        ...sigHeaders,
+        ...metaHeaders,
+        "content-type": typeHeader,
+        "content-length": String(bytes.byteLength),
+      },
+      body: bytes as BodyInit,
+    });
+    if (!response.ok) {
+      const body = await response.text().catch(() => "");
+      throw new Error(`S3 upload failed: ${response.status} ${response.statusText}${body ? ` — ${body}` : ""}`);
+    }
+
+    const etag = response.headers.get("etag") ?? undefined;
+    return {
+      id,
+      url: `${this.baseUrl}/${urlEncodePath(key)}`,
+      path: key,
+      size: bytes.byteLength,
+      meta: {
+        bucket: this.config.bucket,
+        ...(etag ? { etag } : {}),
+      },
+    };
+  }
+
+  private async abortMultipart(
+    key: string,
+    uploadId: string,
+    cred: { accessKeyId: string; secretAccessKey: string; region: string; service: string },
+    now: Date,
+  ): Promise<void> {
+    try {
+      const abort = buildEndpoint(this.config, key, { uploadId });
+      const headers = await sign("DELETE", abort.canonicalPath, { host: abort.host }, SHA256_EMPTY, cred, now);
+      await fetch(abort.url, { method: "DELETE", headers });
+    } catch {
+      // Best-effort cleanup; the original error is the important one.
+    }
   }
 
   async delete(path: string): Promise<boolean> {
@@ -173,7 +353,7 @@ export class S3Driver implements BaseDriver<{ bucket: string; etag?: string }> {
       "DELETE",
       canonicalPath,
       { "host": host },
-      "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      SHA256_EMPTY,
       { ...cred, region: this.config.region!, service: SERVICE },
       now,
     );
@@ -195,14 +375,17 @@ function getCredentials(config: S3DriverConfig): { accessKeyId: string; secretAc
 function buildEndpoint(
   config: S3DriverConfig,
   key: string,
+  query?: Record<string, string>,
 ): { url: string; canonicalPath: string; host: string } {
   const encodedKey = key.split("/").map(encodeURIComponent).join("/");
+  const qs = query ? buildCanonicalQueryString(query) : "";
+  const suffix = qs ? `?${qs}` : "";
 
   if (config.endpoint) {
     const base = config.endpoint.replace(/\/+$/, "");
     const host = new URL(base).host;
     return {
-      url: `${base}/${config.bucket}/${encodedKey}`,
+      url: `${base}/${config.bucket}/${encodedKey}${suffix}`,
       canonicalPath: `/${config.bucket}/${encodedKey}`,
       host,
     };
@@ -210,10 +393,39 @@ function buildEndpoint(
 
   const host = `${config.bucket}.s3.${config.region ?? "us-east-1"}.amazonaws.com`;
   return {
-    url: `https://${host}/${encodedKey}`,
+    url: `https://${host}/${encodedKey}${suffix}`,
     canonicalPath: `/${encodedKey}`,
     host,
   };
+}
+
+function concatBytes(chunks: Uint8Array[], total: number): Uint8Array {
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    out.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return out;
+}
+
+function extractXml(xml: string, tag: string): string | undefined {
+  const match = xml.match(new RegExp(`<${tag}>(.*?)</${tag}>`, "s"));
+  return match?.[1];
+}
+
+function escapeXml(value: string): string {
+  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function buildCompleteXml(parts: { partNumber: number; etag: string }[]): string {
+  const body = parts
+    .map(
+      (p) =>
+        `<Part><PartNumber>${p.partNumber}</PartNumber><ETag>${escapeXml(p.etag)}</ETag></Part>`,
+    )
+    .join("");
+  return `<CompleteMultipartUpload>${body}</CompleteMultipartUpload>`;
 }
 
 function resolveBaseUrl(config: S3DriverConfig): string {

@@ -11,7 +11,7 @@ Instead of learning a different SDK for S3, Cloudinary, and local disk — and f
 
 - **Node.js 20+**, **Cloudflare Workers**, **Bun**, and **Deno 2** — the same code, everywhere.
 - **Zero core dependencies.** `@fileway/core` ships with no runtime deps. The S3 driver is pure `fetch` + Web Crypto — no AWS SDK, no shims.
-- **Real streaming** via `ReadableStream<Uint8Array>` — never buffer whole files into memory.
+- **Real streaming** via `ReadableStream<Uint8Array>` — no whole-file buffering. Local disk streams to disk with backpressure; S3 streams with per-chunk SigV4 signing when the size is known and bounded-memory multipart uploads when it is not.
 - **Type inference** — every driver returns its own metadata shape automatically.
 
 ---
@@ -317,6 +317,7 @@ const cloudinary = new CloudinaryDriver({
 | `options.path` | `string` | Optional storage path prefix |
 | `options.mimeType` | `string` | Optional MIME type |
 | `options.metadata` | `Record<string, string>` | Optional metadata |
+| `options.size` | `number` | Optional known byte size. For `S3Driver`, a known size ≤ 5 GiB enables bounded-memory `aws-chunked` streaming (no full buffering); unknown sizes or files > 5 GiB stream with bounded memory via multipart upload. |
 
 Returns `UploadResult<TMeta>` — `{ id, url, path, size, meta }` where `meta` is inferred from the driver.
 
@@ -330,7 +331,8 @@ Delete returns `Promise<boolean>`; `getUrl` returns the public URL for a stored 
 
 **Toward v1.0.0** (see the [v1 release note](CHANGELOG.md#upcoming--v100)):
 
-- [ ] Streaming S3 multipart uploads with per-chunk SigV4 signing (`aws-chunked`)
+- [x] Streaming S3 uploads with per-chunk SigV4 signing (`aws-chunked`) — pass `options.size` to enable
+- [x] Bounded-memory multipart uploads for S3 — automatic when the size is unknown or the object exceeds 5 GiB (`partSize`, `forceMultipart`)
 - [ ] Stream transformation in `beforeUpload` middlewares
 - [ ] Upload progress / lifecycle hooks
 - [ ] Retries with exponential backoff and classified errors

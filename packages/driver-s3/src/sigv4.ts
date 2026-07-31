@@ -52,6 +52,18 @@ interface SignatureParts {
   signature: string;
 }
 
+/**
+ * Builds the SigV4 canonical query string: every key and value URI-encoded,
+ * sorted by key, joined with `&`. This is exactly the query string a client
+ * sends on the wire, so it is reused for URL construction.
+ */
+export function buildCanonicalQueryString(query: Record<string, string>): string {
+  return Object.keys(query)
+    .sort()
+    .map((k) => `${encodeURIComponent(k)}=${encodeURIComponent(query[k] ?? "")}`)
+    .join("&");
+}
+
 async function computeSignature(
   method: string,
   path: string,
@@ -59,6 +71,7 @@ async function computeSignature(
   bodyHash: string,
   cred: SigV4Credentials,
   date: Date,
+  query?: Record<string, string>,
 ): Promise<SignatureParts> {
   const amzDate = iso8601(date);
   const dateStr = dateStamp(date);
@@ -74,7 +87,8 @@ async function computeSignature(
   const canonicalHeaders = sortedKeys.map((k) => `${k.toLowerCase()}:${allHeaders[k]!.trim()}\n`).join("");
   const signedHeaders = sortedKeys.map((k) => k.toLowerCase()).join(";");
 
-  const canonicalRequest = [method.toUpperCase(), path, "", canonicalHeaders, signedHeaders, bodyHash].join("\n");
+  const canonicalQuery = buildCanonicalQueryString(query ?? {});
+  const canonicalRequest = [method.toUpperCase(), path, canonicalQuery, canonicalHeaders, signedHeaders, bodyHash].join("\n");
   const canonicalHash = await sha256(canonicalRequest);
 
   const scope = `${dateStr}/${cred.region}/${cred.service}/aws4_request`;
@@ -87,8 +101,8 @@ async function computeSignature(
   return { amzDate, scope, signedHeaders, signingKey, signature };
 }
 
-export async function sign(method: string, path: string, headers: Record<string, string>, bodyHash: string, cred: SigV4Credentials, date: Date): Promise<Record<string, string>> {
-  const { amzDate, scope, signedHeaders, signature } = await computeSignature(method, path, headers, bodyHash, cred, date);
+export async function sign(method: string, path: string, headers: Record<string, string>, bodyHash: string, cred: SigV4Credentials, date: Date, query?: Record<string, string>): Promise<Record<string, string>> {
+  const { amzDate, scope, signedHeaders, signature } = await computeSignature(method, path, headers, bodyHash, cred, date, query);
 
   return {
     "x-amz-date": amzDate,
@@ -112,6 +126,7 @@ export async function signStreamingRequest(
   decodedContentLength: number,
   cred: SigV4Credentials,
   date: Date,
+  query?: Record<string, string>,
 ): Promise<StreamingSignResult> {
   const { amzDate, scope, signedHeaders, signingKey, signature } = await computeSignature(
     method,
@@ -124,6 +139,7 @@ export async function signStreamingRequest(
     STREAMING_AWS4_HMAC_SHA256_PAYLOAD,
     cred,
     date,
+    query,
   );
 
   return {
@@ -163,6 +179,9 @@ export async function signChunk(chunkData: Uint8Array, seedSignature: string, da
  * The stream errors (aborting the request) if the input length does not match
  * `expectedSize`, which is what the request's `x-amz-decoded-content-length`
  * claims.
+ *
+ * Runtime bodies swallow the error as a generic `fetch failed` rejection, so a
+ * caller can pass `errorRef` to recover the underlying `ValidationError`.
  */
 export function createStreamingBody(
   input: ReadableStream<Uint8Array>,
@@ -171,6 +190,7 @@ export function createStreamingBody(
   dateTime: string,
   scope: string,
   signingKey: Uint8Array,
+  errorRef?: { current?: Error },
 ): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();
   const reader = input.getReader();
@@ -179,8 +199,10 @@ export function createStreamingBody(
   let terminalSent = false;
 
   const fail = async (controller: ReadableStreamDefaultController<Uint8Array>, message: string) => {
+    const error = new ValidationError(message);
+    if (errorRef) errorRef.current = error;
     await reader.cancel().catch(() => {});
-    controller.error(new ValidationError(message));
+    controller.error(error);
   };
 
   return new ReadableStream<Uint8Array>({
