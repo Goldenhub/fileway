@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { FilewayClient } from "@fileway/core";
 import { CloudinaryDriver } from "./index.js";
 
 const mockFetch = vi.fn();
@@ -230,6 +231,39 @@ describe("CloudinaryDriver", () => {
       const err = await errPromise;
 
       expect(err.name).toBe("AbortError");
+    });
+
+    it("should report progress while buffering the stream", async () => {
+      mockFetch.mockResolvedValue(
+        mockResponse({
+          public_id: "abc123",
+          secure_url: "https://res.cloudinary.com/demo/image/upload/abc123",
+          resource_type: "image",
+          bytes: 4,
+          version: 1,
+          format: "png",
+        }),
+      );
+
+      const events: Array<{ bytes: number; total?: number; progress?: number }> = [];
+      const stream = new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode("data"));
+          controller.close();
+        },
+      });
+
+      await new FilewayClient({ driver }).upload(stream, {
+        filename: "test.png",
+        size: 4,
+        onProgress: (p) => events.push(p),
+      });
+
+      expect(events.length).toBeGreaterThanOrEqual(1);
+      const last = events[events.length - 1]!;
+      expect(last.bytes).toBe(4);
+      expect(last.total).toBe(4);
+      expect(last.progress).toBe(1);
     });
   });
 

@@ -84,6 +84,22 @@ For multipart uploads (unknown size, > 5 GiB, or `forceMultipart`) the driver
 first sends an `AbortMultipartUpload` (`DELETE ?uploadId=`) so no orphaned parts
 are left on the bucket, then rejects with `AbortError`.
 
+## Progress
+
+Pass `onProgress` to receive `{ bytes, total?, progress? }` as bytes are streamed
+(out of the source, and into each part for multipart). Without `options.size`,
+only cumulative `bytes` is reported:
+
+```ts
+const result = await client.upload(stream, {
+  filename: "large.bin",
+  size: totalBytes,
+  onProgress: ({ bytes, progress }) => {
+    console.log(`${Math.round((progress ?? 0) * 100)}%`);
+  },
+});
+```
+
 ## Download
 
 Stream an object back with `get(path)` — an authenticated SigV4 `GET` whose response body is returned as a WHATWG `ReadableStream<Uint8Array>`:

@@ -319,6 +319,7 @@ const cloudinary = new CloudinaryDriver({
 | `options.metadata` | `Record<string, string>` | Optional metadata |
 | `options.size` | `number` | Optional known byte size. For `S3Driver`, a known size ≤ 5 GiB enables bounded-memory `aws-chunked` streaming (no full buffering); unknown sizes or files > 5 GiB stream with bounded memory via multipart upload. |
 | `options.signal` | `AbortSignal` | Optional `AbortSignal` to cancel an in-flight upload. Drivers reject with a `DOMException` named `AbortError` (via `abortError()` from `@fileway/core`); Local unlinks partial files and S3 aborts orphaned multipart sessions. |
+| `options.onProgress` | `(p: UploadProgress) => void` | Optional progress callback: `{ bytes, total?, progress? }`. Fires as chunks flow through the stream — significant chunks (≥ 256 KiB or ≥ 5% of `total`) report immediately, smaller chunks coalesce to ~1 event per 100 ms, and an exact final event always fires. `total`/`progress` are present only when `options.size` is known. |
 
 Returns `UploadResult<TMeta>` — `{ id, url, path, size, meta }` where `meta` is inferred from the driver.
 
@@ -338,8 +339,8 @@ Returns `UploadResult<TMeta>` — `{ id, url, path, size, meta }` where `meta` i
 - [x] Bounded-memory multipart uploads for S3 — automatic when the size is unknown or the object exceeds 5 GiB (`partSize`, `forceMultipart`)
 - [x] Streaming downloads — `get(path)` returns a `ReadableStream<Uint8Array>` on every driver
 - [x] Upload cancellation — `options.signal` on every driver; aborted uploads reject with `AbortError` (Local cleans up partial files, S3 aborts multipart sessions)
+- [x] Upload progress — `options.onProgress` reports bytes streamed on every driver, with exact final totals when `size` is known
 - [ ] Stream transformation in `beforeUpload` middlewares
-- [ ] Upload progress / lifecycle hooks
 - [ ] Retries with exponential backoff and classified errors
 - [ ] Presigned (signed) URL support for downloads
 

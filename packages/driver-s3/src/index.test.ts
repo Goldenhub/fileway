@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { FilewayClient } from "@fileway/core";
 import { S3Driver } from "./index.js";
 
 const mockFetch = vi.fn();
@@ -430,6 +431,31 @@ describe("S3Driver multipart upload", () => {
     const [, deleteOpts] = mockFetch.mock.calls[1]!;
     expect(String(mockFetch.mock.calls[1]![0])).toContain("uploadId=");
     expect(deleteOpts.method).toBe("DELETE");
+  });
+
+  it("reports upload progress on multipart uploads", async () => {
+    mockMultipart();
+
+    const events: Array<{ bytes: number; total?: number; progress?: number }> = [];
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode("buffered"));
+        controller.close();
+      },
+    });
+
+    const result = await new FilewayClient({ driver }).upload(stream, {
+      filename: "progress.bin",
+      onProgress: (p) => events.push(p),
+    });
+
+    expect(result.size).toBe(8);
+    expect(events.length).toBeGreaterThanOrEqual(1);
+    const last = events[events.length - 1]!;
+    expect(last.bytes).toBe(8);
+    // Unknown size → no total/progress fraction.
+    expect(last.total).toBeUndefined();
+    expect(last.progress).toBeUndefined();
   });
 });
 

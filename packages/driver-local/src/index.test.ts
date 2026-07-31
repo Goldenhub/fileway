@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync, existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { FilewayClient } from "@fileway/core";
 import { LocalDriver } from "./index.js";
 
 describe("LocalDriver", () => {
@@ -128,5 +129,31 @@ describe("LocalDriver", () => {
 
     expect(err.name).toBe("AbortError");
     expect(readdirSync(tmpDir)).toHaveLength(0);
+  });
+
+  it("should report upload progress as bytes are written to disk", async () => {
+    const content = "progress payload";
+    const events: Array<{ bytes: number; total?: number; progress?: number }> = [];
+
+    const result = await new FilewayClient({ driver }).upload(
+      new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode(content));
+          controller.close();
+        },
+      }),
+      {
+        filename: "progress.txt",
+        size: content.length,
+        onProgress: (p) => events.push(p),
+      },
+    );
+
+    expect(result.size).toBe(content.length);
+    expect(events.length).toBeGreaterThanOrEqual(1);
+    const last = events[events.length - 1]!;
+    expect(last.bytes).toBe(content.length);
+    expect(last.total).toBe(content.length);
+    expect(last.progress).toBe(1);
   });
 })

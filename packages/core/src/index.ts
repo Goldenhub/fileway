@@ -1,9 +1,11 @@
 export * from "./types.js";
 export * from "./validation.js";
+export * from "./progress.js";
 
 export const version = "0.0.1";
 
 import { BaseDriver, FilewayConfig, UploadOptions } from "./types.js";
+import { withProgress } from "./progress.js";
 
 export class FilewayClient<const TConfig extends FilewayConfig<BaseDriver>> {
   private driver: TConfig["driver"];
@@ -29,7 +31,11 @@ export class FilewayClient<const TConfig extends FilewayConfig<BaseDriver>> {
       }
     }
 
-    const uploadResult = await this.driver.upload(activeStream, activeOptions);
+    const progressStream = activeOptions.onProgress
+      ? withProgress(activeStream, activeOptions.onProgress, activeOptions.size)
+      : activeStream;
+
+    const uploadResult = await this.driver.upload(progressStream, activeOptions);
 
     for (const middleware of this.middlewares) {
       if (middleware.afterUpload) {

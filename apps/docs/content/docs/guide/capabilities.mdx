@@ -11,6 +11,7 @@ Fileway is intentionally minimal. This page documents exactly what each driver s
 |------------|:---:|:---:|:---:|
 | Upload via `ReadableStream` | ✅ | ✅ | ✅ |
 | Upload cancellation (`AbortSignal`) | ✅ | ✅ | ✅ |
+| Upload progress (`onProgress`) | ✅ | ✅ | ✅ |
 | True streaming (no full buffering) | ✅ | ✅¹ | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> |
 | Multipart upload (large files) | <span style={{ color: "var(--color-fd-primary)" }}>—</span> | ✅ | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> |
 | Public URL retrieval (`getUrl`) | ✅ | ✅ | ✅ |
@@ -104,6 +105,22 @@ try {
 | `LocalDriver` | Destroys the source and destination streams and unlinks the partial file, so nothing is left on disk. |
 | `S3Driver` | Cancels the request and source stream. For multipart uploads it first sends `AbortMultipartUpload` so no orphaned parts remain in the bucket. |
 | `CloudinaryDriver` | Aborts the upload request. |
+
+### Tracking upload progress
+
+Pass `onProgress` in `UploadOptions` to receive `{ bytes, total?, progress? }` as chunks flow through the stream. `total` and `progress` (0..1) are present only when `options.size` is known; otherwise only cumulative `bytes` are reported.
+
+```ts
+const result = await client.upload(stream, {
+  filename: "large.bin",
+  size: totalBytes,
+  onProgress: ({ bytes, progress }) => {
+    updateProgressBar(progress ?? bytes / totalBytes);
+  },
+});
+```
+
+Event cadence is adaptive: a significant chunk (≥ 256 KiB, or ≥ 5% of a known total) reports immediately, while small chunks on fast streams are coalesced to at most one event per 100 ms. An exact final event always fires (`bytes === total`, `progress === 1`), and no event fires on abort. Progress is measured at the client layer as bytes leave the source stream — Local reports as bytes hit disk, S3 as bytes are streamed or buffered into parts, and Cloudinary during its pre-signature `Blob` buffering (its `fetch` upload itself exposes no progress).
 
 ## Retrieval & Pre-signed URLs
 

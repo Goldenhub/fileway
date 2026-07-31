@@ -1,3 +1,12 @@
+export interface UploadProgress {
+  /** Bytes read from the source stream (after `beforeUpload` middleware) so far. */
+  bytes: number;
+  /** Known total (from `options.size`). Absent when the size is unknown. */
+  total?: number;
+  /** Fraction completed (`bytes / total`), 0..1. Present only when `total` is known. */
+  progress?: number;
+}
+
 export interface UploadOptions {
   filename: string;
   mimeType?: string;
@@ -9,6 +18,11 @@ export interface UploadOptions {
    * (e.g. server-side multipart abort) and throw a `DOMException` with
    * `name === "AbortError"`. */
   signal?: AbortSignal;
+  /** Called with progress as chunks flow through the upload stream. Large or
+   * infrequent chunks report immediately; small chunks on fast streams are
+   * throttled to at most one event per 100 ms. A final event always reports the
+   * exact total. Not called on abort. */
+  onProgress?: (progress: UploadProgress) => void;
 }
 
 export interface UploadResult<TMeta extends Record<string, unknown>> {

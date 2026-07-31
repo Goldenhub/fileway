@@ -121,6 +121,23 @@ Note: the source stream is buffered into a `Blob` before the API call (required
 to compute the SHA-1 signature), so cancellation takes effect during the network
 request rather than while reading the stream.
 
+## Progress
+
+Pass `onProgress` to receive `{ bytes, total?, progress? }` as the stream is
+buffered for signing. Cloudinary's upload `fetch` itself exposes no progress, so
+events track this local buffering phase (with `options.size`, `progress` reaches
+exactly `1` once the `Blob` is ready):
+
+```ts
+const result = await client.upload(stream, {
+  filename: "large.mp4",
+  size: totalBytes,
+  onProgress: ({ bytes, progress }) => {
+    console.log(`${Math.round((progress ?? 0) * 100)}%`);
+  },
+});
+```
+
 ## Errors
 
 Throws `ValidationError` (from `@fileway/core`) when:

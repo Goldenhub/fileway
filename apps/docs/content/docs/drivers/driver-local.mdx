@@ -67,6 +67,20 @@ try {
 }
 ```
 
+## Progress
+
+Pass `onProgress` to receive `{ bytes, total?, progress? }` as bytes are written to disk — with `options.size` set, `progress` reaches exactly `1` when the file is fully flushed:
+
+```ts
+const result = await client.upload(stream, {
+  filename: "large.bin",
+  size: totalBytes,
+  onProgress: ({ bytes, progress }) => {
+    console.log(`${Math.round((progress ?? 0) * 100)}%`);
+  },
+});
+```
+
 ## Config
 
 | Option | Type | Default | Description |
