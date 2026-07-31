@@ -11,6 +11,7 @@ Fileway is intentionally minimal. This page documents exactly what each driver s
 |------------|:---:|:---:|:---:|
 | Upload via `ReadableStream` | ✅ | ✅ | ✅ |
 | True streaming (no full buffering) | ✅ | ✅¹ | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> |
+| Multipart upload (large files) | <span style={{ color: "var(--color-fd-primary)" }}>—</span> | ✅ | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> |
 | Public URL retrieval (`getUrl`) | ✅ | ✅ | ✅ |
 | Pre-signed URLs | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> |
 | Download / read-back | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> |
@@ -20,7 +21,7 @@ Fileway is intentionally minimal. This page documents exactly what each driver s
 | TTL / expiration | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> |
 | Lifecycle rules | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> |
 
-Legend: **✅** supported today · **¹** S3 always streams with bounded memory: `aws-chunked` when the size is known, multipart when it is not (see below) · <span style={{ color: "var(--color-fd-primary)" }}>✕</span> not yet supported (in the works).
+Legend: **✅** supported today · **¹** S3 always streams with bounded memory: `aws-chunked` when the size is known, multipart when it is not (see below) · **—** not applicable (streams directly to disk, no parts) · <span style={{ color: "var(--color-fd-primary)" }}>✕</span> not yet supported (in the works).
 
 ## Uploads & Streaming
 
@@ -61,6 +62,18 @@ const result = await client.upload(stream, {
 ```
 
 Without `size`, `S3Driver` still streams with bounded memory via a multipart upload. If the stream ends before or after the declared size, the upload is aborted and fails with a validation error instead of silently storing a corrupted object.
+
+### Multipart uploads
+
+`S3Driver` splits large objects into parts via the S3 multipart flow (`CreateMultipartUpload` → `UploadPart` → `CompleteMultipartUpload`) in three situations:
+
+- the size is unknown — the stream is read into part-sized buffers instead of being buffered whole;
+- the object exceeds 5 GiB, the single-`PUT` cap;
+- `forceMultipart: true` is set.
+
+Multipart parts are uploaded sequentially as the stream fills each buffer, so peak memory is bounded by `partSize` (default 8 MiB, minimum 5 MiB) regardless of object size. If the stream mismatches a declared `size`, the driver aborts the in-flight multipart upload and throws a validation error.
+
+`CloudinaryDriver` has no chunked multipart support: it buffers the full asset into a `Blob` and sends it as a single `multipart/form-data` request, which is why very large files are not recommended there. `LocalDriver` has no concept of parts because it streams straight to disk.
 
 ## Retrieval & Pre-signed URLs
 
