@@ -257,6 +257,51 @@ describeEnv("S3Driver integration against MinIO", () => {
       ),
     ).rejects.toThrow(/expected 1000/);
   });
+
+  it("aborts an in-flight multipart upload and leaves no orphaned object", async () => {
+    const client = new FilewayClient({
+      driver: new S3Driver({
+        bucket,
+        region: "us-east-1",
+        endpoint: base,
+        forcePathStyle: true,
+        credentials: { accessKeyId, secretAccessKey },
+      }),
+    });
+
+    const controller = new AbortController();
+    let released!: () => void;
+    const gate = new Promise<void>((resolve) => (released = resolve));
+
+    // Unknown size forces multipart; the stream stays open until we abort.
+    const stream = new ReadableStream<Uint8Array>({
+      async start(c) {
+        for (let i = 0; i < 16; i++) {
+          c.enqueue(new TextEncoder().encode("abort-me-".repeat(1024)));
+        }
+        await gate;
+        c.close();
+      },
+    });
+
+    const upload = client.upload(stream, {
+      filename: "abort.bin",
+      path: "uploads",
+      signal: controller.signal,
+    });
+    const errPromise = upload.catch((e) => e);
+
+    setTimeout(() => controller.abort(), 200);
+    const err = await errPromise;
+    released();
+
+    expect(err.name).toBe("AbortError");
+
+    // AbortMultipartUpload must have cleaned up the session server-side, so no
+    // object (or partially uploaded parts) is reachable.
+    const gone = await s3Request("GET", "uploads/abort.bin");
+    expect(gone.ok).toBe(false);
+  });
 });
 
 async function sha256Hex(data: Uint8Array): Promise<string> {

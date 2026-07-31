@@ -65,7 +65,7 @@ export class CloudinaryDriver implements BaseDriver<CloudinaryMeta> {
     });
     formData.append("signature", signature);
 
-    const res = await fetch(`https://api.cloudinary.com/v1_1/${this.cloudName}/auto/upload`, { method: "POST", body: formData });
+    const res = await fetch(`https://api.cloudinary.com/v1_1/${this.cloudName}/auto/upload`, { method: "POST", body: formData, signal: options.signal ?? null });
 
     if (!res.ok) {
       throw new Error(`Cloudinary HTTP Upload Failed (${res.status})`);

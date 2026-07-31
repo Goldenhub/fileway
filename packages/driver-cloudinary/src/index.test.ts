@@ -149,6 +149,67 @@ describe("CloudinaryDriver", () => {
         driver.upload(stream, { filename: "test.png" }),
       ).rejects.toThrow("Cloudinary HTTP Upload Failed (400)");
     });
+
+    it("should forward an abort signal to the upload fetch", async () => {
+      let capturedInit: RequestInit | undefined;
+      mockFetch.mockImplementation(async (url: string, init: RequestInit) => {
+        capturedInit = init;
+        return mockResponse({
+          public_id: "abc123",
+          secure_url: "https://res.cloudinary.com/demo/image/upload/abc123",
+          resource_type: "image",
+          bytes: 0,
+          version: 1,
+          format: "png",
+        });
+      });
+
+      const controller = new AbortController();
+      const stream = new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode("data"));
+          controller.close();
+        },
+      });
+
+      await driver.upload(stream, {
+        filename: "test.png",
+        signal: controller.signal,
+      });
+
+      expect(capturedInit!.signal).toBe(controller.signal);
+    });
+
+    it("should reject with AbortError when fetch aborts", async () => {
+      const controller = new AbortController();
+      mockFetch.mockImplementation(
+        (_url: string, init: RequestInit) =>
+          new Promise((_resolve, reject) => {
+            init.signal?.addEventListener(
+              "abort",
+              () => reject(controller.signal.reason),
+              { once: true },
+            );
+          }),
+      );
+
+      const stream = new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode("data"));
+          controller.close();
+        },
+      });
+
+      const upload = driver.upload(stream, {
+        filename: "test.png",
+        signal: controller.signal,
+      });
+      const errPromise = upload.catch((e) => e);
+      setTimeout(() => controller.abort(), 20);
+      const err = await errPromise;
+
+      expect(err.name).toBe("AbortError");
+    });
   });
 
   describe("delete", () => {

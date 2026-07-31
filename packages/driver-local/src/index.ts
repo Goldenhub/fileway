@@ -1,5 +1,5 @@
 import type { BaseDriver, UploadOptions, UploadResult } from "@fileway/core";
-import { validateUploadOptions, ValidationError, urlEncodePath } from "@fileway/core";
+import { validateUploadOptions, ValidationError, urlEncodePath, abortError } from "@fileway/core";
 import { createWriteStream, createReadStream } from "node:fs";
 import { mkdir, unlink, access } from "node:fs/promises";
 import { join, dirname, resolve, relative } from "node:path";
@@ -48,18 +48,45 @@ export class LocalDriver implements BaseDriver<{ localPath: string }> {
 
     const size = await new Promise<number>((resolve, reject) => {
       let bytes = 0;
+      let finished = false;
+
+      const cleanup = (err: unknown) => {
+        nodeStream.destroy();
+        writeStream.destroy();
+        if (finished) {
+          reject(err);
+        } else {
+          // Wait for the partial file to be removed so callers observing the
+          // rejection can rely on the directory being clean.
+          unlink(fullPath)
+            .catch(() => {})
+            .finally(() => reject(err));
+        }
+      };
+
+      const onAbort = () => cleanup(abortError("upload aborted"));
+      if (options.signal) {
+        if (options.signal.aborted) {
+          cleanup(abortError("upload aborted"));
+          return;
+        }
+        options.signal.addEventListener("abort", onAbort, { once: true });
+      }
+
       nodeStream.on("data", (chunk: Buffer) => {
         bytes += chunk.length;
         if (this.maxSizeBytes !== undefined && bytes > this.maxSizeBytes) {
-          writeStream.destroy();
-          nodeStream.destroy();
-          reject(new ValidationError(`upload exceeds maxSizeBytes of ${this.maxSizeBytes}`));
+          cleanup(new ValidationError(`upload exceeds maxSizeBytes of ${this.maxSizeBytes}`));
         }
       });
       nodeStream.pipe(writeStream);
-      writeStream.on("finish", () => resolve(bytes));
-      writeStream.on("error", reject);
-      nodeStream.on("error", reject);
+      writeStream.on("finish", () => {
+        finished = true;
+        options.signal?.removeEventListener("abort", onAbort);
+        resolve(bytes);
+      });
+      writeStream.on("error", cleanup);
+      nodeStream.on("error", cleanup);
     });
 
     const safePath = urlEncodePath(relativePath);

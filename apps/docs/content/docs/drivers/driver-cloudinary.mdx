@@ -75,6 +75,39 @@ const bytes = new Uint8Array(await new Response(stream).arrayBuffer());
 
 Throws with the HTTP status on a non-2xx response (e.g. 404 for a missing asset).
 
+## Cancellation
+
+Pass an `AbortSignal` in `UploadOptions` to cancel an upload in flight:
+
+```ts
+const controller = new AbortController();
+
+const upload = client.upload(stream, {
+  filename: "large.mp4",
+  signal: controller.signal,
+});
+
+// later...
+controller.abort();
+```
+
+The signal is forwarded to the Cloudinary API request; on abort the driver
+rejects with a `DOMException` whose `name` is `AbortError`:
+
+```ts
+try {
+  await upload;
+} catch (err) {
+  if (err instanceof DOMException && err.name === "AbortError") {
+    // cancelled
+  }
+}
+```
+
+Note: the source stream is buffered into a `Blob` before the API call (required
+to compute the SHA-1 signature), so cancellation takes effect during the network
+request rather than while reading the stream.
+
 ## Errors
 
 Throws `ValidationError` (from `@fileway/core`) when:

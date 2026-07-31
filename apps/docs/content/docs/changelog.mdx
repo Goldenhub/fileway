@@ -1,6 +1,11 @@
-# Changelog
+---
+title: Changelog
+description: All notable changes to Fileway
+---
 
-All notable changes to Fileway are documented here. Releases are cut from `main` via the [automated release workflow](.github/workflows/release.yml) with npm provenance (SLSA) attestation on every publish.
+View the canonical source on [GitHub →](https://github.com/Goldenhub/fileway/blob/main/CHANGELOG.md)
+
+All notable changes to Fileway are documented here. Releases are cut from `main` via the [automated release workflow](https://github.com/Goldenhub/fileway/blob/main/.github/workflows/release.yml) with npm provenance (SLSA) attestation on every publish.
 
 ## Unreleased
 
@@ -13,7 +18,7 @@ All notable changes to Fileway are documented here. Releases are cut from `main`
 
 ## Upcoming — v1.0.0
 
-The first stable release. Target scope, tracked on the [roadmap](README.md#roadmap):
+The first stable release. Target scope, tracked on the [roadmap](https://github.com/Goldenhub/fileway#roadmap):
 
 - **Stable public API** — `UploadOptions`, `UploadResult<TMeta>`, `BaseDriver`, and `FilewayClient` lock in 1.0 semantics. Breaking changes become semver-major.
 - **True streaming uploads** — ✅ landed for S3: `aws-chunked` per-chunk SigV4 signing via `options.size`, plus bounded-memory multipart uploads for unknown sizes and very large objects.

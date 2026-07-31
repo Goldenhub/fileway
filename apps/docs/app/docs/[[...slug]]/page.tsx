@@ -12,6 +12,8 @@ export default async function Page(props: { params: Promise<{ slug?: string[] }>
 
   if (!page) notFound();
 
+  const isChangelog = page.slugs.length === 1 && page.slugs[0] === "changelog";
+
   const MDX = page.data.body;
 
   const articleJsonLd = {
@@ -53,7 +55,11 @@ export default async function Page(props: { params: Promise<{ slug?: string[] }>
   };
 
   return (
-    <DocsPage toc={page.data.toc} full={page.data.full}>
+    <DocsPage
+      toc={page.data.toc}
+      full={page.data.full}
+      footer={isChangelog ? { enabled: false } : undefined}
+    >
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(articleJsonLd) }}

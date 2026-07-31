@@ -243,6 +243,47 @@ describe("S3Driver streaming upload (known size)", () => {
     expect(partOpts.method).toBe("PUT");
     expect(new TextDecoder().decode(partOpts.body as Uint8Array)).toBe("buffered");
   });
+
+  it("should abort an in-flight streaming upload with AbortError", async () => {
+    const controller = new AbortController();
+    // Mirrors undici: the request hangs until the signal aborts, at which point
+    // the body stream is cancelled.
+    mockFetch.mockImplementation((_input, init) => {
+      const body = init?.body as ReadableStream<Uint8Array> | undefined;
+      return new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener(
+          "abort",
+          () => {
+            body?.cancel().catch(() => {});
+            reject(controller.signal.reason);
+          },
+          { once: true },
+        );
+      });
+    });
+
+    let sourceCancelled = false;
+    const stream = new ReadableStream<Uint8Array>({
+      start(c) {
+        c.enqueue(new TextEncoder().encode("data"));
+      },
+      cancel() {
+        sourceCancelled = true;
+      },
+    });
+
+    const upload = driver.upload(stream, {
+      filename: "big.bin",
+      size: 100,
+      signal: controller.signal,
+    });
+    const errPromise = upload.catch((e) => e);
+    setTimeout(() => controller.abort(), 20);
+    const err = await errPromise;
+
+    expect(err.name).toBe("AbortError");
+    expect(sourceCancelled).toBe(true);
+  });
 });
 
 describe("S3Driver multipart upload", () => {
@@ -356,6 +397,39 @@ describe("S3Driver multipart upload", () => {
 
     const [, putOpts] = mockFetch.mock.calls[2]!;
     expect((putOpts.body as Uint8Array).byteLength).toBe(0);
+  });
+
+  it("aborts the multipart session server-side when cancelled", async () => {
+    const controller = new AbortController();
+    let released!: () => void;
+    const gate = new Promise<void>((resolve) => (released = resolve));
+    const stream = new ReadableStream<Uint8Array>({
+      async start(c) {
+        c.enqueue(new TextEncoder().encode("data"));
+        await gate; // hold mid-upload
+        c.close();
+      },
+    });
+    mockMultipart();
+
+    const upload = driver.upload(stream, {
+      filename: "big.bin",
+      signal: controller.signal,
+    });
+    const errPromise = upload.catch((e) => e);
+    setTimeout(() => controller.abort(), 20);
+    const err = await errPromise;
+    released();
+
+    expect(err.name).toBe("AbortError");
+
+    // create + AbortMultipartUpload (DELETE), no part upload or complete.
+    const methods = mockFetch.mock.calls.map((c) => (c[1] as RequestInit).method);
+    expect(methods).toEqual(["POST", "DELETE"]);
+
+    const [, deleteOpts] = mockFetch.mock.calls[1]!;
+    expect(String(mockFetch.mock.calls[1]![0])).toContain("uploadId=");
+    expect(deleteOpts.method).toBe("DELETE");
   });
 });
 

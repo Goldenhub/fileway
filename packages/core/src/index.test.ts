@@ -1,10 +1,19 @@
 import { describe, it, expect, vi } from "vitest";
-import { FilewayClient, version } from "./index.js";
+import { FilewayClient, version, abortError } from "./index.js";
 import type { BaseDriver, UploadOptions } from "./types.js";
 
 describe("version", () => {
   it("should export the current version", () => {
     expect(version).toBe("0.0.1");
+  });
+});
+
+describe("abortError", () => {
+  it("should create a DOMException named AbortError", () => {
+    const err = abortError("upload aborted");
+    expect(err.name).toBe("AbortError");
+    expect(err.message).toBe("upload aborted");
+    expect(err instanceof DOMException).toBe(true);
   });
 });
 
@@ -104,5 +113,19 @@ describe("FilewayClient", () => {
 
     expect(driver.get).toHaveBeenCalledWith("/uploads/test.txt");
     expect(stream).toBeInstanceOf(ReadableStream);
+  });
+
+  it("should forward an abort signal to the driver", async () => {
+    const driver = createMockDriver();
+    const client = new FilewayClient({ driver });
+    const controller = new AbortController();
+    const options: UploadOptions = { filename: "test.txt", signal: controller.signal };
+
+    await client.upload(new ReadableStream(), options);
+
+    expect(driver.upload).toHaveBeenCalledWith(
+      expect.any(ReadableStream),
+      expect.objectContaining({ signal: controller.signal }),
+    );
   });
 });

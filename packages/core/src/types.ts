@@ -5,6 +5,10 @@ export interface UploadOptions {
   metadata?: Record<string, string>;
   /** Known byte length of the stream. Enables zero-buffer streaming uploads on drivers that need it (e.g. S3). */
   size?: number;
+  /** Aborts the upload in flight. Drivers stop reading the stream, clean up
+   * (e.g. server-side multipart abort) and throw a `DOMException` with
+   * `name === "AbortError"`. */
+  signal?: AbortSignal;
 }
 
 export interface UploadResult<TMeta extends Record<string, unknown>> {

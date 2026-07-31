@@ -5,6 +5,13 @@ export class ValidationError extends Error {
   }
 }
 
+/** Returns a standard `DOMException` with `name === "AbortError"`, the same
+ * error `fetch` throws when its signal aborts. Callers can detect cancellation
+ * with `error.name === "AbortError"` regardless of driver. */
+export function abortError(message = "operation aborted"): DOMException {
+  return new DOMException(message, "AbortError");
+}
+
 export function validateUploadOptions(options: {
   filename: string;
   path?: string;

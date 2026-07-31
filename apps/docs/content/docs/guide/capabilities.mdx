@@ -10,6 +10,7 @@ Fileway is intentionally minimal. This page documents exactly what each driver s
 | Capability | `LocalDriver` | `S3Driver` | `CloudinaryDriver` |
 |------------|:---:|:---:|:---:|
 | Upload via `ReadableStream` | ✅ | ✅ | ✅ |
+| Upload cancellation (`AbortSignal`) | ✅ | ✅ | ✅ |
 | True streaming (no full buffering) | ✅ | ✅¹ | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> |
 | Multipart upload (large files) | <span style={{ color: "var(--color-fd-primary)" }}>—</span> | ✅ | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> |
 | Public URL retrieval (`getUrl`) | ✅ | ✅ | ✅ |
@@ -74,6 +75,35 @@ Without `size`, `S3Driver` still streams with bounded memory via a multipart upl
 Multipart parts are uploaded sequentially as the stream fills each buffer, so peak memory is bounded by `partSize` (default 8 MiB, minimum 5 MiB) regardless of object size. If the stream mismatches a declared `size`, the driver aborts the in-flight multipart upload and throws a validation error.
 
 `CloudinaryDriver` has no chunked multipart support: it buffers the full asset into a `Blob` and sends it as a single `multipart/form-data` request, which is why very large files are not recommended there. `LocalDriver` has no concept of parts because it streams straight to disk.
+
+### Cancelling uploads
+
+Pass an `AbortSignal` in `UploadOptions` to cancel an in-flight upload. On abort, every driver rejects with a `DOMException` named `AbortError` (detectable via `err.name === "AbortError"` or `abortError()` from `@fileway/core`):
+
+```ts
+const controller = new AbortController();
+
+const upload = client.upload(stream, {
+  filename: "large.bin",
+  signal: controller.signal,
+});
+
+controller.abort();
+
+try {
+  await upload;
+} catch (err) {
+  if (err.name === "AbortError") {
+    // cancelled — cleanly
+  }
+}
+```
+
+| Driver | Behavior on abort |
+|--------|-------------------|
+| `LocalDriver` | Destroys the source and destination streams and unlinks the partial file, so nothing is left on disk. |
+| `S3Driver` | Cancels the request and source stream. For multipart uploads it first sends `AbortMultipartUpload` so no orphaned parts remain in the bucket. |
+| `CloudinaryDriver` | Aborts the upload request. |
 
 ## Retrieval & Pre-signed URLs
 

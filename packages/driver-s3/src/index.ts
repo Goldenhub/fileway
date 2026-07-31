@@ -1,5 +1,5 @@
 import type { BaseDriver, UploadOptions, UploadResult } from "@fileway/core";
-import { validateUploadOptions, ValidationError, urlEncodePath } from "@fileway/core";
+import { validateUploadOptions, ValidationError, urlEncodePath, abortError } from "@fileway/core";
 import { buildCanonicalQueryString, createStreamingBody, sign, signStreamingRequest, sha256 } from "./sigv4.js";
 
 const randomUUID = () => globalThis.crypto.randomUUID();
@@ -74,6 +74,7 @@ export class S3Driver implements BaseDriver<{ bucket: string; etag?: string }> {
         metaHeaders,
         typeHeader,
         cred,
+        ...(options.signal !== undefined ? { signal: options.signal } : {}),
         ...(options.size !== undefined ? { expectedSize: options.size } : {}),
       });
     }
@@ -112,6 +113,7 @@ export class S3Driver implements BaseDriver<{ bucket: string; etag?: string }> {
         // Node's fetch (undici) requires `duplex: "half"` for stream bodies;
         // other runtimes ignore it.
         duplex: "half",
+        signal: options.signal ?? null,
       } as RequestInit);
     } catch (err) {
       // An errored body (e.g. size mismatch) surfaces as a generic `fetch
@@ -147,10 +149,11 @@ export class S3Driver implements BaseDriver<{ bucket: string; etag?: string }> {
       metaHeaders: Record<string, string>;
       typeHeader: string;
       cred: { accessKeyId: string; secretAccessKey: string };
+      signal?: AbortSignal;
       expectedSize?: number;
     },
   ): Promise<UploadResult<{ bucket: string; etag?: string }>> {
-    const { id, key, metaHeaders, typeHeader, expectedSize } = args;
+    const { id, key, metaHeaders, typeHeader, signal, expectedSize } = args;
     const cred = { ...args.cred, region: this.config.region!, service: SERVICE };
     const now = new Date();
 
@@ -168,6 +171,7 @@ export class S3Driver implements BaseDriver<{ bucket: string; etag?: string }> {
     const createRes = await fetch(create.url, {
       method: "POST",
       headers: { ...createHeaders, ...metaHeaders, "content-type": typeHeader },
+      signal: signal ?? null,
     });
     if (!createRes.ok) {
       const body = await createRes.text().catch(() => "");
@@ -183,6 +187,27 @@ export class S3Driver implements BaseDriver<{ bucket: string; etag?: string }> {
     // 2. UploadPart — stream into one part-sized buffer at a time, so peak
     // memory is bounded by `partSize` regardless of file size.
     const reader = stream.getReader();
+    let aborted = false;
+    const onAbort = () => {
+      aborted = true;
+      // Cancelling the reader wakes any pending `read()` with `done: true`,
+      // so an abort is noticed even when the producer is mid-stream.
+      reader.cancel().catch(() => {});
+    };
+    if (signal) {
+      if (signal.aborted) {
+        aborted = true;
+      } else {
+        signal.addEventListener("abort", onAbort, { once: true });
+      }
+    }
+    const ensureNotAborted = async () => {
+      if (aborted) {
+        await abort();
+        throw abortError("upload aborted");
+      }
+    };
+
     let buffer: Uint8Array[] = [];
     let bufferedLen = 0;
     let totalBytes = 0;
@@ -200,11 +225,20 @@ export class S3Driver implements BaseDriver<{ bucket: string; etag?: string }> {
         now,
         { partNumber: String(partNumber), uploadId },
       );
-      const res = await fetch(part.url, {
-        method: "PUT",
-        headers: { ...partSig, "content-length": String(bytes.byteLength) },
-        body: bytes as BodyInit,
-      });
+      let res: Response;
+      try {
+        res = await fetch(part.url, {
+          method: "PUT",
+          headers: { ...partSig, "content-length": String(bytes.byteLength) },
+          body: bytes as BodyInit,
+          signal: signal ?? null,
+        });
+      } catch (err) {
+        // Includes abort: undo the server-side multipart session, then rethrow
+        // the original error (an AbortError when the user cancelled).
+        await abort();
+        throw err;
+      }
       if (!res.ok) {
         await abort();
         throw new Error(`S3 multipart part ${partNumber} failed: ${res.status} ${res.statusText}`);
@@ -213,71 +247,78 @@ export class S3Driver implements BaseDriver<{ bucket: string; etag?: string }> {
       parts.push({ partNumber: partNumber++, etag: etag ?? `"${await sha256(bytes)}"` });
     };
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      totalBytes += value.byteLength;
-      buffer.push(value);
-      bufferedLen += value.byteLength;
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        await ensureNotAborted();
+        if (done) break;
+        totalBytes += value.byteLength;
+        buffer.push(value);
+        bufferedLen += value.byteLength;
 
-      if (bufferedLen >= this.partSize) {
-        const merged = concatBytes(buffer, bufferedLen);
-        await uploadPart(merged.subarray(0, this.partSize));
-        const rest = merged.subarray(this.partSize);
-        buffer = rest.byteLength > 0 ? [rest] : [];
-        bufferedLen = rest.byteLength;
+        if (bufferedLen >= this.partSize) {
+          const merged = concatBytes(buffer, bufferedLen);
+          await uploadPart(merged.subarray(0, this.partSize));
+          const rest = merged.subarray(this.partSize);
+          buffer = rest.byteLength > 0 ? [rest] : [];
+          bufferedLen = rest.byteLength;
+        }
       }
-    }
 
-    if (expectedSize !== undefined && totalBytes !== expectedSize) {
-      await abort();
-      throw new ValidationError(`stream delivered ${totalBytes} bytes, expected ${expectedSize}`);
-    }
+      if (expectedSize !== undefined && totalBytes !== expectedSize) {
+        await abort();
+        throw new ValidationError(`stream delivered ${totalBytes} bytes, expected ${expectedSize}`);
+      }
 
-    if (parts.length === 0 && bufferedLen === 0) {
-      // An empty stream can't be represented as a zero-part multipart upload;
-      // abort it and fall back to a single empty PUT.
-      await abort();
-      return this.singlePut(id, key, new Uint8Array(0), metaHeaders, typeHeader, args.cred);
-    }
+      if (parts.length === 0 && bufferedLen === 0) {
+        // An empty stream can't be represented as a zero-part multipart upload;
+        // abort it and fall back to a single empty PUT.
+        await abort();
+        return this.singlePut(id, key, new Uint8Array(0), metaHeaders, typeHeader, args.cred, signal);
+      }
 
-    if (bufferedLen > 0) {
-      await uploadPart(concatBytes(buffer, bufferedLen));
-    }
+      if (bufferedLen > 0) {
+        await uploadPart(concatBytes(buffer, bufferedLen));
+      }
 
-    // 3. CompleteMultipartUpload.
-    const complete = buildEndpoint(this.config, key, { uploadId });
-    const xmlBytes = new TextEncoder().encode(buildCompleteXml(parts));
-    const completeHeaders = await sign(
-      "POST",
-      complete.canonicalPath,
-      { host: complete.host },
-      await sha256(xmlBytes),
-      cred,
-      now,
-      { uploadId },
-    );
-    const completeRes = await fetch(complete.url, {
-      method: "POST",
-      headers: { ...completeHeaders, "content-type": "application/xml" },
-      body: xmlBytes,
-    });
-    if (!completeRes.ok) {
-      await abort();
-      throw new Error(`S3 multipart complete failed: ${completeRes.status} ${completeRes.statusText}`);
-    }
-    const etag = extractXml(await completeRes.text(), "ETag");
+      // 3. CompleteMultipartUpload.
+      await ensureNotAborted();
+      const complete = buildEndpoint(this.config, key, { uploadId });
+      const xmlBytes = new TextEncoder().encode(buildCompleteXml(parts));
+      const completeHeaders = await sign(
+        "POST",
+        complete.canonicalPath,
+        { host: complete.host },
+        await sha256(xmlBytes),
+        cred,
+        now,
+        { uploadId },
+      );
+      const completeRes = await fetch(complete.url, {
+        method: "POST",
+        headers: { ...completeHeaders, "content-type": "application/xml" },
+        body: xmlBytes,
+        signal: signal ?? null,
+      });
+      if (!completeRes.ok) {
+        await abort();
+        throw new Error(`S3 multipart complete failed: ${completeRes.status} ${completeRes.statusText}`);
+      }
+      const etag = extractXml(await completeRes.text(), "ETag");
 
-    return {
-      id,
-      url: `${this.baseUrl}/${urlEncodePath(key)}`,
-      path: key,
-      size: totalBytes,
-      meta: {
-        bucket: this.config.bucket,
-        ...(etag ? { etag } : {}),
-      },
-    };
+      return {
+        id,
+        url: `${this.baseUrl}/${urlEncodePath(key)}`,
+        path: key,
+        size: totalBytes,
+        meta: {
+          bucket: this.config.bucket,
+          ...(etag ? { etag } : {}),
+        },
+      };
+    } finally {
+      signal?.removeEventListener("abort", onAbort);
+    }
   }
 
   private async singlePut(
@@ -287,6 +328,7 @@ export class S3Driver implements BaseDriver<{ bucket: string; etag?: string }> {
     metaHeaders: Record<string, string>,
     typeHeader: string,
     baseCred: { accessKeyId: string; secretAccessKey: string },
+    signal?: AbortSignal,
   ): Promise<UploadResult<{ bucket: string; etag?: string }>> {
     const cred = { ...baseCred, region: this.config.region!, service: SERVICE };
     const now = new Date();
@@ -310,6 +352,7 @@ export class S3Driver implements BaseDriver<{ bucket: string; etag?: string }> {
         "content-length": String(bytes.byteLength),
       },
       body: bytes as BodyInit,
+      signal: signal ?? null,
     });
     if (!response.ok) {
       const body = await response.text().catch(() => "");

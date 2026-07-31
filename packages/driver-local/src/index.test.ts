@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync, existsSync, readFileSync } from "node:fs";
+import { mkdtempSync, rmSync, existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { LocalDriver } from "./index.js";
@@ -101,5 +101,32 @@ describe("LocalDriver", () => {
 
   it("should reject a path that escapes the directory", async () => {
     await expect(driver.get("../evil.txt")).rejects.toThrow(/escapes/);
+  });
+
+  it("should abort an in-flight upload and remove the partial file", async () => {
+    const controller = new AbortController();
+    let released!: () => void;
+    const gate = new Promise<void>((resolve) => (released = resolve));
+
+    const stream = new ReadableStream({
+      async start(c) {
+        c.enqueue(new TextEncoder().encode("chunk"));
+        await gate; // keep the stream open mid-upload
+        c.close();
+      },
+    });
+
+    const upload = driver.upload(stream, {
+      filename: "abort.txt",
+      signal: controller.signal,
+    });
+    const errPromise = upload.catch((e) => e);
+
+    setTimeout(() => controller.abort(), 20);
+    const err = await errPromise;
+    released();
+
+    expect(err.name).toBe("AbortError");
+    expect(readdirSync(tmpDir)).toHaveLength(0);
   });
 })

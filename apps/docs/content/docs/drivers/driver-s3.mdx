@@ -51,6 +51,39 @@ const result = await client.upload(fileStream, {
 - If the stream ends before or after the declared `size`, the driver aborts the upload and throws a validation error — a truncated or oversized object is never stored.
 - Use `partSize` to tune the multipart chunk size, and `forceMultipart` to always go through multipart.
 
+## Cancellation
+
+Pass an `AbortSignal` in `UploadOptions` to cancel an upload in flight:
+
+```ts
+const controller = new AbortController();
+
+const upload = client.upload(stream, {
+  filename: "large.bin",
+  signal: controller.signal,
+});
+
+// later...
+controller.abort();
+```
+
+On abort the driver cancels the source stream and rejects with a `DOMException`
+whose `name` is `AbortError`:
+
+```ts
+try {
+  await upload;
+} catch (err) {
+  if (err instanceof DOMException && err.name === "AbortError") {
+    // cancelled
+  }
+}
+```
+
+For multipart uploads (unknown size, > 5 GiB, or `forceMultipart`) the driver
+first sends an `AbortMultipartUpload` (`DELETE ?uploadId=`) so no orphaned parts
+are left on the bucket, then rejects with `AbortError`.
+
 ## Download
 
 Stream an object back with `get(path)` — an authenticated SigV4 `GET` whose response body is returned as a WHATWG `ReadableStream<Uint8Array>`:
