@@ -12,7 +12,12 @@
       "require": "./dist/index.cjs"
     }
   },
+  "files": ["dist"],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
+    "prepublishOnly": "tsup",
     "build": "tsup",
     "test": "vitest run"
   },

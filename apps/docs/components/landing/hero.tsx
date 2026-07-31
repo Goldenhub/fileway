@@ -38,7 +38,7 @@ export function Hero() {
             Get Started
           </Link>
           <a
-            href="https://github.com/anomalyco/fileway"
+            href="https://github.com/Goldenhub/fileway"
             target="_blank"
             rel="noopener noreferrer"
             className="inline-flex items-center gap-2 rounded-md border px-6 py-3 font-sans text-[14px] font-[500] transition-colors hover:text-white" style={{ borderColor: "var(--lp-border)", color: "var(--lp-muted)" }}

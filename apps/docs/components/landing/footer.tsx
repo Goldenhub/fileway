@@ -17,7 +17,7 @@ Fileway
             Documentation
           </Link>
           <a
-            href="https://github.com/anomalyco/fileway"
+            href="https://github.com/Goldenhub/fileway"
             className="font-sans text-[13px] transition-colors hover:text-white" style={{ color: "var(--lp-muted)" }}
             target="_blank"
             rel="noopener noreferrer"
