@@ -68,8 +68,10 @@ Stream an asset back from the CDN with `get(publicId)` — it fetches the asset'
 
 ```ts
 const stream = await client.get(result.meta.publicId);
-const text = await new Response(stream).text();
+const bytes = new Uint8Array(await new Response(stream).arrayBuffer());
 ```
+
+`stream` is a WHATWG `ReadableStream<Uint8Array>`, so you can also pipe it straight to its destination (`stream.pipeTo(writable)`) with no buffering. Use `.arrayBuffer()`/`.blob()` for binary files — `.text()` would decode binary data as UTF-8 and corrupt it.
 
 Throws with the HTTP status on a non-2xx response (e.g. 404 for a missing asset).
 

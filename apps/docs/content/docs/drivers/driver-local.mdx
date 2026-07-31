@@ -30,8 +30,10 @@ Stream a stored file back from disk with `get(path)` — it returns a WHATWG `Re
 
 ```ts
 const stream = await client.get("users/123/avatars/photo.jpg");
-const text = await new Response(stream).text();
+const bytes = new Uint8Array(await new Response(stream).arrayBuffer());
 ```
+
+`stream` is a WHATWG `ReadableStream<Uint8Array>`, so you can also pipe it straight to its destination (`stream.pipeTo(writable)`) with no buffering. Use `.arrayBuffer()`/`.blob()` for binary files — `.text()` would decode binary data as UTF-8 and corrupt it.
 
 Throws if the file does not exist or if `path` escapes the configured `directory`.
 

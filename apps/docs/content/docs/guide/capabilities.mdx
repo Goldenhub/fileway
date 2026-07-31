@@ -97,10 +97,10 @@ Every driver streams a stored file back as a WHATWG `ReadableStream<Uint8Array>`
 
 ```ts
 const stream = await client.get("uploads/report.pdf"); // ReadableStream<Uint8Array>
-const text = await new Response(stream).text();
+const bytes = new Uint8Array(await new Response(stream).arrayBuffer());
 ```
 
-The stream is pull-based with backpressure, so files are never buffered whole on the way down:
+The stream is pull-based with backpressure, so files are never buffered whole on the way down. It can be piped straight to a destination (`stream.pipeTo(writable)`); for binary files use `.arrayBuffer()`/`.blob()` rather than `.text()`, which would decode binary data as UTF-8 and corrupt it.
 
 | Driver | Behavior |
 |--------|----------|
