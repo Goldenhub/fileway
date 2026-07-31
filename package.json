@@ -3,6 +3,7 @@
   "version": "0.0.3",
   "private": true,
   "description": "",
+  "packageManager": "pnpm@11.11.0",
   "engines": {
     "node": ">=20.0.0",
     "pnpm": ">=10.0.0"
@@ -10,6 +11,15 @@
   "scripts": {
     "build": "pnpm --filter \"@fileway/*\" run build",
     "test": "pnpm --filter \"@fileway/*\" run test",
+    "typecheck": "pnpm --filter \"@fileway/core\" --filter \"@fileway/driver-*\" exec tsc --noEmit -p tsconfig.json",
+    "test:integration": "RUN_MINIO_TESTS=1 pnpm --filter @fileway/driver-s3 exec vitest run src/minio.integration.test.ts",
+    "version:patch": "pnpm -r version patch --no-git-tag-version",
+    "version:minor": "pnpm -r version minor --no-git-tag-version",
+    "version:major": "pnpm -r version major --no-git-tag-version",
+    "release:commit": "git add -A && git commit -m \"chore: release v$(node -p \"require('./packages/core/package.json').version\")\"",
+    "release:tag": "git tag v$(node -p \"require('./packages/core/package.json').version\")",
+    "release:push": "git push origin main --tags",
+    "release": "pnpm run version:patch && pnpm run release:commit && pnpm run release:tag && pnpm run release:push",
     "test:local": "npx tsx scripts/test-local.mjs",
     "test:s3:aws": "npx tsx scripts/test-s3-aws.mjs",
     "test:s3:minio": "npx tsx scripts/test-s3-minio.mjs",

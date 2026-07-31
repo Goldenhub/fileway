@@ -1,5 +1,9 @@
 # Fileway
 
+[![CI](https://img.shields.io/github/actions/workflow/status/Goldenhub/fileway/ci.yml?branch=main&style=flat-square)](https://github.com/Goldenhub/fileway/actions)
+[![npm version](https://img.shields.io/npm/v/@fileway/core?style=flat-square)](https://www.npmjs.com/package/@fileway/core)
+[![bundle size](https://img.shields.io/bundlephobia/minzip/@fileway/core?style=flat-square)](https://bundlephobia.com/package/@fileway/core)
+
 **Runtime-agnostic file storage engine for JavaScript/TypeScript.**
 
 Fileway is a thin, type-safe wrapper around any storage backend. Upload files via `ReadableStream<Uint8Array>`, get back typed results. Swap drivers without changing your application code.
@@ -163,6 +167,47 @@ Returns `Promise<boolean>` — `true` if the file existed and was deleted.
 
 Returns `Promise<string>` — public URL for the file.
 
+## CI & Releases
+
+### Continuous integration
+
+Every push to `main` and every pull request runs [`.github/workflows/ci.yml`](.github/workflows/ci.yml):
+
+- Typecheck all packages and the docs site
+- Build all packages
+- Unit tests across all four packages
+- S3 integration tests against a real MinIO server (Docker service container)
+- Docs typecheck
+
+### Releasing
+
+Releases are fully automated. Bump the versions, tag, and push — GitHub publishes all four packages to npm:
+
+```bash
+pnpm -r version patch   # bumps all packages (0.0.3 -> 0.0.4)
+git add -A && git commit -m "chore: release v0.0.4"
+git tag v0.0.4
+git push origin main --tags
+```
+
+[`.github/workflows/release.yml`](.github/workflows/release.yml) then:
+
+1. Verifies every `package.json` version matches the tag (`v0.0.4` -> `0.0.4`)
+2. Builds all packages
+3. Runs `pnpm -r publish --access public --provenance`
+
+**No `NPM_TOKEN` is stored anywhere.** Publishing uses **npm Trusted Publishers (OIDC)**: GitHub mints a short-lived identity token that npm exchanges for publish permission, and every release ships with SLSA provenance attestation (cryptographic proof of build origin).
+
+One-time npm setup (per package, on the package's npm page → Settings → **Trusted Publisher** → GitHub Actions):
+
+| Field              | Value          |
+| ------------------ | -------------- |
+| Organization / user| `Goldenhub`    |
+| Repository         | `fileway`      |
+| Workflow filename  | `release.yml`  |
+| Environment name   | *(blank)*      |
+| Allowed actions    | `npm publish`  |
+
 ## Development
 
 ```bash
@@ -172,8 +217,14 @@ pnpm install
 # Build all packages
 pnpm build
 
+# Typecheck all packages
+pnpm typecheck
+
 # Run tests across all packages
 pnpm test
+
+# S3 integration tests against a local MinIO (needs Docker running)
+pnpm test:integration
 
 # Test a driver manually
 pnpm test:local

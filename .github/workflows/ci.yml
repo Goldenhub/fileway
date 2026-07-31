@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Typecheck, Build & Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    services:
+      minio:
+        image: quay.io/minio/minio:latest
+        ports:
+          - 9000:9000
+        env:
+          MINIO_ROOT_USER: minioadmin
+          MINIO_ROOT_PASSWORD: minioadmin
+        options: >-
+          --health-cmd "curl -f http://localhost:9000/minio/health/live || exit 1"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+          --health-start-period 5s
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.11.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck packages
+        run: pnpm typecheck
+
+      - name: Build packages
+        run: pnpm build
+
+      - name: Unit tests
+        run: pnpm test
+
+      - name: S3 integration tests (MinIO)
+        run: pnpm --filter @fileway/driver-s3 exec vitest run src/minio.integration.test.ts
+        env:
+          RUN_MINIO_TESTS: "1"
+          S3_ENDPOINT: http://localhost:9000
+          S3_BUCKET: fileway-ci
+          MINIO_ACCESS_KEY: minioadmin
+          MINIO_SECRET_KEY: minioadmin
+
+      - name: Docs typecheck
+        run: pnpm --filter @fileway/docs run types:check

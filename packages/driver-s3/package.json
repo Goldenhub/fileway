@@ -1,6 +1,11 @@
 {
   "name": "@fileway/driver-s3",
   "version": "0.0.3",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Goldenhub/fileway.git"
+  },
   "type": "module",
   "types": "./dist/index.d.ts",
   "exports": {
@@ -17,7 +22,8 @@
     "dist"
   ],
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "provenance": true
   },
   "scripts": {
     "prepublishOnly": "tsup",
