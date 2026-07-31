@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { BetterPushClient, version } from "./index.js";
+import { FilewayClient, version } from "./index.js";
 import type { BaseDriver, UploadOptions } from "./types.js";
 
 describe("version", () => {
@@ -8,7 +8,7 @@ describe("version", () => {
   });
 });
 
-describe("BetterPushClient", () => {
+describe("FilewayClient", () => {
   const createMockDriver = (): BaseDriver => {
     let counter = 0;
     return {
@@ -35,7 +35,7 @@ describe("BetterPushClient", () => {
 
   it("should call driver.upload with stream and options", async () => {
     const driver = createMockDriver();
-    const client = new BetterPushClient({ driver });
+    const client = new FilewayClient({ driver });
     const stream = new ReadableStream();
     const options: UploadOptions = { filename: "test.txt" };
 
@@ -66,7 +66,7 @@ describe("BetterPushClient", () => {
       },
     ];
 
-    const client = new BetterPushClient({ driver, middlewares });
+    const client = new FilewayClient({ driver, middlewares });
     const stream = new ReadableStream();
     const options: UploadOptions = { filename: "test.txt" };
 
@@ -77,7 +77,7 @@ describe("BetterPushClient", () => {
 
   it("should call driver.delete", async () => {
     const driver = createMockDriver();
-    const client = new BetterPushClient({ driver });
+    const client = new FilewayClient({ driver });
 
     const result = await client.delete("/uploads/test.txt");
 
@@ -87,7 +87,7 @@ describe("BetterPushClient", () => {
 
   it("should call driver.getUrl", async () => {
     const driver = createMockDriver();
-    const client = new BetterPushClient({ driver });
+    const client = new FilewayClient({ driver });
 
     const url = await client.getUrl("/uploads/test.txt");
 

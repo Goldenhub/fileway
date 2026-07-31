@@ -7,7 +7,7 @@ const drivers = [
     name: "Local",
     desc: "Native Node.js streams for local filesystem storage. Perfect for development and single-server deployments.",
     href: "/docs/drivers/driver-local",
-    code: `new BetterPushClient({
+    code: `new FilewayClient({
   driver: new LocalDriver({
     directory: "./storage"
   })
@@ -18,7 +18,7 @@ const drivers = [
     name: "S3",
     desc: "AWS S3 and Cloudflare R2 via FetchHttpHandler. Multipart uploads, edge-compatible, no native modules.",
     href: "/docs/drivers/driver-s3",
-    code: `new BetterPushClient({
+    code: `new FilewayClient({
   driver: new S3Driver({
     bucket: "my-bucket",
     region: "us-east-1"
@@ -30,7 +30,7 @@ const drivers = [
     name: "Cloudinary",
     desc: "Pure fetch + Web Crypto signatures. Zero Node deps — works on any runtime with zero polyfills.",
     href: "/docs/drivers/driver-cloudinary",
-    code: `new BetterPushClient({
+    code: `new FilewayClient({
   driver: new CloudinaryDriver({
     cloudName: "my-cloud"
   })

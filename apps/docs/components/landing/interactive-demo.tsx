@@ -8,10 +8,10 @@ const drivers = [
     id: "local",
     label: "Local",
     description: "Local filesystem via Node.js streams",
-    code: `import { BetterPushClient } from "@betterpush/core"
-import { LocalDriver } from "@betterpush/driver-local"
+    code: `import { FilewayClient } from "@fileway/core"
+import { LocalDriver } from "@fileway/driver-local"
 
-const client = new BetterPushClient({
+const client = new FilewayClient({
   driver: new LocalDriver({
     directory: "./uploads",
     baseUrl: "/files",
@@ -28,10 +28,10 @@ const result = await client.upload(stream, {
     id: "s3",
     label: "Amazon S3",
     description: "AWS S3, Cloudflare R2, MinIO, DigitalOcean",
-    code: `import { BetterPushClient } from "@betterpush/core"
-import { S3Driver } from "@betterpush/driver-s3"
+    code: `import { FilewayClient } from "@fileway/core"
+import { S3Driver } from "@fileway/driver-s3"
 
-const client = new BetterPushClient({
+const client = new FilewayClient({
   driver: new S3Driver({
     bucket: "my-bucket",
     region: "us-east-1",
@@ -49,10 +49,10 @@ const result = await client.upload(stream, {
     id: "r2",
     label: "Cloudflare R2",
     description: "S3-compatible, zero egress fees",
-    code: `import { BetterPushClient } from "@betterpush/core"
-import { S3Driver } from "@betterpush/driver-s3"
+    code: `import { FilewayClient } from "@fileway/core"
+import { S3Driver } from "@fileway/driver-s3"
 
-const client = new BetterPushClient({
+const client = new FilewayClient({
   driver: new S3Driver({
     bucket: "my-bucket",
     endpoint: "https://<account>.r2.cloudflarestorage.com",
@@ -69,10 +69,10 @@ const result = await client.upload(stream, {
     id: "cloudinary",
     label: "Cloudinary",
     description: "Pure fetch + Web Crypto, zero Node deps",
-    code: `import { BetterPushClient } from "@betterpush/core"
-import { CloudinaryDriver } from "@betterpush/driver-cloudinary"
+    code: `import { FilewayClient } from "@fileway/core"
+import { CloudinaryDriver } from "@fileway/driver-cloudinary"
 
-const client = new BetterPushClient({
+const client = new FilewayClient({
   driver: new CloudinaryDriver({
     cloudName: "my-cloud",
     apiKey: process.env.CLOUDINARY_API_KEY,
@@ -102,7 +102,7 @@ export function InteractiveDemo() {
             Switch backends — not your code
           </h2>
           <p className="mx-auto mt-4 max-w-[520px] font-sans text-[14px] leading-[1.6]" style={{ color: "var(--lp-muted)" }}>
-            The <code className="font-mono text-[13px]" style={{ color: "var(--lp-text)" }}>BetterPushClient</code> API never changes.
+            The <code className="font-mono text-[13px]" style={{ color: "var(--lp-text)" }}>FilewayClient</code> API never changes.
             Only the driver config. Full TypeScript inference adapts to each driver&apos;s metadata.
           </p>
         </div>

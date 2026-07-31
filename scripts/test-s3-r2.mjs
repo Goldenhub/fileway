@@ -1,5 +1,5 @@
-import { BetterPushClient } from "@betterpush/core";
-import { S3Driver } from "@betterpush/driver-s3";
+import { FilewayClient } from "@fileway/core";
+import { S3Driver } from "@fileway/driver-s3";
 
 const { S3_BUCKET, S3_ENDPOINT, S3_PUBLIC_URL, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY } = process.env;
 
@@ -16,7 +16,7 @@ const driver = new S3Driver({
   credentials: { accessKeyId: R2_ACCESS_KEY_ID, secretAccessKey: R2_SECRET_ACCESS_KEY },
 });
 
-const client = new BetterPushClient({ driver });
+const client = new FilewayClient({ driver });
 
 const stream = new ReadableStream({
   start(controller) {

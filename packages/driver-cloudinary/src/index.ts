@@ -1,5 +1,5 @@
-import type { BaseDriver, UploadOptions, UploadResult } from "@betterpush/core";
-import { validateUploadOptions, ValidationError, urlEncodePath } from "@betterpush/core";
+import type { BaseDriver, UploadOptions, UploadResult } from "@fileway/core";
+import { validateUploadOptions, ValidationError, urlEncodePath } from "@fileway/core";
 
 const randomUUID = () => globalThis.crypto.randomUUID();
 

@@ -1,5 +1,5 @@
 {
-  "name": "@betterpush/driver-local",
+  "name": "@fileway/driver-local",
   "version": "0.0.1",
   "type": "module",
   "main": "./dist/index.cjs",
@@ -17,7 +17,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@betterpush/core": "workspace:*"
+    "@fileway/core": "workspace:*"
   },
   "devDependencies": {
     "typescript": "catalog:",

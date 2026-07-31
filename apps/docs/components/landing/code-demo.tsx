@@ -19,7 +19,7 @@ export function CodeDemo() {
               <span className="text-[14px] text-[#ffffff]">local</span>
             </div>
             <pre className="text-[12px] leading-[1.6] text-[#d9dad3] overflow-x-auto">
-              <code>{`new BetterPushClient({
+              <code>{`new FilewayClient({
   driver: new LocalDriver({
     directory: "./storage"
   })
@@ -33,7 +33,7 @@ export function CodeDemo() {
               <span className="text-[14px] text-[#ffffff]">s3</span>
             </div>
             <pre className="text-[12px] leading-[1.6] text-[#d9dad3] overflow-x-auto">
-              <code>{`new BetterPushClient({
+              <code>{`new FilewayClient({
   driver: new S3Driver({
     bucket: "my-bucket",
     region: "us-east-1"
@@ -48,7 +48,7 @@ export function CodeDemo() {
               <span className="text-[14px] text-[#ffffff]">cloudinary</span>
             </div>
             <pre className="text-[12px] leading-[1.6] text-[#d9dad3] overflow-x-auto">
-              <code>{`new BetterPushClient({
+              <code>{`new FilewayClient({
   driver: new CloudinaryDriver({
     cloudName: "my-cloud",
     apiKey: process.env.API_KEY,

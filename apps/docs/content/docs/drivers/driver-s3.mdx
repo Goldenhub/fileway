@@ -6,10 +6,10 @@ description: Upload files to S3-compatible storage
 Uploads files to S3-compatible storage (AWS S3, Cloudflare R2, MinIO) using `FetchHttpHandler`.
 
 ```ts
-import { BetterPushClient } from "@betterpush/core";
-import { S3Driver } from "@betterpush/driver-s3";
+import { FilewayClient } from "@fileway/core";
+import { S3Driver } from "@fileway/driver-s3";
 
-const client = new BetterPushClient({
+const client = new FilewayClient({
   driver: new S3Driver({
     bucket: "my-bucket",
     region: "us-east-1",
@@ -33,7 +33,7 @@ console.log(result.meta.etag);
 ## MinIO
 
 ```ts
-const client = new BetterPushClient({
+const client = new FilewayClient({
   driver: new S3Driver({
     bucket: "my-bucket",
     endpoint: "http://localhost:9000",
@@ -50,7 +50,7 @@ const client = new BetterPushClient({
 ## Cloudflare R2
 
 ```ts
-const client = new BetterPushClient({
+const client = new FilewayClient({
   driver: new S3Driver({
     bucket: "my-bucket",
     endpoint: "https://<accountid>.r2.cloudflarestorage.com",
@@ -88,7 +88,7 @@ const client = new BetterPushClient({
 
 ## Errors
 
-Throws `ValidationError` (from `@betterpush/core`) when:
+Throws `ValidationError` (from `@fileway/core`) when:
 - `filename` is missing, contains path separators, or exceeds 255 characters
 - `path` is absolute or contains null bytes
 - `mimeType` is malformed|

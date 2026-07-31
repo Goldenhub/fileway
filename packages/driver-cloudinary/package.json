@@ -1,5 +1,5 @@
 {
-  "name": "@betterpush/driver-cloudinary",
+  "name": "@fileway/driver-cloudinary",
   "version": "0.0.1",
   "type": "module",
   "types": "./dist/index.d.ts",
@@ -18,7 +18,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@betterpush/core": "workspace:*"
+    "@fileway/core": "workspace:*"
   },
   "devDependencies": {
     "typescript": "catalog:",

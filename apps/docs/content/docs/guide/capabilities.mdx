@@ -1,0 +1,127 @@
+---
+title: Capabilities
+description: What Fileway supports today — uploads & streaming, retrieval, metadata & tagging, and lifecycle
+---
+
+Fileway is intentionally minimal. This page documents exactly what each driver supports today, what is currently in the works, and what you need to build yourself.
+
+## Coverage Matrix
+
+| Capability | `LocalDriver` | `S3Driver` | `CloudinaryDriver` |
+|------------|:---:|:---:|:---:|
+| Upload via `ReadableStream` | ✅ | ✅ | ✅ |
+| True streaming (no full buffering) | ✅ | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> |
+| Public URL retrieval (`getUrl`) | ✅ | ✅ | ✅ |
+| Pre-signed URLs | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> |
+| Download / read-back | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> |
+| User metadata (`options.metadata`) | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> | ✅ | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> |
+| Result metadata (`result.meta`) | ✅ | ✅ | ✅ |
+| Object tagging | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> |
+| TTL / expiration | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> |
+| Lifecycle rules | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> |
+
+Legend: **✅** supported today · <span style={{ color: "var(--color-fd-primary)" }}>✕</span> not yet supported (in the works).
+
+## Uploads & Streaming
+
+All drivers accept a WHATWG `ReadableStream<Uint8Array>`:
+
+```ts
+const stream = new ReadableStream({
+  start(controller) {
+    controller.enqueue(new TextEncoder().encode("file content"));
+    controller.close();
+  },
+});
+
+const result = await client.upload(stream, {
+  filename: "report.pdf",
+  path: "invoices/2024",
+  mimeType: "application/pdf",
+});
+```
+
+### Streaming behavior per driver
+
+| Driver | Behavior |
+|--------|----------|
+| `LocalDriver` | **True streaming.** The web stream is piped to disk via Node.js streams with backpressure. Memory usage stays constant regardless of file size. Enforces `maxSizeBytes` while streaming. |
+| `S3Driver` | **Buffers the full file** into memory to compute the SHA-256 payload hash, then issues a single `PUT`. Large files use memory proportional to file size. The `aws-chunked` streaming encoder exists in the codebase but is not yet wired into `upload()`. |
+| `CloudinaryDriver` | **Buffers the full file** into a `Blob` for the multipart upload. Enforces `maxSizeBytes`. |
+
+**In the works:** bounded-memory `aws-chunked` streaming uploads for `S3Driver`. If you need bounded memory today, chunk your stream at the caller.
+
+## Retrieval & Pre-signed URLs
+
+### `getUrl(path)`
+
+Returns a static public URL built from the driver's `baseUrl` (or an auto-derived default) plus the encoded path.
+
+| Driver | URL format |
+|--------|------------|
+| `LocalDriver` | `<baseUrl>/<path>` — defaults to `file://<directory>/<path>`. Set `baseUrl` to a CDN/web URL in production. |
+| `S3Driver` | `<baseUrl>/<path>` — virtual-hosted or path-style based on `forcePathStyle`. Assumes the bucket is publicly readable. |
+| `CloudinaryDriver` | The Cloudinary CDN URL for the asset. |
+
+### Pre-signed URLs
+
+**In the works.** For private S3 buckets you currently cannot hand out `getUrl()` results — you would need temporary, credential-signed URLs. `getPresignedUrl` support is being added for `S3Driver`.
+
+### Download / read-back
+
+**In the works.** `BaseDriver` currently only defines `upload`, `delete`, and `getUrl` — there is no `download(path)` or stream-back API. A read-back/stream API is being added. Until then, fetch public assets directly with `fetch`.
+
+## Metadata & Tagging
+
+### User metadata (`options.metadata`)
+
+Pass a `Record<string, string>` on upload:
+
+```ts
+const result = await client.upload(stream, {
+  filename: "photo.jpg",
+  metadata: {
+    userId: "1234",
+    license: "cc-by-4.0",
+  },
+});
+```
+
+| Driver | Behavior |
+|--------|----------|
+| `S3Driver` | Sends metadata as signed `x-amz-meta-*` request headers, so it is persisted as S3 user metadata. |
+| `LocalDriver` | Metadata is **not persisted yet** (persistence is in the works). |
+| `CloudinaryDriver` | Metadata is **not sent yet** (support is in the works). |
+
+### Result metadata (`result.meta`)
+
+Each driver returns its own typed metadata:
+
+| Driver | `meta` shape |
+|--------|--------------|
+| `LocalDriver` | `{ localPath: string }` |
+| `S3Driver` | `{ bucket: string; etag?: string }` |
+| `CloudinaryDriver` | `{ publicId, version, format, resourceType, bytes, secureUrl, width?, height? }` |
+
+### Object tagging
+
+**In the works.** S3 object tags (`x-amz-tagging`) are being added. Until then, put tags in `options.metadata` or track them in your own database.
+
+## Lifecycle & Expiration
+
+**In the works.** TTL/expiration on uploads and lifecycle rule management are being added to the core contract.
+
+- **S3 lifecycle rules** (e.g. "delete after 30 days") are bucket-level configuration and are not yet exposed by Fileway. Configure them in the AWS console, Terraform, or via the AWS SDK directly.
+- **Cloudinary** supports automatic deletion via signed URLs with `expires_at`; wiring this in is in the works.
+- **Local** has no built-in cleanup yet; a scheduled sweep is in the works.
+
+## Roadmap
+
+In the works and coming next:
+
+- `aws-chunked` streaming uploads for `S3Driver` (bounded memory)
+- Pre-signed URL generation (`getPresignedUrl`) for `S3Driver`
+- Download / stream-back API across drivers
+- S3 object tagging and metadata read-back (`headObject`)
+- Metadata persistence for `LocalDriver` and `CloudinaryDriver`
+- TTL / expiration in `UploadOptions` and lifecycle rule management

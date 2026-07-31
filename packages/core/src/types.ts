@@ -34,7 +34,7 @@ export interface MiddlewareHook {
   afterUpload?: (result: UploadResult<Record<string, unknown>>) => Promise<void>;
 }
 
-export interface BetterPushConfig<TDriver extends BaseDriver> {
+export interface FilewayConfig<TDriver extends BaseDriver> {
   driver: TDriver;
   middlewares?: MiddlewareHook[];
 }

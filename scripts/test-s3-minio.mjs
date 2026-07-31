@@ -12,8 +12,8 @@
 // Run:
 //   S3_BUCKET=my-bucket S3_ENDPOINT=http://localhost:9000 MINIO_ACCESS_KEY=minioadmin MINIO_SECRET_KEY=minioadmin npx tsx scripts/test-s3-minio.mjs
 
-import { BetterPushClient } from "@betterpush/core";
-import { S3Driver } from "@betterpush/driver-s3";
+import { FilewayClient } from "@fileway/core";
+import { S3Driver } from "@fileway/driver-s3";
 
 const { S3_BUCKET, S3_ENDPOINT, MINIO_ACCESS_KEY, MINIO_SECRET_KEY } = process.env;
 
@@ -30,7 +30,7 @@ const driver = new S3Driver({
   credentials: { accessKeyId: MINIO_ACCESS_KEY, secretAccessKey: MINIO_SECRET_KEY },
 });
 
-const client = new BetterPushClient({ driver });
+const client = new FilewayClient({ driver });
 
 const stream = new ReadableStream({
   start(controller) {

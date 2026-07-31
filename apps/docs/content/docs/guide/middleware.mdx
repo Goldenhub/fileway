@@ -29,7 +29,7 @@ Runs before the driver receives the stream. You can replace the stream (e.g. com
 Return `{ stream }`, `{ options }`, both, or `undefined` to pass through unchanged.
 
 ```ts
-import { BetterPushClient, MiddlewareHook } from "@betterpush/core";
+import { FilewayClient, MiddlewareHook } from "@fileway/core";
 
 const sizeLimit: MiddlewareHook = {
   async beforeUpload(stream, options) {
@@ -77,7 +77,7 @@ const logger: MiddlewareHook = {
 Pass middleware via the `middlewares` array in the client config:
 
 ```ts
-const client = new BetterPushClient({
+const client = new FilewayClient({
   driver: new LocalDriver({ directory: "./uploads" }),
   middlewares: [sizeLimit, logger],
 });
@@ -112,7 +112,7 @@ const injectMeta: MiddlewareHook = {
 ## Example: Stream Compression
 
 ```ts
-import { BetterPushClient, MiddlewareHook } from "@betterpush/core";
+import { FilewayClient, MiddlewareHook } from "@fileway/core";
 
 const compressor: MiddlewareHook = {
   async beforeUpload(stream) {

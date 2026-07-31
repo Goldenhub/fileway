@@ -1,5 +1,5 @@
 {
-  "name": "@betterpush/driver-s3",
+  "name": "@fileway/driver-s3",
   "version": "0.0.1",
   "type": "module",
   "types": "./dist/index.d.ts",
@@ -18,9 +18,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@betterpush/core": "workspace:*",
-    "@aws-sdk/client-s3": "^3.600.0",
-    "@smithy/fetch-http-handler": "^4.0.0"
+    "@fileway/core": "workspace:*"
   },
   "devDependencies": {
     "typescript": "catalog:",

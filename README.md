@@ -1,14 +1,14 @@
-# BetterPush
+# Fileway
 
 **Runtime-agnostic file storage engine for JavaScript/TypeScript.**
 
-BetterPush is a thin, type-safe wrapper around any storage backend. Upload files via `ReadableStream<Uint8Array>`, get back typed results. Swap drivers without changing your application code.
+Fileway is a thin, type-safe wrapper around any storage backend. Upload files via `ReadableStream<Uint8Array>`, get back typed results. Swap drivers without changing your application code.
 
 ```ts
-import { BetterPushClient } from "@betterpush/core";
-import { S3Driver } from "@betterpush/driver-s3";
+import { FilewayClient } from "@fileway/core";
+import { S3Driver } from "@fileway/driver-s3";
 
-const client = new BetterPushClient({
+const client = new FilewayClient({
   driver: new S3Driver({ bucket: "my-bucket", region: "us-east-1" }),
 });
 
@@ -22,14 +22,14 @@ const result = await client.upload(stream, { filename: "photo.jpg" });
 
 | Package | Description | Dependencies | Runtime |
 |---|---|---|---|
-| `@betterpush/core` | Client engine, types, validation | Zero | Universal |
-| `@betterpush/driver-local` | Local filesystem storage | `node:fs` | Node.js / Bun |
-| `@betterpush/driver-s3` | AWS S3 & compatible (MinIO, R2) | AWS SDK v3 | Universal |
-| `@betterpush/driver-cloudinary` | Cloudinary uploads via Fetch API | Zero | Universal |
+| `@fileway/core` | Client engine, types, validation | Zero | Universal |
+| `@fileway/driver-local` | Local filesystem storage | `node:fs` | Node.js / Bun |
+| `@fileway/driver-s3` | AWS S3 & compatible (MinIO, R2) | AWS SDK v3 | Universal |
+| `@fileway/driver-cloudinary` | Cloudinary uploads via Fetch API | Zero | Universal |
 
 ## Features
 
-- **Zero-core-deps** — `@betterpush/core` has no runtime dependencies.
+- **Zero-core-deps** — `@fileway/core` has no runtime dependencies.
 - **Streaming** — Files transfer via WHATWG `ReadableStream<Uint8Array>`. No buffering entire files in memory.
 - **Type inference** — Each driver returns its own metadata shape automatically.
 - **Middleware pipeline** — Hook into upload lifecycle (`beforeUpload`, `afterUpload`).
@@ -39,18 +39,18 @@ const result = await client.upload(stream, { filename: "photo.jpg" });
 ## Install
 
 ```bash
-npm install @betterpush/core
+npm install @fileway/core
 # Add a driver:
-npm install @betterpush/driver-s3
+npm install @fileway/driver-s3
 ```
 
 ## Usage
 
 ```ts
-import { BetterPushClient } from "@betterpush/core";
-import { LocalDriver } from "@betterpush/driver-local";
+import { FilewayClient } from "@fileway/core";
+import { LocalDriver } from "@fileway/driver-local";
 
-const client = new BetterPushClient({
+const client = new FilewayClient({
   driver: new LocalDriver({ directory: "./storage" }),
 });
 
@@ -77,7 +77,7 @@ const deleted = await client.delete(result.path);
 ### Local
 
 ```ts
-import { LocalDriver } from "@betterpush/driver-local";
+import { LocalDriver } from "@fileway/driver-local";
 
 const driver = new LocalDriver({
   directory: "./uploads",
@@ -89,7 +89,7 @@ const driver = new LocalDriver({
 ### S3 (AWS, MinIO, Cloudflare R2)
 
 ```ts
-import { S3Driver } from "@betterpush/driver-s3";
+import { S3Driver } from "@fileway/driver-s3";
 
 // AWS
 const aws = new S3Driver({
@@ -119,7 +119,7 @@ const r2 = new S3Driver({
 ### Cloudinary
 
 ```ts
-import { CloudinaryDriver } from "@betterpush/driver-cloudinary";
+import { CloudinaryDriver } from "@fileway/driver-cloudinary";
 
 const driver = new CloudinaryDriver({
   cloudName: "my-cloud",
@@ -138,7 +138,7 @@ const logger = {
   },
 };
 
-const client = new BetterPushClient({ driver, middlewares: [logger] });
+const client = new FilewayClient({ driver, middlewares: [logger] });
 ```
 
 ## API
@@ -183,12 +183,12 @@ S3_BUCKET=my-bucket S3_ENDPOINT=http://localhost:9000 MINIO_ACCESS_KEY=minioadmi
 ### Project structure
 
 ```
-betterpush/
+fileway/
 ├── packages/
-│   ├── core/              # @betterpush/core
-│   ├── driver-local/      # @betterpush/driver-local
-│   ├── driver-s3/         # @betterpush/driver-s3
-│   └── driver-cloudinary/ # @betterpush/driver-cloudinary
+│   ├── core/              # @fileway/core
+│   ├── driver-local/      # @fileway/driver-local
+│   ├── driver-s3/         # @fileway/driver-s3
+│   └── driver-cloudinary/ # @fileway/driver-cloudinary
 ├── apps/
 │   └── docs/              # Documentation site (Fumadocs + Next.js)
 ├── scripts/               # Manual test scripts

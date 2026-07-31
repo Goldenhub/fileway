@@ -1,5 +1,5 @@
 {
-  "name": "@betterpush/docs",
+  "name": "@fileway/docs",
   "version": "0.0.1",
   "private": true,
   "type": "module",
@@ -7,7 +7,10 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "types:check": "fumadocs-mdx && tsc --noEmit"
+    "types:check": "fumadocs-mdx && tsc --noEmit",
+    "generate:llms": "node scripts/generate-llms.mjs",
+    "predev": "node scripts/generate-llms.mjs",
+    "prebuild": "node scripts/generate-llms.mjs"
   },
   "dependencies": {
     "fumadocs-core": "^16.0.0",

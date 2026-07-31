@@ -1,5 +1,5 @@
 {
-  "name": "betterpush",
+  "name": "fileway",
   "version": "0.0.1",
   "private": true,
   "description": "",
@@ -8,8 +8,8 @@
     "pnpm": ">=10.0.0"
   },
   "scripts": {
-    "build": "pnpm --filter \"@betterpush/*\" run build",
-    "test": "pnpm --filter \"@betterpush/*\" run test",
+    "build": "pnpm --filter \"@fileway/*\" run build",
+    "test": "pnpm --filter \"@fileway/*\" run test",
     "test:local": "npx tsx scripts/test-local.mjs",
     "test:s3:aws": "npx tsx scripts/test-s3-aws.mjs",
     "test:s3:minio": "npx tsx scripts/test-s3-minio.mjs",
@@ -17,10 +17,10 @@
     "test:cloudinary": "npx tsx scripts/test-cloudinary.mjs"
   },
   "devDependencies": {
-    "@betterpush/core": "workspace:*",
-    "@betterpush/driver-cloudinary": "workspace:*",
-    "@betterpush/driver-local": "workspace:*",
-    "@betterpush/driver-s3": "workspace:*",
+    "@fileway/core": "workspace:*",
+    "@fileway/driver-cloudinary": "workspace:*",
+    "@fileway/driver-local": "workspace:*",
+    "@fileway/driver-s3": "workspace:*",
     "@edge-runtime/vm": "catalog:"
   }
 }

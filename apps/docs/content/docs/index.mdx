@@ -1,9 +1,9 @@
 ---
 title: Welcome
-description: Get started with BetterPush
+description: Get started with Fileway
 ---
 
-# BetterPush
+# Fileway
 
 **Runtime-agnostic file storage engine for the JavaScript/TypeScript ecosystem.**
 
@@ -12,10 +12,10 @@ Unify cloud and local file storage behind a single, edge-compatible, type-safe A
 ## Quick Example
 
 ```ts
-import { BetterPushClient } from "@betterpush/core";
-import { LocalDriver } from "@betterpush/driver-local";
+import { FilewayClient } from "@fileway/core";
+import { LocalDriver } from "@fileway/driver-local";
 
-const client = new BetterPushClient({
+const client = new FilewayClient({
   driver: new LocalDriver({ directory: "./uploads" }),
 });
 

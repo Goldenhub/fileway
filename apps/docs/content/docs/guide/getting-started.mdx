@@ -1,6 +1,6 @@
 ---
 title: Getting Started
-description: Install and use BetterPush in your project
+description: Install and use Fileway in your project
 ---
 
 ## Install
@@ -8,22 +8,22 @@ description: Install and use BetterPush in your project
 <Tabs id="package-manager" items={["npm", "pnpm", "yarn", "bun"]}>
   <Tab value="npm">
     ```bash
-    npm install @betterpush/core
+    npm install @fileway/core
     ```
   </Tab>
   <Tab value="pnpm">
     ```bash
-    pnpm add @betterpush/core
+    pnpm add @fileway/core
     ```
   </Tab>
   <Tab value="yarn">
     ```bash
-    yarn add @betterpush/core
+    yarn add @fileway/core
     ```
   </Tab>
   <Tab value="bun">
     ```bash
-    bun add @betterpush/core
+    bun add @fileway/core
     ```
   </Tab>
 </Tabs>
@@ -33,30 +33,30 @@ Then add the drivers you need:
 <Tabs id="package-manager-drivers" items={["npm", "pnpm", "yarn", "bun"]}>
   <Tab value="npm">
     ```bash
-    npm install @betterpush/driver-local
-    npm install @betterpush/driver-s3
-    npm install @betterpush/driver-cloudinary
+    npm install @fileway/driver-local
+    npm install @fileway/driver-s3
+    npm install @fileway/driver-cloudinary
     ```
   </Tab>
   <Tab value="pnpm">
     ```bash
-    pnpm add @betterpush/driver-local
-    pnpm add @betterpush/driver-s3
-    pnpm add @betterpush/driver-cloudinary
+    pnpm add @fileway/driver-local
+    pnpm add @fileway/driver-s3
+    pnpm add @fileway/driver-cloudinary
     ```
   </Tab>
   <Tab value="yarn">
     ```bash
-    yarn add @betterpush/driver-local
-    yarn add @betterpush/driver-s3
-    yarn add @betterpush/driver-cloudinary
+    yarn add @fileway/driver-local
+    yarn add @fileway/driver-s3
+    yarn add @fileway/driver-cloudinary
     ```
   </Tab>
   <Tab value="bun">
     ```bash
-    bun add @betterpush/driver-local
-    bun add @betterpush/driver-s3
-    bun add @betterpush/driver-cloudinary
+    bun add @fileway/driver-local
+    bun add @fileway/driver-s3
+    bun add @fileway/driver-cloudinary
     ```
   </Tab>
 </Tabs>
@@ -64,10 +64,10 @@ Then add the drivers you need:
 ## Basic Usage
 
 ```ts
-import { BetterPushClient } from "@betterpush/core";
-import { LocalDriver } from "@betterpush/driver-local";
+import { FilewayClient } from "@fileway/core";
+import { LocalDriver } from "@fileway/driver-local";
 
-const client = new BetterPushClient({
+const client = new FilewayClient({
   driver: new LocalDriver({
     directory: "./storage",
     baseUrl: "https://cdn.example.com",
@@ -136,14 +136,14 @@ Returns a public URL for a stored file.
 Each driver returns its own metadata shape:
 
 ```ts
-import { LocalDriver } from "@betterpush/driver-local";
-import { S3Driver } from "@betterpush/driver-s3";
+import { LocalDriver } from "@fileway/driver-local";
+import { S3Driver } from "@fileway/driver-s3";
 
-const localClient = new BetterPushClient({
+const localClient = new FilewayClient({
   driver: new LocalDriver({ directory: "./storage" }),
 });
 
-const s3Client = new BetterPushClient({
+const s3Client = new FilewayClient({
   driver: new S3Driver({ bucket: "my-bucket", region: "us-east-1" }),
 });
 

@@ -1,5 +1,5 @@
-import type { BaseDriver, UploadOptions, UploadResult } from "@betterpush/core";
-import { validateUploadOptions, ValidationError, urlEncodePath } from "@betterpush/core";
+import type { BaseDriver, UploadOptions, UploadResult } from "@fileway/core";
+import { validateUploadOptions, ValidationError, urlEncodePath } from "@fileway/core";
 import { createWriteStream } from "node:fs";
 import { mkdir, unlink } from "node:fs/promises";
 import { join, dirname, resolve, relative } from "node:path";

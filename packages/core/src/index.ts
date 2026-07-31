@@ -3,9 +3,9 @@ export * from "./validation.js";
 
 export const version = "0.0.1";
 
-import { BaseDriver, BetterPushConfig, UploadOptions } from "./types.js";
+import { BaseDriver, FilewayConfig, UploadOptions } from "./types.js";
 
-export class BetterPushClient<const TConfig extends BetterPushConfig<BaseDriver>> {
+export class FilewayClient<const TConfig extends FilewayConfig<BaseDriver>> {
   private driver: TConfig["driver"];
   private middlewares: NonNullable<TConfig["middlewares"]>;
 

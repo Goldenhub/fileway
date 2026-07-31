@@ -12,7 +12,7 @@ export function DarkBreak() {
                 <div className="h-3 w-3 rounded-full bg-stone" />
                 <div className="h-3 w-3 rounded-full bg-stone" />
                 <span className="ml-4 font-booton text-caption text-ash-gray">
-                  architecture — betterpush flow
+                  architecture — fileway flow
                 </span>
               </div>
               <div className="flex items-center justify-center bg-obsidian px-8 pb-8 pt-6">
@@ -22,7 +22,7 @@ export function DarkBreak() {
                   <text x="80" y="105" textAnchor="middle" fill="#80807c" fontSize="11" fontFamily="system-ui">ReadableStream</text>
 
                   <rect x="190" y="40" width="140" height="120" rx="6" stroke="currentColor" strokeWidth="1" fill="none" />
-                  <text x="260" y="85" textAnchor="middle" fill="currentColor" fontSize="13" fontFamily="system-ui">BetterPush</text>
+                  <text x="260" y="85" textAnchor="middle" fill="currentColor" fontSize="13" fontFamily="system-ui">Fileway</text>
                   <text x="260" y="105" textAnchor="middle" fill="#80807c" fontSize="11" fontFamily="system-ui">Middleware</text>
 
                   <rect x="370" y="20" width="140" height="60" rx="6" stroke="#71eaee" strokeWidth="1" fill="none" />

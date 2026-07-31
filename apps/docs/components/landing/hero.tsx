@@ -38,7 +38,7 @@ export function Hero() {
             Get Started
           </Link>
           <a
-            href="https://github.com/anomalyco/betterpush"
+            href="https://github.com/anomalyco/fileway"
             target="_blank"
             rel="noopener noreferrer"
             className="inline-flex items-center gap-2 rounded-md border px-6 py-3 font-sans text-[14px] font-[500] transition-colors hover:text-white" style={{ borderColor: "var(--lp-border)", color: "var(--lp-muted)" }}
@@ -64,7 +64,7 @@ export function Hero() {
                   <div className="flex items-center gap-2">
                     <span className="font-mono text-[13px] opacity-50" style={{ color: "var(--lp-muted)" }}>$</span>
                     <code className="font-mono text-[14px]" style={{ color: "var(--lp-text)" }}>
-                      npm install @betterpush/core @betterpush/driver-s3
+                      npm install @fileway/core @fileway/driver-s3
                     </code>
                   </div>
                 </Tab>
@@ -72,7 +72,7 @@ export function Hero() {
                   <div className="flex items-center gap-2">
                     <span className="font-mono text-[13px] opacity-50" style={{ color: "var(--lp-muted)" }}>$</span>
                     <code className="font-mono text-[14px]" style={{ color: "var(--lp-text)" }}>
-                      pnpm add @betterpush/core @betterpush/driver-s3
+                      pnpm add @fileway/core @fileway/driver-s3
                     </code>
                   </div>
                 </Tab>
@@ -80,7 +80,7 @@ export function Hero() {
                   <div className="flex items-center gap-2">
                     <span className="font-mono text-[13px] opacity-50" style={{ color: "var(--lp-muted)" }}>$</span>
                     <code className="font-mono text-[14px]" style={{ color: "var(--lp-text)" }}>
-                      yarn add @betterpush/core @betterpush/driver-s3
+                      yarn add @fileway/core @fileway/driver-s3
                     </code>
                   </div>
                 </Tab>
@@ -88,7 +88,7 @@ export function Hero() {
                   <div className="flex items-center gap-2">
                     <span className="font-mono text-[13px] opacity-50" style={{ color: "var(--lp-muted)" }}>$</span>
                     <code className="font-mono text-[14px]" style={{ color: "var(--lp-text)" }}>
-                      bun add @betterpush/core @betterpush/driver-s3
+                      bun add @fileway/core @fileway/driver-s3
                     </code>
                   </div>
                 </Tab>

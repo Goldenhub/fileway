@@ -1,5 +1,5 @@
-import { BetterPushClient } from "@betterpush/core";
-import { CloudinaryDriver } from "@betterpush/driver-cloudinary";
+import { FilewayClient } from "@fileway/core";
+import { CloudinaryDriver } from "@fileway/driver-cloudinary";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
@@ -18,7 +18,7 @@ const driver = new CloudinaryDriver({
   apiSecret: CLOUDINARY_API_SECRET,
 });
 
-const client = new BetterPushClient({ driver });
+const client = new FilewayClient({ driver });
 
 const buf = readFileSync(resolve(imagePath));
 const filename = imagePath.split("/").pop() ?? "image";

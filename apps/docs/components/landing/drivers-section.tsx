@@ -2,28 +2,28 @@ import Link from "next/link";
 
 const drivers = [
   {
-    name: "@betterpush/driver-local",
+    name: "@fileway/driver-local",
     status: "Stable",
     link: "/docs/drivers/driver-local",
     desc: "Local filesystem via Node.js streams",
     supports: "Node.js, Bun",
   },
   {
-    name: "@betterpush/driver-s3",
+    name: "@fileway/driver-s3",
     status: "Stable",
     link: "/docs/drivers/driver-s3",
     desc: "AWS S3, Cloudflare R2, MinIO, DigitalOcean Spaces",
     supports: "Universal",
   },
   {
-    name: "@betterpush/driver-cloudinary",
+    name: "@fileway/driver-cloudinary",
     status: "Stable",
     link: "/docs/drivers/driver-cloudinary",
     desc: "Pure fetch + Web Crypto, zero Node dependencies",
     supports: "Universal",
   },
   {
-    name: "@betterpush/driver-gcs",
+    name: "@fileway/driver-gcs",
     status: "Coming Soon",
     link: "/docs",
     desc: "Google Cloud Storage adapter",

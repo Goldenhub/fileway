@@ -1,9 +1,9 @@
 ---
 title: Cross-Runtime Usage
-description: Run BetterPush on Bun, Deno, and Cloudflare Workers
+description: Run Fileway on Bun, Deno, and Cloudflare Workers
 ---
 
-BetterPush universal packages (`@betterpush/core`, `@betterpush/driver-s3`, `@betterpush/driver-cloudinary`) contain zero `node:*` imports and work on any JavaScript runtime. Only `@betterpush/driver-local` requires Node.js (uses `node:fs`).
+Fileway universal packages (`@fileway/core`, `@fileway/driver-s3`, `@fileway/driver-cloudinary`) contain zero `node:*` imports and work on any JavaScript runtime. Only `@fileway/driver-local` requires Node.js (uses `node:fs`).
 
 ## Bun
 
@@ -41,7 +41,7 @@ If workspace resolution fails, use explicit npm paths:
 
 ```bash
 deno run --allow-read --allow-env --allow-net \
-  npm:@betterpush/driver-cloudinary packages/driver-cloudinary/test-upload.mjs
+  npm:@fileway/driver-cloudinary packages/driver-cloudinary/test-upload.mjs
 ```
 
 `driver-local` is **not supported** on Deno (no `node:fs`).
@@ -50,11 +50,11 @@ deno run --allow-read --allow-env --allow-net \
 
 ### Vitest (unit tests)
 
-`@betterpush/core` and `@betterpush/driver-cloudinary` already run tests under `@edge-runtime/vm` via vitest. Run:
+`@fileway/core` and `@fileway/driver-cloudinary` already run tests under `@edge-runtime/vm` via vitest. Run:
 
 ```bash
-pnpm --filter @betterpush/core test
-pnpm --filter @betterpush/driver-cloudinary test
+pnpm --filter @fileway/core test
+pnpm --filter @fileway/driver-cloudinary test
 ```
 
 ### Wrangler (integration tests)
@@ -65,15 +65,15 @@ Create a minimal worker to test uploads locally:
 npx wrangler init test-worker
 ```
 
-Add `@betterpush/core` and `@betterpush/driver-s3` as dependencies, then write:
+Add `@fileway/core` and `@fileway/driver-s3` as dependencies, then write:
 
 ```ts
-import { BetterPushClient } from "@betterpush/core";
-import { S3Driver } from "@betterpush/driver-s3";
+import { FilewayClient } from "@fileway/core";
+import { S3Driver } from "@fileway/driver-s3";
 
 export default {
   async fetch(req: Request): Promise<Response> {
-    const client = new BetterPushClient({
+    const client = new FilewayClient({
       driver: new S3Driver({
         bucket: "my-bucket",
         endpoint: "https://<account>.r2.cloudflarestorage.com",
@@ -100,7 +100,7 @@ npx wrangler dev
 
 ## Compatibility Matrix
 
-| Runtime | `@betterpush/core` | `driver-local` | `driver-s3` | `driver-cloudinary` |
+| Runtime | `@fileway/core` | `driver-local` | `driver-s3` | `driver-cloudinary` |
 |---|---|---|---|---|
 | Node.js 18+ | <span className="text-green-500">✓</span> | <span className="text-green-500">✓</span> | <span className="text-green-500">✓</span> | <span className="text-green-500">✓</span> |
 | Bun | <span className="text-green-500">✓</span> | <span className="text-green-500">✓</span> | <span className="text-green-500">✓</span> | <span className="text-green-500">✓</span> |

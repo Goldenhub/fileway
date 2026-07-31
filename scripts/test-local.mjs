@@ -1,14 +1,14 @@
-import { BetterPushClient } from "@betterpush/core";
-import { LocalDriver } from "@betterpush/driver-local";
+import { FilewayClient } from "@fileway/core";
+import { LocalDriver } from "@fileway/driver-local";
 import { mkdtempSync, rmSync, readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 const tmpDir = mkdtempSync(join(tmpdir(), "bp-test-"));
 const driver = new LocalDriver({ directory: tmpDir, maxSizeBytes: 1024 * 1024 });
-const client = new BetterPushClient({ driver });
+const client = new FilewayClient({ driver });
 
-const content = "Hello, BetterPush!";
+const content = "Hello, Fileway!";
 const stream = new ReadableStream({
   start(controller) {
     controller.enqueue(new TextEncoder().encode(content));

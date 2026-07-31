@@ -68,15 +68,15 @@ async function uploadToS3(
               <div className="h-2.5 w-2.5 rounded-full opacity-30" style={{ backgroundColor: "var(--lp-muted)" }} />
               <div className="h-2.5 w-2.5 rounded-full opacity-30" style={{ backgroundColor: "var(--lp-muted)" }} />
               <span className="ml-3 font-mono text-[11px] font-[500]" style={{ color: "var(--lp-accent)" }}>
-                The BetterPush Way
+                The Fileway Way
               </span>
             </div>
             <div className="p-5">
               <pre className="overflow-x-auto font-mono text-[13px] leading-[1.7]">
-                <CodeBlock code={`import { BetterPushClient } from "@betterpush/core"
-import { S3Driver } from "@betterpush/driver-s3"
+                <CodeBlock code={`import { FilewayClient } from "@fileway/core"
+import { S3Driver } from "@fileway/driver-s3"
 
-const client = new BetterPushClient({
+const client = new FilewayClient({
   driver: new S3Driver({
     bucket: "my-bucket",
     region: "us-east-1",

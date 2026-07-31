@@ -6,10 +6,10 @@ description: Upload files to Cloudinary media CDN
 Uploads files to Cloudinary using pure `fetch`, `FormData`, and Web Crypto signatures. Zero Node dependencies — works on any runtime.
 
 ```ts
-import { BetterPushClient } from "@betterpush/core";
-import { CloudinaryDriver } from "@betterpush/driver-cloudinary";
+import { FilewayClient } from "@fileway/core";
+import { CloudinaryDriver } from "@fileway/driver-cloudinary";
 
-const client = new BetterPushClient({
+const client = new FilewayClient({
   driver: new CloudinaryDriver({
     cloudName: "my-cloud",
     apiKey: process.env.CLOUDINARY_API_KEY!,
@@ -64,7 +64,7 @@ The resource type (`image`, `video`, or `raw`) and version are tracked automatic
 
 ## Errors
 
-Throws `ValidationError` (from `@betterpush/core`) when:
+Throws `ValidationError` (from `@fileway/core`) when:
 - `filename` is missing, contains path separators, or exceeds 255 characters
 - `path` is absolute or contains null bytes
 - `mimeType` is malformed

@@ -2,3 +2,6 @@
 out/
 .source/
 *.tsbuildinfo
+public/llms.txt
+public/llms-full.txt
+public/atom.xml
