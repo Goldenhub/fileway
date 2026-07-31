@@ -14,21 +14,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
-    services:
-      minio:
-        image: quay.io/minio/minio:latest
-        ports:
-          - 9000:9000
-        env:
-          MINIO_ROOT_USER: minioadmin
-          MINIO_ROOT_PASSWORD: minioadmin
-        options: >-
-          --health-cmd "curl -f http://localhost:9000/minio/health/live || exit 1"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 5
-          --health-start-period 5s
-
     steps:
       - uses: actions/checkout@v4
 
@@ -52,6 +37,22 @@ jobs:
 
       - name: Unit tests
         run: pnpm test
+
+      - name: Start MinIO
+        run: |
+          docker run -d --name minio \
+            -p 9000:9000 \
+            -e MINIO_ROOT_USER=minioadmin \
+            -e MINIO_ROOT_PASSWORD=minioadmin \
+            quay.io/minio/minio:latest server /data
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:9000/minio/health/live >/dev/null; then
+              echo "MinIO ready"
+              break
+            fi
+            sleep 2
+          done
+          curl -sf http://localhost:9000/minio/health/live >/dev/null || { echo "MinIO failed to start" >&2; exit 1; }
 
       - name: S3 integration tests (MinIO)
         run: pnpm --filter @fileway/driver-s3 exec vitest run src/minio.integration.test.ts
