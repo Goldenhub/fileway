@@ -24,6 +24,17 @@ const result = await client.upload(stream, {
 // result.meta.localPath -> absolute path on disk
 ```
 
+## Download
+
+Stream a stored file back from disk with `get(path)` — it returns a WHATWG `ReadableStream<Uint8Array>`:
+
+```ts
+const stream = await client.get("users/123/avatars/photo.jpg");
+const text = await new Response(stream).text();
+```
+
+Throws if the file does not exist or if `path` escapes the configured `directory`.
+
 ## Config
 
 | Option | Type | Default | Description |

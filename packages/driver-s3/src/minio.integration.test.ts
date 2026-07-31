@@ -105,6 +105,26 @@ describeEnv("S3Driver integration against MinIO", () => {
     expect(gone.ok).toBe(false);
   });
 
+  it("downloads a file back via get()", async () => {
+    const bytes = new TextEncoder().encode("round-trip-content");
+    const result = await client.upload(
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(bytes);
+          controller.close();
+        },
+      }),
+      { filename: "roundtrip.txt", path: "uploads" },
+    );
+
+    const stream = await client.get(result.path);
+    const read = new Uint8Array(await new Response(stream).arrayBuffer());
+
+    expect(bytesEqual(read, bytes)).toBe(true);
+
+    await client.delete(result.path);
+  });
+
   it("keeps filenames unique across uploads", async () => {
     const upload = () =>
       client.upload(

@@ -14,7 +14,7 @@ Fileway is intentionally minimal. This page documents exactly what each driver s
 | Multipart upload (large files) | <span style={{ color: "var(--color-fd-primary)" }}>—</span> | ✅ | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> |
 | Public URL retrieval (`getUrl`) | ✅ | ✅ | ✅ |
 | Pre-signed URLs | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> |
-| Download / read-back | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> |
+| Download / read-back | ✅ | ✅ | ✅ |
 | User metadata (`options.metadata`) | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> | ✅ | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> |
 | Result metadata (`result.meta`) | ✅ | ✅ | ✅ |
 | Object tagging | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> |
@@ -91,9 +91,22 @@ Returns a static public URL built from the driver's `baseUrl` (or an auto-derive
 
 **In the works.** For private S3 buckets you currently cannot hand out `getUrl()` results — you would need temporary, credential-signed URLs. `getPresignedUrl` support is being added for `S3Driver`.
 
-### Download / read-back
+### Download / read-back (`get(path)`)
 
-**In the works.** `BaseDriver` currently only defines `upload`, `delete`, and `getUrl` — there is no `download(path)` or stream-back API. A read-back/stream API is being added. Until then, fetch public assets directly with `fetch`.
+Every driver streams a stored file back as a WHATWG `ReadableStream<Uint8Array>` — the same type it accepts on upload:
+
+```ts
+const stream = await client.get("uploads/report.pdf"); // ReadableStream<Uint8Array>
+const text = await new Response(stream).text();
+```
+
+The stream is pull-based with backpressure, so files are never buffered whole on the way down:
+
+| Driver | Behavior |
+|--------|----------|
+| `LocalDriver` | Streams the file from disk via `createReadStream` → `Readable.toWeb()`. Throws if the file is missing or the path escapes the storage directory. |
+| `S3Driver` | Authenticated SigV4 `GET`; returns the response body directly. Throws with the HTTP status on failure (e.g. 404). |
+| `CloudinaryDriver` | `fetch`es the asset's public CDN URL and returns the response body. Throws on a non-2xx status. |
 
 ## Metadata & Tagging
 
@@ -144,7 +157,6 @@ Each driver returns its own typed metadata:
 In the works and coming next:
 
 - Pre-signed URL generation (`getPresignedUrl`) for `S3Driver`
-- Download / stream-back API across drivers
 - S3 object tagging and metadata read-back (`headObject`)
 - Metadata persistence for `LocalDriver` and `CloudinaryDriver`
 - TTL / expiration in `UploadOptions` and lifecycle rule management

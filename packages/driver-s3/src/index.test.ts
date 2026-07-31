@@ -148,6 +148,36 @@ describe("S3Driver (AWS S3)", () => {
     const url = await driver.getUrl("test.txt");
     expect(url).toBe("https://test-bucket.s3.us-east-1.amazonaws.com/test.txt");
   });
+
+  it("should stream an object back with a GET request", async () => {
+    const bytes = new TextEncoder().encode("file-content");
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(bytes);
+        controller.close();
+      },
+    });
+    mockFetch.mockResolvedValue(new Response(body, { status: 200 }));
+
+    const stream = await driver.get("uploads/hello.txt");
+
+    const [url, opts] = mockFetch.mock.calls[0]!;
+    expect(url).toContain("uploads/hello.txt");
+    expect(opts.method).toBe("GET");
+    expect(new Uint8Array(await new Response(stream).arrayBuffer())).toEqual(bytes);
+  });
+
+  it("should throw on a non-ok GET", async () => {
+    mockFetch.mockResolvedValue(new Response("NoSuchKey", { status: 404 }));
+
+    await expect(driver.get("missing.txt")).rejects.toThrow(/S3 get failed: 404/);
+  });
+
+  it("should throw when the GET response has no body", async () => {
+    mockFetch.mockResolvedValue(new Response(null, { status: 200 }));
+
+    await expect(driver.get("empty.txt")).rejects.toThrow(/no response body/);
+  });
 });
 
 describe("S3Driver streaming upload (known size)", () => {

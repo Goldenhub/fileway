@@ -47,4 +47,8 @@ export class FilewayClient<const TConfig extends FilewayConfig<BaseDriver>> {
   async getUrl(path: string): Promise<string> {
     return this.driver.getUrl(path);
   }
+
+  get(path: string): Promise<ReadableStream<Uint8Array>> {
+    return this.driver.get(path);
+  }
 }

@@ -365,6 +365,33 @@ export class S3Driver implements BaseDriver<{ bucket: string; etag?: string }> {
   async getUrl(path: string): Promise<string> {
     return `${this.baseUrl}/${urlEncodePath(path)}`;
   }
+
+  async get(path: string): Promise<ReadableStream<Uint8Array>> {
+    const cred = getCredentials(this.config);
+    const { url, canonicalPath, host } = buildEndpoint(this.config, path);
+    const now = new Date();
+
+    const sigHeaders = await sign(
+      "GET",
+      canonicalPath,
+      { "host": host },
+      SHA256_EMPTY,
+      { ...cred, region: this.config.region!, service: SERVICE },
+      now,
+    );
+
+    const response = await fetch(url, { method: "GET", headers: sigHeaders });
+    if (!response.ok) {
+      const body = await response.text().catch(() => "");
+      throw new Error(`S3 get failed: ${response.status} ${response.statusText}${body ? ` — ${body}` : ""}`);
+    }
+
+    if (!response.body) {
+      throw new Error("S3 get returned no response body");
+    }
+
+    return response.body;
+  }
 }
 
 function getCredentials(config: S3DriverConfig): { accessKeyId: string; secretAccessKey: string } {

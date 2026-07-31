@@ -139,6 +139,18 @@ export class CloudinaryDriver implements BaseDriver<CloudinaryMeta> {
     return `https://res.cloudinary.com/${this.cloudName}/${resourceType}/upload${versionStr}/${publicId}`;
   }
 
+  async get(publicId: string): Promise<ReadableStream<Uint8Array>> {
+    const url = await this.getUrl(publicId);
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`Cloudinary get failed: ${response.status} ${response.statusText}`);
+    }
+    if (!response.body) {
+      throw new Error("Cloudinary get returned no response body");
+    }
+    return response.body;
+  }
+
   private async generateSignature(params: Record<string, string | undefined>): Promise<string> {
     const sortedKeys = Object.keys(params)
       .filter((k) => params[k] !== undefined)

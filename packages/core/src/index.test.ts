@@ -30,6 +30,7 @@ describe("FilewayClient", () => {
       ),
       delete: vi.fn(async () => true),
       getUrl: vi.fn(async (path: string) => `https://example.com${path}`),
+      get: vi.fn(async () => new ReadableStream<Uint8Array>()),
     };
   };
 
@@ -93,5 +94,15 @@ describe("FilewayClient", () => {
 
     expect(driver.getUrl).toHaveBeenCalledWith("/uploads/test.txt");
     expect(url).toBe("https://example.com/uploads/test.txt");
+  });
+
+  it("should call driver.get", async () => {
+    const driver = createMockDriver();
+    const client = new FilewayClient({ driver });
+
+    const stream = await client.get("/uploads/test.txt");
+
+    expect(driver.get).toHaveBeenCalledWith("/uploads/test.txt");
+    expect(stream).toBeInstanceOf(ReadableStream);
   });
 });

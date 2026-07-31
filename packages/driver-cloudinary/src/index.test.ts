@@ -183,4 +183,47 @@ describe("CloudinaryDriver", () => {
       );
     });
   });
+
+  describe("get", () => {
+    it("should return the CDN response body as a stream", async () => {
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode("image-bytes"));
+          controller.close();
+        },
+      });
+      mockFetch.mockResolvedValue({ ok: true, status: 200, body } as Response);
+
+      const stream = await driver.get("abc123");
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        "https://res.cloudinary.com/demo/image/upload/abc123",
+      );
+      expect(stream).toBe(body);
+    });
+
+    it("should throw on a non-ok response", async () => {
+      mockFetch.mockResolvedValue({
+        ok: false,
+        status: 404,
+        statusText: "Not Found",
+      } as Response);
+
+      await expect(driver.get("missing")).rejects.toThrow(
+        "Cloudinary get failed: 404 Not Found",
+      );
+    });
+
+    it("should throw when the response has no body", async () => {
+      mockFetch.mockResolvedValue({
+        ok: true,
+        status: 200,
+        body: null,
+      } as Response);
+
+      await expect(driver.get("abc123")).rejects.toThrow(
+        /no response body/,
+      );
+    });
+  });
 });

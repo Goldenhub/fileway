@@ -51,6 +51,17 @@ const result = await client.upload(fileStream, {
 - If the stream ends before or after the declared `size`, the driver aborts the upload and throws a validation error — a truncated or oversized object is never stored.
 - Use `partSize` to tune the multipart chunk size, and `forceMultipart` to always go through multipart.
 
+## Download
+
+Stream an object back with `get(path)` — an authenticated SigV4 `GET` whose response body is returned as a WHATWG `ReadableStream<Uint8Array>`:
+
+```ts
+const stream = await client.get("uploads/video.mp4");
+const text = await new Response(stream).text();
+```
+
+Throws with the HTTP status on failure (e.g. 404 when the object does not exist).
+
 ## MinIO
 
 ```ts

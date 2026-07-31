@@ -321,9 +321,11 @@ const cloudinary = new CloudinaryDriver({
 
 Returns `UploadResult<TMeta>` — `{ id, url, path, size, meta }` where `meta` is inferred from the driver.
 
-### `client.delete(path)` / `client.getUrl(path)`
+### `client.get(path)` / `client.delete(path)` / `client.getUrl(path)`
 
-Delete returns `Promise<boolean>`; `getUrl` returns the public URL for a stored path.
+- `get(path)` returns a WHATWG `ReadableStream<Uint8Array>` for streaming the stored file back — pull-based with backpressure, never buffered whole. Throws when `path` does not exist.
+- `delete(path)` returns `Promise<boolean>`.
+- `getUrl(path)` returns the public URL for a stored path.
 
 ---
 
@@ -333,6 +335,7 @@ Delete returns `Promise<boolean>`; `getUrl` returns the public URL for a stored 
 
 - [x] Streaming S3 uploads with per-chunk SigV4 signing (`aws-chunked`) — pass `options.size` to enable
 - [x] Bounded-memory multipart uploads for S3 — automatic when the size is unknown or the object exceeds 5 GiB (`partSize`, `forceMultipart`)
+- [x] Streaming downloads — `get(path)` returns a `ReadableStream<Uint8Array>` on every driver
 - [ ] Stream transformation in `beforeUpload` middlewares
 - [ ] Upload progress / lifecycle hooks
 - [ ] Retries with exponential backoff and classified errors

@@ -76,4 +76,30 @@ describe("LocalDriver", () => {
     const url = await driver.getUrl("test.txt");
     expect(url).toBe(`file://${tmpDir}/test.txt`);
   });
+
+  it("should stream a stored file back", async () => {
+    const content = "file contents";
+    const result = await driver.upload(
+      new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode(content));
+          controller.close();
+        },
+      }),
+      { filename: "read.txt" },
+    );
+
+    const stream = await driver.get(result.path);
+    const text = await new Response(stream).text();
+
+    expect(text).toBe(content);
+  });
+
+  it("should throw when streaming a missing file", async () => {
+    await expect(driver.get("missing.txt")).rejects.toThrow(/not found/);
+  });
+
+  it("should reject a path that escapes the directory", async () => {
+    await expect(driver.get("../evil.txt")).rejects.toThrow(/escapes/);
+  });
 })

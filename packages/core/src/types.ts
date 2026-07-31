@@ -23,6 +23,11 @@ export interface BaseDriver<TMeta extends Record<string, unknown> = Record<strin
   ): Promise<UploadResult<TMeta>>;
   delete(path: string): Promise<boolean>;
   getUrl(path: string): Promise<string>;
+  /**
+   * Streams the stored file back as a WHATWG `ReadableStream<Uint8Array>`.
+   * Throws when `path` does not exist.
+   */
+  get(path: string): Promise<ReadableStream<Uint8Array>>;
 }
 
 export interface MiddlewareHook {

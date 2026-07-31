@@ -4,6 +4,7 @@ All notable changes to Fileway are documented here. Releases are cut from `main`
 
 ## Unreleased
 
+- **Streaming downloads (`get(path)`)** — new `BaseDriver.get(path): Promise<ReadableStream<Uint8Array>>` method on every driver, with a `FilewayClient.get(path)` passthrough. Files stream back pull-based with backpressure instead of being buffered whole. Local streams from disk (`createReadStream` → `Readable.toWeb`), S3 uses an authenticated SigV4 `GET`, and Cloudinary fetches the public CDN URL. Missing paths throw.
 - **`@fileway/driver-s3`: bounded-memory streaming uploads** — pass `options.size` (≤ 5 GiB) and the payload is uploaded as a SigV4 `aws-chunked` body (`STREAMING-AWS4-HMAC-SHA256-PAYLOAD`); chunks are signed lazily as the stream is read, so memory stays constant regardless of file size.
 - **`@fileway/driver-s3`: multipart uploads** — unknown sizes and objects > 5 GiB now stream through a multipart upload (`CreateMultipartUpload` → `UploadPart` → `CompleteMultipartUpload`) into part-sized buffers (default `8 MiB`, minimum `5 MiB`), so peak memory stays bounded even without a declared size. Configurable via `partSize` and `forceMultipart`.
 - **`@fileway/driver-s3`: size-mismatch safety** — streams that end before/after the declared `size` abort the upload and throw a validation error instead of storing a corrupted object.

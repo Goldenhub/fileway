@@ -1,7 +1,7 @@
 import type { BaseDriver, UploadOptions, UploadResult } from "@fileway/core";
 import { validateUploadOptions, ValidationError, urlEncodePath } from "@fileway/core";
-import { createWriteStream } from "node:fs";
-import { mkdir, unlink } from "node:fs/promises";
+import { createWriteStream, createReadStream } from "node:fs";
+import { mkdir, unlink, access } from "node:fs/promises";
 import { join, dirname, resolve, relative } from "node:path";
 import { Readable } from "node:stream";
 
@@ -88,5 +88,20 @@ export class LocalDriver implements BaseDriver<{ localPath: string }> {
 
   async getUrl(path: string): Promise<string> {
     return `${this.baseUrl}/${urlEncodePath(path)}`;
+  }
+
+  async get(path: string): Promise<ReadableStream<Uint8Array>> {
+    const fullPath = resolve(join(this.directory, path));
+    if (!fullPath.startsWith(resolve(this.directory))) {
+      throw new Error(`path escapes the configured storage directory: ${path}`);
+    }
+
+    try {
+      await access(fullPath);
+    } catch {
+      throw new Error(`file not found: ${path}`);
+    }
+
+    return Readable.toWeb(createReadStream(fullPath)) as ReadableStream<Uint8Array>;
   }
 }
