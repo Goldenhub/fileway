@@ -1,0 +1,99 @@
+---
+title: Uploads & Streaming
+description: How files flow into each driver — streaming, multipart uploads, cancellation, and progress
+---
+
+All drivers accept a WHATWG `ReadableStream<Uint8Array>`:
+
+```ts
+const stream = new ReadableStream({
+  start(controller) {
+    controller.enqueue(new TextEncoder().encode("file content"));
+    controller.close();
+  },
+});
+
+const result = await client.upload(stream, {
+  filename: "report.pdf",
+  path: "invoices/2024",
+  mimeType: "application/pdf",
+});
+```
+
+## Streaming behavior per driver
+
+| Driver | Behavior |
+|--------|----------|
+| `LocalDriver` | **True streaming.** The web stream is piped to disk via Node.js streams with backpressure. Memory usage stays constant regardless of file size. Enforces `maxSizeBytes` while streaming. |
+| `S3Driver` | **Streams with bounded memory, always.** With `options.size` (≤ 5 GiB) the payload is sent as a SigV4 `aws-chunked` body whose chunks are signed lazily as they are read (backpressure preserved, zero buffering). Without a known size — or beyond 5 GiB — the driver falls back to a multipart upload, reading the stream into part-sized buffers (default 8 MiB, minimum 5 MiB), so peak memory stays bounded. |
+| `CloudinaryDriver` | **Buffers the full file** into a `Blob` for the multipart upload. Enforces `maxSizeBytes`. |
+
+When the size is known, pass it to unlock the leanest (single-request) streaming path:
+
+```ts
+const result = await client.upload(stream, {
+  filename: "report.pdf",
+  path: "invoices/2024",
+  mimeType: "application/pdf",
+  size: bytes,
+});
+```
+
+Without `size`, `S3Driver` still streams with bounded memory via a multipart upload. If the stream ends before or after the declared size, the upload is aborted and fails with a validation error instead of silently storing a corrupted object.
+
+## Multipart uploads
+
+`S3Driver` splits large objects into parts via the S3 multipart flow (`CreateMultipartUpload` → `UploadPart` → `CompleteMultipartUpload`) in three situations:
+
+- the size is unknown — the stream is read into part-sized buffers instead of being buffered whole;
+- the object exceeds 5 GiB, the single-`PUT` cap;
+- `forceMultipart: true` is set.
+
+Multipart parts are uploaded sequentially as the stream fills each buffer, so peak memory is bounded by `partSize` (default 8 MiB, minimum 5 MiB) regardless of object size. If the stream mismatches a declared `size`, the driver aborts the in-flight multipart upload and throws a validation error.
+
+`CloudinaryDriver` has no chunked multipart support: it buffers the full asset into a `Blob` and sends it as a single `multipart/form-data` request, which is why very large files are not recommended there. `LocalDriver` has no concept of parts because it streams straight to disk.
+
+## Cancelling uploads
+
+Pass an `AbortSignal` in `UploadOptions` to cancel an in-flight upload. On abort, every driver rejects with a `DOMException` named `AbortError` (detectable via `err.name === "AbortError"` or `abortError()` from `@fileway/core`):
+
+```ts
+const controller = new AbortController();
+
+const upload = client.upload(stream, {
+  filename: "large.bin",
+  signal: controller.signal,
+});
+
+controller.abort();
+
+try {
+  await upload;
+} catch (err) {
+  if (err.name === "AbortError") {
+    // cancelled — cleanly
+  }
+}
+```
+
+| Driver | Behavior on abort |
+|--------|-------------------|
+| `LocalDriver` | Destroys the source and destination streams and unlinks the partial file, so nothing is left on disk. |
+| `S3Driver` | Cancels the request and source stream. For multipart uploads it first sends `AbortMultipartUpload` so no orphaned parts remain in the bucket. |
+| `CloudinaryDriver` | Aborts the upload request. |
+
+## Tracking upload progress
+
+Pass `onProgress` in `UploadOptions` to receive `{ bytes, total?, progress? }` as chunks flow through the stream. `total` and `progress` (0..1) are present only when `options.size` is known; otherwise only cumulative `bytes` are reported.
+
+```ts
+const result = await client.upload(stream, {
+  filename: "large.bin",
+  size: totalBytes,
+  onProgress: ({ bytes, progress }) => {
+    updateProgressBar(progress ?? bytes / totalBytes);
+  },
+});
+```
+
+Event cadence is adaptive: a significant chunk (≥ 256 KiB, or ≥ 5% of a known total) reports immediately, while small chunks on fast streams are coalesced to at most one event per 100 ms. An exact final event always fires (`bytes === total`, `progress === 1`), and no event fires on abort. Progress is measured at the client layer as bytes leave the source stream — Local reports as bytes hit disk, S3 as bytes are streamed or buffered into parts, and Cloudinary during its pre-signature `Blob` buffering (its `fetch` upload itself exposes no progress).

@@ -100,6 +100,19 @@ describe("LocalDriver", () => {
     await expect(driver.get("missing.txt")).rejects.toThrow(/not found/);
   });
 
+  it("should classify a missing file as not-found", async () => {
+    await expect(driver.get("missing.txt")).rejects.toMatchObject({
+      code: "not-found",
+      provider: "local",
+    });
+  });
+
+  it("should classify an escaping path as validation", async () => {
+    await expect(driver.get("../evil.txt")).rejects.toMatchObject({
+      code: "validation",
+    });
+  });
+
   it("should reject a path that escapes the directory", async () => {
     await expect(driver.get("../evil.txt")).rejects.toThrow(/escapes/);
   });

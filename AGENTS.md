@@ -136,16 +136,27 @@ export class FilewayClient<const TConfig extends FilewayConfig> {
 - [x] **Remove edge duplicates** — `driver-cloudinary-edge` and `driver-s3-edge` deleted; their functionality is now in the universal `driver-cloudinary` and `driver-s3`.
 - [x] **Conditional exports** — All packages declare `worker`, `deno`, `bun`, `import`, `require` in `exports` map.
 - [x] **Edge-runtime tests** — `@fileway/core` and `@fileway/driver-cloudinary` run vitest with `environment: "edge-runtime"` via `@edge-runtime/vm`.
-- [x] **All builds & tests pass** — 40 unit tests across 4 packages, plus 5 S3 integration tests against MinIO.
+- [x] **All builds & tests pass** — 117 unit tests across 4 packages, plus 8 S3 integration tests against MinIO.
+
+## Typed Error Taxonomy (Complete)
+
+- [x] **Single `StorageError`** — `packages/core/src/errors.ts` defines `StorageError` + the `StorageErrorCode` union (`validation`, `config`, `not-found`, `bucket-not-found`, `auth-failed`, `size-exceeded`, `network`, `provider-error`) with optional `statusCode`/`provider`/`cause`, `toJSON()`, and `isAbortError()`. `ValidationError` is a subclass (`code === "validation"`); aborts stay standard `DOMException`/`AbortError`.
+- [x] **All drivers throw typed errors** — S3 parses AWS/MinIO XML `<Code>` with HTTP fallback and wraps fetch failures as `network`; Cloudinary maps HTTP status by context (upload vs get); Local classifies missing files as `not-found`; missing S3 credentials and unsupported presigned-URL drivers throw `config`. Message strings unchanged (non-breaking).
+- [x] **Retry foundation** — `network`/`provider-error` are retryable; `validation`/`config`/`auth-failed`/`not-found`/`bucket-not-found`/`size-exceeded` are not.
+
+## Dependency-Free Logging & Error Hooks (Complete)
+
+- [x] **`logger`** — optional `{ debug?, info?, warn?, error? }` on `FilewayClient` config (`packages/core/src/logging.ts`). Fires `info` on every operation start/success with structured meta and `error` on failures; silent when omitted; a throwing logger never breaks the operation.
+- [x] **`onError(error, context)`** — awaited before rethrow; skipped for aborts, fires for `ValidationError`/`config`; a throwing hook never masks the original error. No logger SDK is imported anywhere (zero core deps preserved).
 
 ## Current Packages
 
 | Package | Node deps | Runtime | Tests |
 |---|---|---|---|
-| `@fileway/core` | None | Universal | 5 |
-| `@fileway/driver-local` | `node:fs`, `node:path`, `node:stream` | Node.js, Bun | 5 |
-| `@fileway/driver-s3` | None (pure fetch + Web Crypto SigV4) | Universal | 22 |
-| `@fileway/driver-cloudinary` | None | Universal | 8 |
+| `@fileway/core` | None | Universal | 30 |
+| `@fileway/driver-local` | `node:fs`, `node:path`, `node:stream` | Node.js, Bun | 12 |
+| `@fileway/driver-s3` | None (pure fetch + Web Crypto SigV4) | Universal | 42 unit + 8 MinIO |
+| `@fileway/driver-cloudinary` | None | Universal | 33 |
 
 ## Relevant Files
 

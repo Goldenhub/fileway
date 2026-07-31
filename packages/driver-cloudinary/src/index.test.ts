@@ -473,6 +473,7 @@ describe("CloudinaryDriver", () => {
 
       expect(mockFetch).toHaveBeenCalledWith(
         "https://res.cloudinary.com/demo/image/upload/abc123",
+        {},
       );
       expect(stream).toBe(body);
     });
@@ -564,6 +565,82 @@ describe("CloudinaryDriver", () => {
       await expect(driver.getPresignedUrl("abc123", { expiresIn: 1.5 })).rejects.toThrow(
         /expiresIn must be a positive integer/,
       );
+    });
+  });
+
+  describe("error taxonomy", () => {
+    const uploadStream = () =>
+      new ReadableStream<Uint8Array>({
+        start(c) {
+          c.enqueue(new TextEncoder().encode("data"));
+          c.close();
+        },
+      });
+
+    it("classifies an upload 401 as auth-failed", async () => {
+      mockFetch.mockResolvedValue({
+        ok: false,
+        status: 401,
+        statusText: "Unauthorized",
+      } as Response);
+      await expect(driver.upload(uploadStream(), { filename: "a.png" })).rejects.toMatchObject({
+        code: "auth-failed",
+        statusCode: 401,
+        provider: "cloudinary",
+      });
+    });
+
+    it("classifies an upload 404 as bucket-not-found", async () => {
+      mockFetch.mockResolvedValue({
+        ok: false,
+        status: 404,
+        statusText: "Not Found",
+      } as Response);
+      await expect(driver.upload(uploadStream(), { filename: "a.png" })).rejects.toMatchObject({
+        code: "bucket-not-found",
+        statusCode: 404,
+      });
+    });
+
+    it("classifies a get 404 as not-found", async () => {
+      mockFetch.mockResolvedValue({
+        ok: false,
+        status: 404,
+        statusText: "Not Found",
+      } as Response);
+      await expect(driver.get("missing")).rejects.toMatchObject({
+        code: "not-found",
+        statusCode: 404,
+      });
+    });
+
+    it("classifies a 5xx as provider-error", async () => {
+      mockFetch.mockResolvedValue({
+        ok: false,
+        status: 500,
+        statusText: "Internal Server Error",
+      } as Response);
+      await expect(driver.get("abc123")).rejects.toMatchObject({
+        code: "provider-error",
+        statusCode: 500,
+      });
+    });
+
+    it("maps a fetch rejection to network and preserves the cause", async () => {
+      const cause = new TypeError("fetch failed");
+      mockFetch.mockRejectedValue(cause);
+      await expect(driver.get("abc123")).rejects.toMatchObject({
+        code: "network",
+        provider: "cloudinary",
+        cause,
+      });
+    });
+
+    it("lets an abort pass through untouched", async () => {
+      const controller = new AbortController();
+      controller.abort();
+      mockFetch.mockRejectedValue(controller.signal.reason);
+      await expect(driver.get("abc123")).rejects.toMatchObject({ name: "AbortError" });
     });
   });
 });

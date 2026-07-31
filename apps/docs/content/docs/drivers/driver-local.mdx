@@ -99,9 +99,9 @@ const result = await client.upload(stream, {
 
 ## Errors
 
-Throws `ValidationError` (from `@fileway/core`) when:
-- `filename` is missing, contains path separators, or exceeds 255 characters
-- `path` is absolute or contains null bytes
-- `mimeType` is malformed
-- Upload size exceeds `maxSizeBytes`
-- Path traversal is detected (path escapes the configured `directory`)|
+All failures are `StorageError`s from `@fileway/core` (see the [error reference](/docs/guide/observability#errors) for the full contract — codes, `statusCode`, `provider`, `cause`, and `isAbortError`). For this driver:
+
+| Code | When |
+|------|------|
+| `validation` | Malformed input: missing/oversized `filename`, path separators, absolute `path`, null bytes, malformed `mimeType`, upload size exceeding `maxSizeBytes`, path traversal (a path escaping the configured `directory`). |
+| `not-found` | `get()` for a file that does not exist. |

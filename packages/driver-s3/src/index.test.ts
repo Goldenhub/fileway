@@ -607,3 +607,89 @@ describe("S3Driver (Cloudflare R2)", () => {
     );
   });
 });
+
+describe("S3Driver error taxonomy", () => {
+  let driver: S3Driver;
+
+  beforeEach(() => {
+    driver = new S3Driver({
+      bucket: "test-bucket",
+      region: "us-east-1",
+      credentials: { accessKeyId: "AKID", secretAccessKey: "secret" },
+    });
+  });
+
+  const s3XmlError = (code: string, status: number) =>
+    new Response(
+      `<?xml version="1.0" encoding="UTF-8"?><Error><Code>${code}</Code><Message>nope</Message></Error>`,
+      { status },
+    );
+
+  it("classifies NoSuchKey as not-found", async () => {
+    mockFetch.mockResolvedValue(s3XmlError("NoSuchKey", 404));
+    await expect(driver.get("missing.txt")).rejects.toMatchObject({
+      code: "not-found",
+      statusCode: 404,
+      provider: "s3",
+    });
+  });
+
+  it("classifies NoSuchBucket as bucket-not-found", async () => {
+    mockFetch.mockResolvedValue(s3XmlError("NoSuchBucket", 404));
+    await expect(driver.get("file.txt")).rejects.toMatchObject({
+      code: "bucket-not-found",
+      statusCode: 404,
+    });
+  });
+
+  it("classifies AccessDenied as auth-failed", async () => {
+    mockFetch.mockResolvedValue(s3XmlError("AccessDenied", 403));
+    await expect(driver.get("file.txt")).rejects.toMatchObject({ code: "auth-failed" });
+  });
+
+  it("classifies EntityTooLarge as size-exceeded", async () => {
+    mockFetch.mockResolvedValue(s3XmlError("EntityTooLarge", 400));
+    const stream = new ReadableStream<Uint8Array>({
+      start(c) {
+        c.enqueue(new Uint8Array([1]));
+        c.close();
+      },
+    });
+    await expect(
+      driver.upload(stream, { filename: "big.bin", size: 1 }),
+    ).rejects.toMatchObject({ code: "size-exceeded" });
+  });
+
+  it("falls back to provider-error with statusCode for unknown codes", async () => {
+    mockFetch.mockResolvedValue(new Response("InternalError", { status: 500 }));
+    await expect(driver.get("file.txt")).rejects.toMatchObject({
+      code: "provider-error",
+      statusCode: 500,
+    });
+  });
+
+  it("maps a fetch rejection to network and preserves the cause", async () => {
+    const cause = new TypeError("fetch failed");
+    mockFetch.mockRejectedValue(cause);
+    await expect(driver.get("file.txt")).rejects.toMatchObject({
+      code: "network",
+      provider: "s3",
+      cause,
+    });
+  });
+
+  it("lets an abort pass through untouched", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    mockFetch.mockRejectedValue(controller.signal.reason);
+    await expect(driver.get("file.txt")).rejects.toMatchObject({ name: "AbortError" });
+  });
+
+  it("throws config when credentials are missing", async () => {
+    const noCreds = new S3Driver({ bucket: "test-bucket" });
+    await expect(noCreds.get("file.txt")).rejects.toMatchObject({
+      code: "config",
+      provider: "s3",
+    });
+  });
+});

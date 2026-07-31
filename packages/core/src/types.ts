@@ -1,3 +1,5 @@
+import type { ErrorContext, Logger } from "./logging.js";
+
 export interface UploadProgress {
   /** Bytes read from the source stream (after `beforeUpload` middleware) so far. */
   bytes: number;
@@ -73,4 +75,12 @@ export interface MiddlewareHook {
 export interface FilewayConfig<TDriver extends BaseDriver> {
   driver: TDriver;
   middlewares?: MiddlewareHook[];
+  /** Optional structured logger (dependency-free contract — adapt Pino,
+   * Sentry, Datadog, etc.). Receives `info` events per operation and `error`
+   * events on failure. Absent by default: nothing is logged. */
+  logger?: Logger;
+  /** Optional error hook called when an operation throws. Receives the raw
+   * error (a `StorageError` for driver failures) plus context. Aborts are
+   * skipped. A throwing/`onError` never masks the original error. */
+  onError?: (error: unknown, context: ErrorContext) => void | Promise<void>;
 }

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { FilewayClient, version, abortError } from "./index.js";
+import { FilewayClient, version, abortError, isAbortError, StorageError, ValidationError } from "./index.js";
 import type { BaseDriver, UploadOptions, UploadResult } from "./types.js";
 
 describe("version", () => {
@@ -14,6 +14,65 @@ describe("abortError", () => {
     expect(err.name).toBe("AbortError");
     expect(err.message).toBe("upload aborted");
     expect(err instanceof DOMException).toBe(true);
+  });
+});
+
+describe("StorageError", () => {
+  it("should expose a stable machine-readable code", () => {
+    const err = new StorageError("not-found", "S3 get failed: 404 Not Found", {
+      statusCode: 404,
+      provider: "s3",
+    });
+    expect(err.code).toBe("not-found");
+    expect(err.statusCode).toBe(404);
+    expect(err.provider).toBe("s3");
+    expect(err.message).toBe("S3 get failed: 404 Not Found");
+    expect(err instanceof Error).toBe(true);
+    expect(err.name).toBe("StorageError");
+  });
+
+  it("should wrap a cause", () => {
+    const cause = new TypeError("fetch failed");
+    const err = new StorageError("network", "s3 network error: fetch failed", { cause });
+    expect(err.cause).toBe(cause);
+  });
+
+  it("should serialize to JSON with code and message", () => {
+    const err = new StorageError("auth-failed", "bad credentials", {
+      statusCode: 403,
+      provider: "cloudinary",
+    });
+    expect(err.toJSON()).toEqual({
+      name: "StorageError",
+      code: "auth-failed",
+      message: "bad credentials",
+      statusCode: 403,
+      provider: "cloudinary",
+    });
+    expect(JSON.parse(JSON.stringify(err)).code).toBe("auth-failed");
+  });
+});
+
+describe("isAbortError", () => {
+  it("should detect abortError()", () => {
+    expect(isAbortError(abortError("upload aborted"))).toBe(true);
+  });
+
+  it("should return false for other errors", () => {
+    expect(isAbortError(new Error("boom"))).toBe(false);
+    expect(isAbortError(new StorageError("network", "boom"))).toBe(false);
+    expect(isAbortError(null)).toBe(false);
+  });
+});
+
+describe("ValidationError", () => {
+  it("should be a StorageError with code validation", () => {
+    const err = new ValidationError("filename is required");
+    expect(err).toBeInstanceOf(ValidationError);
+    expect(err).toBeInstanceOf(StorageError);
+    expect(err).toBeInstanceOf(Error);
+    expect(err.code).toBe("validation");
+    expect(err.name).toBe("ValidationError");
   });
 });
 
@@ -136,6 +195,10 @@ describe("FilewayClient", () => {
     await expect(client.getPresignedUrl("/uploads/test.txt")).rejects.toThrow(
       "driver mock does not support presigned URLs",
     );
+    await expect(client.getPresignedUrl("/uploads/test.txt")).rejects.toMatchObject({
+      code: "config",
+      provider: "mock",
+    });
   });
 
   it("should forward an abort signal to the driver", async () => {
@@ -342,5 +405,162 @@ describe("FilewayClient upload progress", () => {
     expect(events.length).toBeGreaterThanOrEqual(2);
     expect(events.length).toBeLessThanOrEqual(3);
     expect(events[events.length - 1]!.bytes).toBe(small * 32);
+  });
+});
+
+describe("FilewayClient logging & onError", () => {
+  const streamOfBytes = (...lengths: number[]): ReadableStream<Uint8Array> => {
+    const encoder = new TextEncoder();
+    return new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (const len of lengths) controller.enqueue(encoder.encode("x".repeat(len)));
+        controller.close();
+      },
+    });
+  };
+
+  const okDriver = (): BaseDriver => ({
+    name: "mock",
+    upload: vi.fn(
+      async (): Promise<UploadResult<Record<string, unknown>>> => ({
+        id: "file_1",
+        url: "https://example.com/test.txt",
+        path: "/uploads/test.txt",
+        size: 5,
+        meta: {},
+      }),
+    ),
+    delete: vi.fn(async () => true),
+    getUrl: vi.fn(async (p: string) => `https://example.com${p}`),
+    get: vi.fn(async () => new ReadableStream<Uint8Array>()),
+  });
+
+  const failingDriver = (err: Error): BaseDriver => ({
+    name: "mock",
+    upload: vi.fn(async () => {
+      throw err;
+    }),
+    delete: vi.fn(async () => {
+      throw err;
+    }),
+    getUrl: vi.fn(async () => {
+      throw err;
+    }),
+    get: vi.fn(async () => {
+      throw err;
+    }),
+  });
+
+  it("logs upload started and succeeded with meta", async () => {
+    const info = vi.fn();
+    const client = new FilewayClient({ driver: okDriver(), logger: { info } });
+
+    await client.upload(streamOfBytes(5), { filename: "test.txt", size: 5 });
+
+    expect(info).toHaveBeenCalledWith(
+      "upload started",
+      expect.objectContaining({ operation: "upload", filename: "test.txt", size: 5 }),
+    );
+    expect(info).toHaveBeenCalledWith(
+      "upload succeeded",
+      expect.objectContaining({
+        operation: "upload",
+        id: "file_1",
+        path: "/uploads/test.txt",
+        size: 5,
+        durationMs: expect.any(Number),
+      }),
+    );
+  });
+
+  it("reports failures to onError with a typed error and context", async () => {
+    const onError = vi.fn();
+    const client = new FilewayClient({
+      driver: failingDriver(
+        new StorageError("network", "s3 network error: fetch failed", { provider: "s3" }),
+      ),
+      onError,
+    });
+
+    await expect(client.get("missing.txt")).rejects.toThrow("s3 network error");
+
+    expect(onError).toHaveBeenCalledWith(
+      expect.objectContaining({ code: "network", provider: "s3" }),
+      expect.objectContaining({ operation: "get", path: "missing.txt", durationMs: expect.any(Number) }),
+    );
+  });
+
+  it("skips onError on abort", async () => {
+    const onError = vi.fn();
+    const client = new FilewayClient({
+      driver: failingDriver(abortError("upload aborted")),
+      onError,
+    });
+
+    await expect(
+      client.upload(streamOfBytes(3), { filename: "a.txt" }),
+    ).rejects.toMatchObject({ name: "AbortError" });
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it("logs an error-level event even without onError", async () => {
+    const error = vi.fn();
+    const client = new FilewayClient({
+      driver: failingDriver(new StorageError("not-found", "file not found: x", { provider: "local" })),
+      logger: { error },
+    });
+
+    await expect(client.get("x")).rejects.toThrow();
+
+    expect(error).toHaveBeenCalledWith(
+      "get failed",
+      expect.objectContaining({ operation: "get", path: "x" }),
+    );
+  });
+
+  it("does not let a throwing logger mask a successful upload", async () => {
+    const logger = {
+      info: vi.fn(() => {
+        throw new Error("logger boom");
+      }),
+    };
+    const client = new FilewayClient({ driver: okDriver(), logger });
+
+    await expect(client.upload(streamOfBytes(1), { filename: "a.txt" })).resolves.toMatchObject({
+      id: "file_1",
+    });
+  });
+
+  it("does not let a throwing onError mask the original error", async () => {
+    const onError = vi.fn(() => {
+      throw new Error("reporter boom");
+    });
+    const client = new FilewayClient({
+      driver: failingDriver(new StorageError("auth-failed", "denied")),
+      onError,
+    });
+
+    await expect(client.delete("x")).rejects.toMatchObject({ code: "auth-failed" });
+  });
+
+  it("awaits an async onError before rejecting", async () => {
+    let flushed = false;
+    const onError = vi.fn(async () => {
+      await new Promise((r) => setTimeout(r, 10));
+      flushed = true;
+    });
+    const client = new FilewayClient({ driver: failingDriver(new Error("boom")), onError });
+
+    await expect(client.getUrl("x")).rejects.toThrow("boom");
+    expect(flushed).toBe(true);
+  });
+
+  it("only calls the logger methods that are provided", async () => {
+    const debug = vi.fn();
+    const client = new FilewayClient({ driver: okDriver(), logger: { debug } });
+
+    await client.getUrl("x");
+
+    expect(debug).not.toHaveBeenCalled();
   });
 });

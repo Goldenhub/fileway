@@ -1,5 +1,5 @@
-import type { BaseDriver, PresignedUrlOptions, UploadOptions, UploadResult } from "@fileway/core";
-import { validateUploadOptions, ValidationError, urlEncodePath } from "@fileway/core";
+import type { BaseDriver, PresignedUrlOptions, StorageErrorCode, UploadOptions, UploadResult } from "@fileway/core";
+import { validateUploadOptions, ValidationError, urlEncodePath, isAbortError, StorageError } from "@fileway/core";
 
 const randomUUID = () => globalThis.crypto.randomUUID();
 const PRESIGN_DEFAULT_EXPIRY = 3600;
@@ -96,10 +96,17 @@ export class CloudinaryDriver implements BaseDriver<CloudinaryMeta> {
     });
     formData.append("signature", signature);
 
-    const res = await fetch(`https://api.cloudinary.com/v1_1/${this.cloudName}/auto/upload`, { method: "POST", body: formData, signal: options.signal ?? null });
+    const res = await fetchWithAbort(
+      `https://api.cloudinary.com/v1_1/${this.cloudName}/auto/upload`,
+      { method: "POST", body: formData, signal: options.signal ?? null },
+      "cloudinary",
+    );
 
     if (!res.ok) {
-      throw new Error(`Cloudinary HTTP Upload Failed (${res.status})`);
+      throw new StorageError(classifyCloudinaryStatus(res.status, "upload"), `Cloudinary HTTP Upload Failed (${res.status})`, {
+        statusCode: res.status,
+        provider: "cloudinary",
+      });
     }
 
     const data = (await res.json()) as {
@@ -166,12 +173,15 @@ export class CloudinaryDriver implements BaseDriver<CloudinaryMeta> {
 
   async get(publicId: string, options?: CloudinaryLookupOptions): Promise<ReadableStream<Uint8Array>> {
     const url = await this.getUrl(publicId, options);
-    const response = await fetch(url);
+    const response = await fetchWithAbort(url, {}, "cloudinary");
     if (!response.ok) {
-      throw new Error(`Cloudinary get failed: ${response.status} ${response.statusText}`);
+      throw new StorageError(classifyCloudinaryStatus(response.status, "get"), `Cloudinary get failed: ${response.status} ${response.statusText}`, {
+        statusCode: response.status,
+        provider: "cloudinary",
+      });
     }
     if (!response.body) {
-      throw new Error("Cloudinary get returned no response body");
+      throw new StorageError("provider-error", "Cloudinary get returned no response body", { provider: "cloudinary" });
     }
     return response.body;
   }
@@ -296,4 +306,26 @@ function base64UrlEncode(bytes: Uint8Array): string {
   let binary = "";
   for (const b of bytes) binary += String.fromCharCode(b);
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+/** `fetch` that converts non-abort failures into a typed `network` error,
+ * while letting aborts (`AbortError`) pass through untouched. */
+async function fetchWithAbort(url: string | URL, init: RequestInit, provider: string): Promise<Response> {
+  try {
+    return await fetch(url, init);
+  } catch (err) {
+    if (isAbortError(err)) throw err;
+    const cause = err instanceof Error ? err : new Error(String(err));
+    throw new StorageError("network", `${provider} network error: ${cause.message}`, { provider, cause });
+  }
+}
+
+/** Classifies a Cloudinary HTTP status. Context separates a 404 on the CDN
+ * (missing asset → `not-found`) from one on the upload/admin API (unknown
+ * cloud → `bucket-not-found`). */
+function classifyCloudinaryStatus(status: number, context: "upload" | "get"): StorageErrorCode {
+  if (status === 401 || status === 403) return "auth-failed";
+  if (status === 404) return context === "upload" ? "bucket-not-found" : "not-found";
+  if (status === 413) return "size-exceeded";
+  return "provider-error";
 }

@@ -153,8 +153,14 @@ const result = await client.upload(stream, {
 
 ## Errors
 
-Throws `ValidationError` (from `@fileway/core`) when:
-- `filename` is missing, contains path separators, or exceeds 255 characters
-- `path` is absolute or contains null bytes
-- `mimeType` is malformed
-- Upload size exceeds `maxSizeBytes`|
+All failures are `StorageError`s from `@fileway/core` (see the [error reference](/docs/guide/observability#errors) for the full contract — codes, `statusCode`, `provider`, `cause`, and `isAbortError`). For this driver:
+
+| Code | When |
+|------|------|
+| `validation` | Malformed input: missing/oversized `filename`, path separators, absolute `path`, null bytes, malformed `mimeType`, upload size exceeding `maxSizeBytes`, non-positive `expiresIn`. |
+| `auth-failed` | HTTP 401/403 — invalid or expired `apiKey`/`apiSecret`, or restricted permissions. |
+| `bucket-not-found` | Upload-time HTTP 404 — the cloud does not exist. |
+| `not-found` | Download-time HTTP 404 — the asset does not exist at the CDN URL. |
+| `size-exceeded` | HTTP 413. |
+| `network` | `fetch` failed before an HTTP response; the original error is preserved as `cause`. Safe to retry. |
+| `provider-error` | Any other non-2xx response (e.g. HTTP 500). Safe to retry. |

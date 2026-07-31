@@ -323,6 +323,55 @@ const cloudinary = new CloudinaryDriver({
 
 Returns `UploadResult<TMeta>` — `{ id, url, path, size, meta }` where `meta` is inferred from the driver.
 
+### Errors
+
+Every failure is a `StorageError` from `@fileway/core` with a stable `code` to branch on (don't parse `message`), plus optional `statusCode`, `provider`, and `cause`:
+
+```ts
+import { StorageError, isAbortError } from "@fileway/core";
+
+try {
+  await client.get("uploads/report.pdf");
+} catch (err) {
+  if (isAbortError(err)) return; // cancelled — not an error
+  if (err instanceof StorageError) {
+    switch (err.code) {
+      case "not-found": // 404 / NoSuchKey / missing local file
+      case "bucket-not-found": // NoSuchBucket
+      case "auth-failed": // 401/403, bad credentials
+      case "size-exceeded": // EntityTooLarge / 413
+      case "network": // fetch failed before a response — safe to retry
+      case "provider-error": // 5xx etc. — safe to retry
+    }
+    console.error(`${err.provider}:${err.code}`, err.message, err.statusCode);
+  }
+}
+```
+
+`code` is one of `validation` (`ValidationError` is a `StorageError` subclass), `config`, `not-found`, `bucket-not-found`, `auth-failed`, `size-exceeded`, `network`, `provider-error`. Cancellation is not a `StorageError` — it rejects with the standard `DOMException`/`AbortError` that `isAbortError()` recognizes. See the [Error handling guide](apps/docs/content/docs/guide/observability.mdx) for the per-driver code derivation.
+
+### Logging & error reporting
+
+Attach your own loggers and error reporters with zero extra dependencies — Fileway only defines a minimal, dependency-free contract:
+
+```ts
+const client = new FilewayClient({
+  driver,
+  logger: {
+    info: (message, meta) => pino.info(meta ?? {}, message),
+    error: (message, meta) => pino.error(meta ?? {}, message),
+  },
+  onError: (error, context) => {
+    Sentry.captureException(error, {
+      tags: { operation: context.operation, code: error.code, provider: error.provider },
+    });
+  },
+});
+```
+
+- `logger` — optional `{ debug?, info?, warn?, error? }`; receives `"<operation> started/succeeded"` `info` events (with `{ operation, path, filename, size, id, url, durationMs }`) and `error` on failures. Silent when omitted. Never breaks the operation (a throwing logger is caught). Adapt Pino/Datadog with a few lines — see the [Logging guide](apps/docs/content/docs/guide/observability.mdx).
+- `onError` — optional `(error, context) => void | Promise<void>`; awaited on every failure before the error is rethrown, with `{ operation, durationMs, filename?, path?, mimeType?, size? }`. Aborts are skipped; `ValidationError`/`config` errors fire. A throwing `onError` never masks the original error.
+
 ### `client.get(path)` / `client.delete(path)` / `client.getUrl(path)` / `client.getPresignedUrl(path, options)`
 
 - `get(path)` returns a WHATWG `ReadableStream<Uint8Array>` for streaming the stored file back — pull-based with backpressure, never buffered whole. Throws when `path` does not exist.
@@ -342,8 +391,10 @@ Returns `UploadResult<TMeta>` — `{ id, url, path, size, meta }` where `meta` i
 - [x] Upload cancellation — `options.signal` on every driver; aborted uploads reject with `AbortError` (Local cleans up partial files, S3 aborts multipart sessions)
 - [x] Upload progress — `options.onProgress` reports bytes streamed on every driver, with exact final totals when `size` is known
 - [x] Presigned URLs — `getPresignedUrl(path, { expiresIn })` issues time-limited, signed download links for S3 (SigV4, works with MinIO/R2 endpoints) and Cloudinary (signed delivery URLs)
+- [x] Typed errors — every failure is a `StorageError` from `@fileway/core` with a stable `code` (`not-found`, `auth-failed`, `network`, `provider-error`, …) plus `statusCode`/`provider`/`cause`; `ValidationError` is a subclass and aborts stay `AbortError`
+- [x] Logging & error hooks — optional `logger` (Pino-style `{ debug, info, warn, error }`) and `onError` (Sentry/Datadog) config on `FilewayClient`, zero dependencies, aborts excluded
 - [ ] Stream transformation in `beforeUpload` middlewares
-- [ ] Retries with exponential backoff and classified errors
+- [ ] Retries with exponential backoff (on `network`/`provider-error` codes)
 
 **Planned drivers:** Cloudflare R2 (native), Google Cloud Storage, Backblaze B2, Azure Blob Storage, DigitalOcean Spaces (S3-compatible).
 

@@ -1,5 +1,5 @@
-import type { BaseDriver, PresignedUrlOptions, UploadOptions, UploadResult } from "@fileway/core";
-import { validateUploadOptions, ValidationError, urlEncodePath, abortError } from "@fileway/core";
+import type { BaseDriver, PresignedUrlOptions, StorageErrorCode, UploadOptions, UploadResult } from "@fileway/core";
+import { validateUploadOptions, ValidationError, urlEncodePath, abortError, isAbortError, StorageError } from "@fileway/core";
 import { buildCanonicalQueryString, createStreamingBody, presignUrl, sign, signStreamingRequest, sha256 } from "./sigv4.js";
 
 const randomUUID = () => globalThis.crypto.randomUUID();
@@ -106,7 +106,7 @@ export class S3Driver implements BaseDriver<{ bucket: string; etag?: string }> {
     const bodyError: { current?: Error } = {};
     let response: Response;
     try {
-      response = await fetch(url, {
+      response = await fetchWithAbort(url, {
         method: "PUT",
         headers: {
           ...sigHeaders,
@@ -118,7 +118,7 @@ export class S3Driver implements BaseDriver<{ bucket: string; etag?: string }> {
         // other runtimes ignore it.
         duplex: "half",
         signal: options.signal ?? null,
-      } as RequestInit);
+      } as RequestInit, "s3");
     } catch (err) {
       // An errored body (e.g. size mismatch) surfaces as a generic `fetch
       // failed`; rethrow the specific ValidationError when present.
@@ -128,7 +128,7 @@ export class S3Driver implements BaseDriver<{ bucket: string; etag?: string }> {
 
     if (!response.ok) {
       const body = await response.text().catch(() => "");
-      throw new Error(`S3 upload failed: ${response.status} ${response.statusText}${body ? ` — ${body}` : ""}`);
+      throw s3Error(`S3 upload failed: ${response.status} ${response.statusText}${body ? ` — ${body}` : ""}`, response.status, body);
     }
 
     const etag = response.headers.get("etag") ?? undefined;
@@ -172,18 +172,18 @@ export class S3Driver implements BaseDriver<{ bucket: string; etag?: string }> {
       now,
       { uploads: "" },
     );
-    const createRes = await fetch(create.url, {
+    const createRes = await fetchWithAbort(create.url, {
       method: "POST",
       headers: { ...createHeaders, ...metaHeaders, "content-type": typeHeader },
       signal: signal ?? null,
-    });
+    }, "s3");
     if (!createRes.ok) {
       const body = await createRes.text().catch(() => "");
-      throw new Error(`S3 multipart create failed: ${createRes.status} ${createRes.statusText}${body ? ` — ${body}` : ""}`);
+      throw s3Error(`S3 multipart create failed: ${createRes.status} ${createRes.statusText}${body ? ` — ${body}` : ""}`, createRes.status, body);
     }
     const uploadId = extractXml(await createRes.text(), "UploadId");
     if (!uploadId) {
-      throw new Error("S3 multipart create returned no UploadId");
+      throw new StorageError("provider-error", "S3 multipart create returned no UploadId", { provider: "s3" });
     }
 
     const abort = () => this.abortMultipart(key, uploadId, cred, now);
@@ -231,12 +231,12 @@ export class S3Driver implements BaseDriver<{ bucket: string; etag?: string }> {
       );
       let res: Response;
       try {
-        res = await fetch(part.url, {
+        res = await fetchWithAbort(part.url, {
           method: "PUT",
           headers: { ...partSig, "content-length": String(bytes.byteLength) },
           body: bytes as BodyInit,
           signal: signal ?? null,
-        });
+        }, "s3");
       } catch (err) {
         // Includes abort: undo the server-side multipart session, then rethrow
         // the original error (an AbortError when the user cancelled).
@@ -245,7 +245,7 @@ export class S3Driver implements BaseDriver<{ bucket: string; etag?: string }> {
       }
       if (!res.ok) {
         await abort();
-        throw new Error(`S3 multipart part ${partNumber} failed: ${res.status} ${res.statusText}`);
+        throw s3Error(`S3 multipart part ${partNumber} failed: ${res.status} ${res.statusText}`, res.status);
       }
       const etag = res.headers.get("etag");
       parts.push({ partNumber: partNumber++, etag: etag ?? `"${await sha256(bytes)}"` });
@@ -298,15 +298,15 @@ export class S3Driver implements BaseDriver<{ bucket: string; etag?: string }> {
         now,
         { uploadId },
       );
-      const completeRes = await fetch(complete.url, {
+      const completeRes = await fetchWithAbort(complete.url, {
         method: "POST",
         headers: { ...completeHeaders, "content-type": "application/xml" },
         body: xmlBytes,
         signal: signal ?? null,
-      });
+      }, "s3");
       if (!completeRes.ok) {
         await abort();
-        throw new Error(`S3 multipart complete failed: ${completeRes.status} ${completeRes.statusText}`);
+        throw s3Error(`S3 multipart complete failed: ${completeRes.status} ${completeRes.statusText}`, completeRes.status);
       }
       const etag = extractXml(await completeRes.text(), "ETag");
 
@@ -347,7 +347,7 @@ export class S3Driver implements BaseDriver<{ bucket: string; etag?: string }> {
       now,
     );
 
-    const response = await fetch(url, {
+    const response = await fetchWithAbort(url, {
       method: "PUT",
       headers: {
         ...sigHeaders,
@@ -357,10 +357,10 @@ export class S3Driver implements BaseDriver<{ bucket: string; etag?: string }> {
       },
       body: bytes as BodyInit,
       signal: signal ?? null,
-    });
+    }, "s3");
     if (!response.ok) {
       const body = await response.text().catch(() => "");
-      throw new Error(`S3 upload failed: ${response.status} ${response.statusText}${body ? ` — ${body}` : ""}`);
+      throw s3Error(`S3 upload failed: ${response.status} ${response.statusText}${body ? ` — ${body}` : ""}`, response.status, body);
     }
 
     const etag = response.headers.get("etag") ?? undefined;
@@ -405,7 +405,7 @@ export class S3Driver implements BaseDriver<{ bucket: string; etag?: string }> {
       now,
     );
 
-    const response = await fetch(url, { method: "DELETE", headers: sigHeaders });
+    const response = await fetchWithAbort(url, { method: "DELETE", headers: sigHeaders }, "s3");
     return response.ok;
   }
 
@@ -454,14 +454,14 @@ export class S3Driver implements BaseDriver<{ bucket: string; etag?: string }> {
       now,
     );
 
-    const response = await fetch(url, { method: "GET", headers: sigHeaders });
+    const response = await fetchWithAbort(url, { method: "GET", headers: sigHeaders }, "s3");
     if (!response.ok) {
       const body = await response.text().catch(() => "");
-      throw new Error(`S3 get failed: ${response.status} ${response.statusText}${body ? ` — ${body}` : ""}`);
+      throw s3Error(`S3 get failed: ${response.status} ${response.statusText}${body ? ` — ${body}` : ""}`, response.status, body);
     }
 
     if (!response.body) {
-      throw new Error("S3 get returned no response body");
+      throw new StorageError("provider-error", "S3 get returned no response body", { provider: "s3" });
     }
 
     return response.body;
@@ -470,7 +470,50 @@ export class S3Driver implements BaseDriver<{ bucket: string; etag?: string }> {
 
 function getCredentials(config: S3DriverConfig): { accessKeyId: string; secretAccessKey: string } {
   if (config.credentials) return config.credentials;
-  throw new Error("S3Driver requires credentials in config");
+  throw new StorageError("config", "S3Driver requires credentials in config", { provider: "s3" });
+}
+
+/** `fetch` that converts non-abort failures into a typed `network` error,
+ * while letting aborts (`AbortError`) pass through untouched. */
+async function fetchWithAbort(url: string | URL, init: RequestInit, provider: string): Promise<Response> {
+  try {
+    return await fetch(url, init);
+  } catch (err) {
+    if (isAbortError(err)) throw err;
+    const cause = err instanceof Error ? err : new Error(String(err));
+    throw new StorageError("network", `${provider} network error: ${cause.message}`, { provider, cause });
+  }
+}
+
+/** Classifies an S3 failure into a typed code using the AWS/MinIO XML error
+ * `<Code>` when present, falling back to the HTTP status. */
+function classifyS3Error(status: number, body: string): StorageErrorCode {
+  switch (extractXml(body, "Code")) {
+    case "NoSuchBucket":
+      return "bucket-not-found";
+    case "NoSuchKey":
+    case "NoSuchUpload":
+      return "not-found";
+    case "AccessDenied":
+    case "InvalidAccessKeyId":
+    case "SignatureDoesNotMatch":
+    case "ExpiredToken":
+    case "InvalidToken":
+      return "auth-failed";
+    case "EntityTooLarge":
+      return "size-exceeded";
+  }
+  if (status === 401 || status === 403) return "auth-failed";
+  if (status === 404) return "not-found";
+  if (status === 413) return "size-exceeded";
+  return "provider-error";
+}
+
+function s3Error(message: string, status: number, body?: string): StorageError {
+  return new StorageError(classifyS3Error(status, body ?? ""), message, {
+    statusCode: status,
+    provider: "s3",
+  });
 }
 
 function buildEndpoint(

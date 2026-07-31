@@ -1,0 +1,46 @@
+---
+title: Metadata & Lifecycle
+description: User metadata, result metadata, object tagging, and expiration
+---
+
+## User metadata (`options.metadata`)
+
+Pass a `Record<string, string>` on upload:
+
+```ts
+const result = await client.upload(stream, {
+  filename: "photo.jpg",
+  metadata: {
+    userId: "1234",
+    license: "cc-by-4.0",
+  },
+});
+```
+
+| Driver | Behavior |
+|--------|----------|
+| `S3Driver` | Sends metadata as signed `x-amz-meta-*` request headers, so it is persisted as S3 user metadata. |
+| `LocalDriver` | Metadata is **not persisted yet** (persistence is in the works). |
+| `CloudinaryDriver` | Metadata is **not sent yet** (support is in the works). |
+
+## Result metadata (`result.meta`)
+
+Each driver returns its own typed metadata:
+
+| Driver | `meta` shape |
+|--------|--------------|
+| `LocalDriver` | `{ localPath: string }` |
+| `S3Driver` | `{ bucket: string; etag?: string }` |
+| `CloudinaryDriver` | `{ publicId, version, format, resourceType, bytes, secureUrl, width?, height? }` |
+
+## Object tagging
+
+**In the works.** S3 object tags (`x-amz-tagging`) are being added. Until then, put tags in `options.metadata` or track them in your own database.
+
+## Lifecycle & Expiration
+
+**In the works.** TTL/expiration on uploads and lifecycle rule management are being added to the core contract.
+
+- **S3 lifecycle rules** (e.g. "delete after 30 days") are bucket-level configuration and are not yet exposed by Fileway. Configure them in the AWS console, Terraform, or via the AWS SDK directly.
+- **Cloudinary** supports automatic deletion via signed URLs with `expires_at`; wiring this in is in the works.
+- **Local** has no built-in cleanup yet; a scheduled sweep is in the works.

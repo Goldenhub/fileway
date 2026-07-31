@@ -1,6 +1,8 @@
-export class ValidationError extends Error {
+import { StorageError } from "./errors.js";
+
+export class ValidationError extends StorageError {
   constructor(message: string) {
-    super(message);
+    super("validation", message);
     this.name = "ValidationError";
   }
 }

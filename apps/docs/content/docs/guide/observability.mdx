@@ -1,0 +1,147 @@
+---
+title: Observability
+description: Typed errors, structured logging, and error reporting hooks
+---
+
+## Errors
+
+Every failure from Fileway is a `StorageError` (exported from `@fileway/core`) carrying a stable, machine-readable `code` you can branch on — check `err.code`, not `err.message` or `instanceof` (which doesn't survive across realms like workers/iframes):
+
+```ts
+import { StorageError } from "@fileway/core";
+
+try {
+  await client.upload(stream, { filename: "a.png" });
+} catch (err) {
+  if (err instanceof StorageError) {
+    switch (err.code) {
+      case "auth-failed": // bad/expired credentials
+      case "bucket-not-found":
+      case "size-exceeded":
+      case "network": // fetch-level failure; safe to retry
+      case "provider-error": // 5xx etc.; safe to retry
+    }
+  }
+}
+```
+
+### The `StorageErrorCode` union
+
+| Code | Meaning | Retry? |
+|------|---------|--------|
+| `validation` | Malformed input (`ValidationError` — invalid filename, size, `expiresIn`, escaping path, etc.) | Never — fix the call |
+| `config` | Driver misconfiguration (e.g. missing S3 credentials, driver lacks presigned-URL support) | Never — fix the config |
+| `not-found` | The object/asset does not exist | No |
+| `bucket-not-found` | The S3 bucket / Cloudinary cloud does not exist or is not reachable | No |
+| `auth-failed` | Invalid or expired credentials, access denied | Re-auth, then retry |
+| `size-exceeded` | Payload over the provider limit (`EntityTooLarge`, `413`) | No |
+| `network` | `fetch` failed before an HTTP response (DNS, socket, TLS, timeout) | Yes — with backoff |
+| `provider-error` | The provider returned an HTTP error without a more specific classification (e.g. 5xx) | Yes — with backoff |
+
+`StorageError` also exposes:
+
+- `statusCode` — the HTTP status when the failure came from an HTTP response (404, 403, 500, …).
+- `provider` — which driver produced it: `"s3"`, `"cloudinary"`, or `"local"`.
+- `cause` — the wrapped underlying error when one exists (e.g. the original `TypeError("fetch failed")` for `network` errors).
+- `toJSON()` — serializes to `{ name, code, message, statusCode?, provider? }` for logs.
+- `isAbortError(err)` — `true` when `err` is the standard `DOMException`/`AbortError` produced by upload cancellation (a cancellation is **not** a `StorageError`).
+
+### How codes are derived per driver
+
+| Driver | Classification |
+|--------|----------------|
+| `LocalDriver` | Missing file → `not-found`; escaping path → `validation`. |
+| `S3Driver` | Parses the AWS/MinIO XML `<Code>` (`NoSuchBucket`, `NoSuchKey`/`NoSuchUpload`, `AccessDenied`/`InvalidAccessKeyId`/`SignatureDoesNotMatch`/`ExpiredToken`/`InvalidToken`, `EntityTooLarge`) with an HTTP-status fallback (401/403 → `auth-failed`, 404 → `not-found`, 413 → `size-exceeded`, else `provider-error`). `fetch` failures → `network`; missing credentials → `config`. |
+| `CloudinaryDriver` | HTTP status mapping: 401/403 → `auth-failed`, upload 404 → `bucket-not-found`, get 404 → `not-found`, 413 → `size-exceeded`, else `provider-error`. `fetch` failures → `network`. |
+
+Abort signals are never wrapped: cancelling an upload rejects with a plain `DOMException` named `AbortError` (see [Cancelling uploads](/docs/guide/uploads#cancelling-uploads)), which `isAbortError()` recognizes. This is the same error `fetch` itself throws on abort, so your cancellation handling works uniformly.
+
+### Note on breaking changes
+
+`ValidationError` is now a `StorageError` subclass, and driver messages are unchanged — existing `try/catch`, `err.message`, and `instanceof ValidationError` checks keep working. Adding the `code` field is additive.
+
+## Logging & Error Reporting
+
+Attach your own loggers and error reporters as `FilewayClient` config — no SDK, no dependencies, no adapter package. Fileway only defines a minimal contract; you adapt your tooling with a few lines.
+
+### `logger`
+
+Pass any object implementing `{ debug?, info?, warn?, error? }` (all methods optional):
+
+```ts
+const client = new FilewayClient({
+  driver,
+  logger: {
+    info: (message, meta) => console.log(`[fileway] ${message}`, meta),
+    error: (message, meta) => console.error(`[fileway] ${message}`, meta),
+  },
+});
+```
+
+Fileway calls `info` with `"upload started"` / `"upload succeeded"` (and the equivalents for `delete`, `get`, `getUrl`, `getPresignedUrl`) plus structured `meta` (`{ operation, path, filename, size, id, url, durationMs }`), and `error` on every failure. Nothing is logged when `logger` is omitted. A throwing logger is caught and never breaks the operation it is reporting on.
+
+**Pino** — its `(obj, msg)` signature is nearly compatible; adapt with a tiny wrapper:
+
+```ts
+import pino from "pino";
+const pinoLogger = pino();
+const client = new FilewayClient({
+  driver,
+  logger: {
+    info: (message, meta) => pinoLogger.info(meta ?? {}, message),
+    warn: (message, meta) => pinoLogger.warn(meta ?? {}, message),
+    error: (message, meta) => pinoLogger.error(meta ?? {}, message),
+  },
+});
+```
+
+**Datadog / any async logger** — the contract methods are `void`, so adapt async senders by queueing or fire-and-forget (Fileway does not await `logger` methods):
+
+```ts
+logger: {
+  info: (message, meta) => { void sendToDatadog("info", message, meta); },
+  error: (message, meta) => { void sendToDatadog("error", message, meta); },
+}
+```
+
+### `onError`
+
+Called (and awaited) when an operation throws — before the error is re-thrown to your caller — with the raw error and a `{ operation, durationMs, filename?, path?, mimeType?, size? }` context. Use it to report typed failures to Sentry or your own tracker:
+
+```ts
+import * as Sentry from "@sentry/nextjs";
+
+const client = new FilewayClient({
+  driver,
+  onError: (error, context) => {
+    if (error instanceof StorageError) {
+      Sentry.captureException(error, {
+        tags: {
+          fileway: "1",
+          operation: context.operation,
+          provider: error.provider ?? "unknown",
+          code: error.code,
+        },
+        extra: { statusCode: error.statusCode, path: context.path },
+      });
+    }
+  },
+});
+```
+
+Rules:
+
+- **Aborts are not errors.** Cancelling an upload (`AbortError`) never fires `onError`.
+- **`ValidationError` and `config` errors do fire** — they're client bugs worth seeing.
+- A throwing `onError` is swallowed: it never masks the original error.
+- The error is **re-thrown** to your code after `onError` completes, so your existing error handling is unchanged.
+
+### Choosing between them
+
+| Use `logger` | Use `onError` |
+|---|---|
+| Structured success/start events ("upload succeeded", duration) | Failures only |
+| Local/file logging, Pino pipelines | Sentry/Datadog error tracking |
+| Fire-and-forget (not awaited) | Awaited before rethrow (can flush) |
+
+Both can be set together: `logger` for the audit trail, `onError` for alerting.

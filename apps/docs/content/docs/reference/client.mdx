@@ -1,0 +1,79 @@
+---
+title: FilewayClient
+description: API reference for the FilewayClient engine and its configuration
+---
+
+## Constructor
+
+```ts
+new FilewayClient<TConfig extends FilewayConfig>(config: TConfig)
+```
+
+### `config`
+
+| Option | Type | Description |
+|--------|------|-------------|
+| `driver` | `BaseDriver` | The storage driver. See [Drivers](/docs/drivers/driver-local). |
+| `middlewares` | `MiddlewareHook[]` | Optional. Middleware run around uploads. See [Middleware](/docs/guide/middleware). |
+| `logger` | `Logger` | Optional. Structured logger; receives `info` per operation and `error` on failure. See [Observability](/docs/guide/observability#logger). |
+| `onError` | `(error, context) => void \| Promise<void>` | Optional. Called (and awaited) before an error is re-thrown. Aborts are skipped. See [Observability](/docs/guide/observability#onerror). |
+
+## `upload(stream, options)`
+
+Uploads a WHATWG `ReadableStream<Uint8Array>`.
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `stream` | `ReadableStream<Uint8Array>` | The file bytes. Never buffered whole by Local/S3. |
+| `options` | `UploadOptions` | See the options table below. |
+
+Returns `Promise<UploadResult<TMeta>>` where `TMeta` is the driver's metadata type.
+
+`UploadOptions`:
+
+| Option | Type | Required | Description |
+|--------|------|----------|-------------|
+| `filename` | `string` | ✅ | Original file name. |
+| `path` | `string` | | Folder/path prefix for the stored object. |
+| `mimeType` | `string` | | Content type. |
+| `metadata` | `Record<string, string>` | | Provider user metadata (see [Metadata](/docs/guide/metadata)). |
+| `size` | `number` | | Known byte length — unlocks zero-buffer streaming (see [Uploads](/docs/guide/uploads)). |
+| `signal` | `AbortSignal` | | Cancels the upload in flight (see [Uploads](/docs/guide/uploads#cancelling-uploads)). |
+| `onProgress` | `(progress) => void` | | Progress callback (see [Uploads](/docs/guide/uploads#tracking-upload-progress)). |
+
+## `get(path)`
+
+Streams a stored file back as `ReadableStream<Uint8Array>` (see [Downloads](/docs/guide/downloads#download--read-back-getpath)).
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `path` | `string` | Path of the stored file. |
+
+Throws `StorageError("not-found")` when the file does not exist.
+
+## `delete(path)`
+
+Deletes a stored file.
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `path` | `string` | Path of the stored file. |
+
+Returns `Promise<boolean>` — `true` when deleted, `false` when it was already gone.
+
+## `getUrl(path)`
+
+Returns the public URL for a stored file (see [Downloads](/docs/guide/downloads#geturlpath)).
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `path` | `string` | Path of the stored file. |
+
+## `getPresignedUrl(path, options?)`
+
+Returns a time-limited, signed download URL. Only available on drivers that implement it (`S3Driver`, `CloudinaryDriver`); otherwise throws `StorageError("config")` (see [Downloads](/docs/guide/downloads#pre-signed-urls)).
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `path` | `string` | Path of the stored file. |
+| `options.expiresIn` | `number` | Lifetime in seconds (default `3600`; bounds are driver-specific). |

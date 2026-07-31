@@ -1,6 +1,6 @@
 ---
-title: Getting Started
-description: Install and use Fileway in your project
+title: Quickstart
+description: Install Fileway and upload your first file
 ---
 
 ## Install
@@ -61,7 +61,7 @@ Then add the drivers you need:
   </Tab>
 </Tabs>
 
-## Basic Usage
+## Upload your first file
 
 ```ts
 import { FilewayClient } from "@fileway/core";
@@ -93,45 +93,7 @@ console.log(result.path);
 console.log(result.size);
 ```
 
-## API Reference
-
-### `delete(path)`
-
-Deletes a file from the storage backend.
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `path` | `string` | The file path (as returned by `upload()`) |
-
-**Returns:** `Promise<boolean>` — `true` if the file existed and was deleted, `false` if it didn't exist.
-
-**Behavior across drivers:**
-
-| Driver | Behavior |
-|--------|----------|
-| `LocalDriver` | Removes the file from disk. Returns `false` if file doesn't exist. Throws if path traverses outside the configured directory. |
-| `S3Driver` | Deletes the object from the bucket. Returns `true` regardless of whether the object existed (S3 delete is idempotent). |
-| `CloudinaryDriver` | Calls the Cloudinary Destroy API. Returns `true` on success. |
-
-### `getUrl(path)`
-
-Returns a public URL for a stored file.
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `path` | `string` | The file path (as returned by `upload()`) |
-
-**Returns:** `Promise<string>`
-
-**Behavior across drivers:**
-
-| Driver | Behavior |
-|--------|----------|
-| `LocalDriver` | Returns `<baseUrl>/<path>`. Defaults to `file://<directory>/<path>`. Set `baseUrl` in production (e.g. `"https://cdn.example.com"`). |
-| `S3Driver` | Returns the object URL in the configured bucket (virtual-hosted or path-style based on `forcePathStyle`). |
-| `CloudinaryDriver` | Returns the CDN URL based on the public ID, resource type, and version. |
-
-## Type Inference
+## Type inference
 
 Each driver returns its own metadata shape:
 
@@ -154,3 +116,10 @@ const s3Result = await s3Client.upload(stream, { filename: "f.txt" });
 s3Result.meta.bucket; // string
 s3Result.meta.etag;   // string | undefined
 ```
+
+## Next steps
+
+- See the [Feature overview](/docs/guide/capabilities) for what every driver supports.
+- Deep-dive into [uploads](/docs/guide/uploads), [downloads](/docs/guide/downloads), and [metadata](/docs/guide/metadata).
+- Handle failures with the [observability guide](/docs/guide/observability).
+- Find the full [API reference](/docs/reference/client) for every method and option.

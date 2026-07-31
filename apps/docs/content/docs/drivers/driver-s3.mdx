@@ -186,7 +186,17 @@ const client = new FilewayClient({
 
 ## Errors
 
-Throws `ValidationError` (from `@fileway/core`) when:
-- `filename` is missing, contains path separators, or exceeds 255 characters
-- `path` is absolute or contains null bytes
-- `mimeType` is malformed|
+All failures are `StorageError`s from `@fileway/core` (see the [error reference](/docs/guide/observability#errors) for the full contract — codes, `statusCode`, `provider`, `cause`, and `isAbortError`). For this driver:
+
+| Code | When |
+|------|------|
+| `validation` | Malformed input: missing/oversized `filename`, path separators, absolute `path`, null bytes, malformed `mimeType`, non-integer `size`, invalid `expiresIn`. |
+| `config` | Missing `credentials` in the driver config. |
+| `not-found` | The object does not exist (`NoSuchKey`, or HTTP 404). |
+| `bucket-not-found` | The bucket does not exist (`NoSuchBucket`). |
+| `auth-failed` | Invalid/expired credentials or access denied (`AccessDenied`, `InvalidAccessKeyId`, `SignatureDoesNotMatch`, `ExpiredToken`, `InvalidToken`, or HTTP 401/403). |
+| `size-exceeded` | Payload over the limit (`EntityTooLarge`, or HTTP 413). |
+| `network` | `fetch` failed before an HTTP response (DNS, socket, timeout); the original error is preserved as `cause`. Safe to retry. |
+| `provider-error` | Any other non-2xx response (e.g. HTTP 500). Safe to retry. |
+
+S3 codes come from parsing the AWS/MinIO XML `<Code>` element when present, with an HTTP-status fallback.

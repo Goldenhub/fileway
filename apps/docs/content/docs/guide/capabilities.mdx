@@ -1,9 +1,9 @@
 ---
 title: Capabilities
-description: What Fileway supports today — uploads & streaming, retrieval, metadata & tagging, and lifecycle
+description: What Fileway supports today — a coverage matrix across drivers, plus the roadmap
 ---
 
-Fileway is intentionally minimal. This page documents exactly what each driver supports today, what is currently in the works, and what you need to build yourself.
+Fileway is intentionally minimal. This page is the overview: exactly what each driver supports today, what is currently in the works, and what you need to build yourself. Deep-dives live in the [uploads](/docs/guide/uploads), [downloads](/docs/guide/downloads), [metadata](/docs/guide/metadata), and [observability](/docs/guide/observability) guides.
 
 ## Coverage Matrix
 
@@ -17,203 +17,15 @@ Fileway is intentionally minimal. This page documents exactly what each driver s
 | Public URL retrieval (`getUrl`) | ✅ | ✅ | ✅ |
 | Pre-signed URLs | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> | ✅ | ✅ |
 | Download / read-back | ✅ | ✅ | ✅ |
+| Typed errors (`StorageError.code`) | ✅ | ✅ | ✅ |
+| Logging & error hooks (`logger`, `onError`) | ✅ | ✅ | ✅ |
 | User metadata (`options.metadata`) | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> | ✅ | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> |
 | Result metadata (`result.meta`) | ✅ | ✅ | ✅ |
 | Object tagging | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> |
 | TTL / expiration | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> |
 | Lifecycle rules | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> |
 
-Legend: **✅** supported today · **¹** S3 always streams with bounded memory: `aws-chunked` when the size is known, multipart when it is not (see below) · **—** not applicable (streams directly to disk, no parts) · <span style={{ color: "var(--color-fd-primary)" }}>✕</span> not yet supported (in the works).
-
-## Uploads & Streaming
-
-All drivers accept a WHATWG `ReadableStream<Uint8Array>`:
-
-```ts
-const stream = new ReadableStream({
-  start(controller) {
-    controller.enqueue(new TextEncoder().encode("file content"));
-    controller.close();
-  },
-});
-
-const result = await client.upload(stream, {
-  filename: "report.pdf",
-  path: "invoices/2024",
-  mimeType: "application/pdf",
-});
-```
-
-### Streaming behavior per driver
-
-| Driver | Behavior |
-|--------|----------|
-| `LocalDriver` | **True streaming.** The web stream is piped to disk via Node.js streams with backpressure. Memory usage stays constant regardless of file size. Enforces `maxSizeBytes` while streaming. |
-| `S3Driver` | **Streams with bounded memory, always.** With `options.size` (≤ 5 GiB) the payload is sent as a SigV4 `aws-chunked` body whose chunks are signed lazily as they are read (backpressure preserved, zero buffering). Without a known size — or beyond 5 GiB — the driver falls back to a multipart upload, reading the stream into part-sized buffers (default 8 MiB, minimum 5 MiB), so peak memory stays bounded. |
-| `CloudinaryDriver` | **Buffers the full file** into a `Blob` for the multipart upload. Enforces `maxSizeBytes`. |
-
-When the size is known, pass it to unlock the leanest (single-request) streaming path:
-
-```ts
-const result = await client.upload(stream, {
-  filename: "report.pdf",
-  path: "invoices/2024",
-  mimeType: "application/pdf",
-  size: bytes,
-});
-```
-
-Without `size`, `S3Driver` still streams with bounded memory via a multipart upload. If the stream ends before or after the declared size, the upload is aborted and fails with a validation error instead of silently storing a corrupted object.
-
-### Multipart uploads
-
-`S3Driver` splits large objects into parts via the S3 multipart flow (`CreateMultipartUpload` → `UploadPart` → `CompleteMultipartUpload`) in three situations:
-
-- the size is unknown — the stream is read into part-sized buffers instead of being buffered whole;
-- the object exceeds 5 GiB, the single-`PUT` cap;
-- `forceMultipart: true` is set.
-
-Multipart parts are uploaded sequentially as the stream fills each buffer, so peak memory is bounded by `partSize` (default 8 MiB, minimum 5 MiB) regardless of object size. If the stream mismatches a declared `size`, the driver aborts the in-flight multipart upload and throws a validation error.
-
-`CloudinaryDriver` has no chunked multipart support: it buffers the full asset into a `Blob` and sends it as a single `multipart/form-data` request, which is why very large files are not recommended there. `LocalDriver` has no concept of parts because it streams straight to disk.
-
-### Cancelling uploads
-
-Pass an `AbortSignal` in `UploadOptions` to cancel an in-flight upload. On abort, every driver rejects with a `DOMException` named `AbortError` (detectable via `err.name === "AbortError"` or `abortError()` from `@fileway/core`):
-
-```ts
-const controller = new AbortController();
-
-const upload = client.upload(stream, {
-  filename: "large.bin",
-  signal: controller.signal,
-});
-
-controller.abort();
-
-try {
-  await upload;
-} catch (err) {
-  if (err.name === "AbortError") {
-    // cancelled — cleanly
-  }
-}
-```
-
-| Driver | Behavior on abort |
-|--------|-------------------|
-| `LocalDriver` | Destroys the source and destination streams and unlinks the partial file, so nothing is left on disk. |
-| `S3Driver` | Cancels the request and source stream. For multipart uploads it first sends `AbortMultipartUpload` so no orphaned parts remain in the bucket. |
-| `CloudinaryDriver` | Aborts the upload request. |
-
-### Tracking upload progress
-
-Pass `onProgress` in `UploadOptions` to receive `{ bytes, total?, progress? }` as chunks flow through the stream. `total` and `progress` (0..1) are present only when `options.size` is known; otherwise only cumulative `bytes` are reported.
-
-```ts
-const result = await client.upload(stream, {
-  filename: "large.bin",
-  size: totalBytes,
-  onProgress: ({ bytes, progress }) => {
-    updateProgressBar(progress ?? bytes / totalBytes);
-  },
-});
-```
-
-Event cadence is adaptive: a significant chunk (≥ 256 KiB, or ≥ 5% of a known total) reports immediately, while small chunks on fast streams are coalesced to at most one event per 100 ms. An exact final event always fires (`bytes === total`, `progress === 1`), and no event fires on abort. Progress is measured at the client layer as bytes leave the source stream — Local reports as bytes hit disk, S3 as bytes are streamed or buffered into parts, and Cloudinary during its pre-signature `Blob` buffering (its `fetch` upload itself exposes no progress).
-
-## Retrieval & Pre-signed URLs
-
-### `getUrl(path)`
-
-Returns a static public URL built from the driver's `baseUrl` (or an auto-derived default) plus the encoded path.
-
-| Driver | URL format |
-|--------|------------|
-| `LocalDriver` | `<baseUrl>/<path>` — defaults to `file://<directory>/<path>`. Set `baseUrl` to a CDN/web URL in production. |
-| `S3Driver` | `<baseUrl>/<path>` — virtual-hosted or path-style based on `forcePathStyle`. Assumes the bucket is publicly readable. |
-| `CloudinaryDriver` | The Cloudinary CDN URL for the asset. |
-
-### Pre-signed URLs
-
-Both `S3Driver` and `CloudinaryDriver` can sign time-limited download URLs; only `LocalDriver` cannot (it has no access control to gate).
-
-**S3** — `getPresignedUrl(path, { expiresIn })` returns a SigV4-signed GET URL — anyone with the link can download the object without credentials until it expires. Hand these out for private buckets instead of `getUrl()` results, which assume a publicly readable bucket.
-
-```ts
-const url = await client.getPresignedUrl("uploads/report.pdf", { expiresIn: 900 });
-// https://bucket.s3.us-east-1.amazonaws.com/uploads/report.pdf?X-Amz-Algorithm=...
-```
-
-- `expiresIn` defaults to 3600 seconds (1 hour) and must be an integer in `1..604800` (AWS's 7-day cap); invalid values throw a `ValidationError`.
-- Signing is done entirely with Web Crypto + your configured credentials — no SDK, no network call. Only the `host` header is signed with an `UNSIGNED-PAYLOAD` hash, so the URL works in any browser or client.
-- Works with `endpoint`/`forcePathStyle` too (MinIO, R2, GCS-S3), as long as the endpoint validates SigV4 presigning (MinIO does).
-
-**Cloudinary** — `getPresignedUrl(publicId, { expiresIn, deliveryType })` returns a signed delivery URL (`/s--SIG--/` component + `expires_at`) using the same resource-type/version resolution chain as `getUrl`. The signature (first 8 chars of URL-safe base64 `SHA-1` of the resource path + API secret) only *restricts* access for assets with `authenticated` or `private` delivery — pass `deliveryType: "authenticated"` for those. `CloudinaryDriver.upload` creates public `upload` assets, so the default signed URL resolves but doesn't restrict anything.
-
-- `expiresIn` defaults to 3600 seconds and must be a positive integer; no documented maximum.
-- Drivers that cannot presign (`LocalDriver`) omit the method — `FilewayClient.getPresignedUrl` throws a clear error in that case.
-
-### Download / read-back (`get(path)`)
-
-Every driver streams a stored file back as a WHATWG `ReadableStream<Uint8Array>` — the same type it accepts on upload:
-
-```ts
-const stream = await client.get("uploads/report.pdf"); // ReadableStream<Uint8Array>
-const bytes = new Uint8Array(await new Response(stream).arrayBuffer());
-```
-
-The stream is pull-based with backpressure, so files are never buffered whole on the way down. It can be piped straight to a destination (`stream.pipeTo(writable)`); for binary files use `.arrayBuffer()`/`.blob()` rather than `.text()`, which would decode binary data as UTF-8 and corrupt it.
-
-| Driver | Behavior |
-|--------|----------|
-| `LocalDriver` | Streams the file from disk via `createReadStream` → `Readable.toWeb()`. Throws if the file is missing or the path escapes the storage directory. |
-| `S3Driver` | Authenticated SigV4 `GET`; returns the response body directly. Throws with the HTTP status on failure (e.g. 404). |
-| `CloudinaryDriver` | `fetch`es the asset's public CDN URL and returns the response body. Throws on a non-2xx status. |
-
-## Metadata & Tagging
-
-### User metadata (`options.metadata`)
-
-Pass a `Record<string, string>` on upload:
-
-```ts
-const result = await client.upload(stream, {
-  filename: "photo.jpg",
-  metadata: {
-    userId: "1234",
-    license: "cc-by-4.0",
-  },
-});
-```
-
-| Driver | Behavior |
-|--------|----------|
-| `S3Driver` | Sends metadata as signed `x-amz-meta-*` request headers, so it is persisted as S3 user metadata. |
-| `LocalDriver` | Metadata is **not persisted yet** (persistence is in the works). |
-| `CloudinaryDriver` | Metadata is **not sent yet** (support is in the works). |
-
-### Result metadata (`result.meta`)
-
-Each driver returns its own typed metadata:
-
-| Driver | `meta` shape |
-|--------|--------------|
-| `LocalDriver` | `{ localPath: string }` |
-| `S3Driver` | `{ bucket: string; etag?: string }` |
-| `CloudinaryDriver` | `{ publicId, version, format, resourceType, bytes, secureUrl, width?, height? }` |
-
-### Object tagging
-
-**In the works.** S3 object tags (`x-amz-tagging`) are being added. Until then, put tags in `options.metadata` or track them in your own database.
-
-## Lifecycle & Expiration
-
-**In the works.** TTL/expiration on uploads and lifecycle rule management are being added to the core contract.
-
-- **S3 lifecycle rules** (e.g. "delete after 30 days") are bucket-level configuration and are not yet exposed by Fileway. Configure them in the AWS console, Terraform, or via the AWS SDK directly.
-- **Cloudinary** supports automatic deletion via signed URLs with `expires_at`; wiring this in is in the works.
-- **Local** has no built-in cleanup yet; a scheduled sweep is in the works.
+Legend: **✅** supported today · **¹** S3 always streams with bounded memory: `aws-chunked` when the size is known, multipart when it is not (see [uploads](/docs/guide/uploads)) · **—** not applicable (streams directly to disk, no parts) · <span style={{ color: "var(--color-fd-primary)" }}>✕</span> not yet supported (in the works).
 
 ## Roadmap
 
@@ -222,3 +34,15 @@ In the works and coming next:
 - S3 object tagging and metadata read-back (`headObject`)
 - Metadata persistence for `LocalDriver` and `CloudinaryDriver`
 - TTL / expiration in `UploadOptions` and lifecycle rule management
+
+Tracked alongside in the [changelog](/docs/reference/changelog).
+
+## Where to go next
+
+- [Uploads & Streaming](/docs/guide/uploads) — streaming behavior, multipart, cancellation, progress
+- [Downloads & Retrieval](/docs/guide/downloads) — public URLs, pre-signed URLs, read-back
+- [Metadata & Lifecycle](/docs/guide/metadata) — user metadata, result metadata, tagging, expiration
+- [Observability](/docs/guide/observability) — typed errors, logging, and `onError`
+- [Middleware](/docs/guide/middleware) — transform and intercept uploads
+- [Runtimes](/docs/guide/runtimes) — where each driver runs (Node, Bun, Deno, Workers)
+- [Drivers](/docs/drivers/driver-local) — per-driver configuration reference

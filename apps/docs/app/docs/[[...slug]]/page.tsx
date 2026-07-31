@@ -12,7 +12,8 @@ export default async function Page(props: { params: Promise<{ slug?: string[] }>
 
   if (!page) notFound();
 
-  const isChangelog = page.slugs.length === 1 && page.slugs[0] === "changelog";
+  const isChangelog =
+    page.slugs.length === 2 && page.slugs[0] === "reference" && page.slugs[1] === "changelog";
 
   const MDX = page.data.body;
 
