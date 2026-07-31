@@ -29,11 +29,11 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile
 
-      - name: Typecheck packages
-        run: pnpm typecheck
-
       - name: Build packages
         run: pnpm --filter "@fileway/core" --filter "@fileway/driver-*" run build
+
+      - name: Typecheck packages
+        run: pnpm typecheck
 
       - name: Unit tests
         run: pnpm test
