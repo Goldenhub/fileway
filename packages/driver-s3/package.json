@@ -2,6 +2,18 @@
   "name": "@fileway/driver-s3",
   "version": "0.0.5",
   "license": "MIT",
+  "keywords": [
+    "fileway",
+    "file-upload",
+    "storage",
+    "aws",
+    "s3",
+    "minio",
+    "cloudflare-r2",
+    "r2",
+    "stream",
+    "sigv4"
+  ],
   "repository": {
     "type": "git",
     "url": "git+https://github.com/Goldenhub/fileway.git"

@@ -1,6 +1,6 @@
 import type { BaseDriver, UploadOptions, UploadResult } from "@fileway/core";
 import { validateUploadOptions, urlEncodePath } from "@fileway/core";
-import { sign, signChunkedBody, sha256 } from "./sigv4.js";
+import { createStreamingBody, sign, signStreamingRequest, sha256 } from "./sigv4.js";
 
 const randomUUID = () => globalThis.crypto.randomUUID();
 const SERVICE = "s3";
@@ -37,6 +37,71 @@ export class S3Driver implements BaseDriver<{ bucket: string; etag?: string }> {
     const filename = ext ? `${id}.${ext}` : id;
     const key = options.path ? `${options.path}/${filename}` : filename;
 
+    const now = new Date();
+    const { url, canonicalPath, host } = buildEndpoint(this.config, key);
+
+    const cred = getCredentials(this.config);
+
+    const metaHeaders = options.metadata
+      ? Object.fromEntries(
+          Object.entries(options.metadata).map(([k, v]) => [
+            `x-amz-meta-${k.toLowerCase()}`,
+            v,
+          ]),
+        )
+      : {};
+
+    const typeHeader = options.mimeType ?? "application/octet-stream";
+
+    // Streaming path: the caller knows the size, so we can sign and stream the
+    // body chunk-by-chunk (aws-chunked) without ever buffering the file.
+    if (options.size !== undefined) {
+      const { headers: sigHeaders, seedSignature, signingKey, scope, amzDate } = await signStreamingRequest(
+        "PUT",
+        canonicalPath,
+        {
+          host,
+          "content-type": typeHeader,
+          ...metaHeaders,
+        },
+        options.size,
+        { ...cred, region: this.config.region!, service: SERVICE },
+        now,
+      );
+
+      const response = await fetch(url, {
+        method: "PUT",
+        headers: {
+          ...sigHeaders,
+          ...metaHeaders,
+          "content-type": typeHeader,
+        },
+        body: createStreamingBody(stream, options.size, seedSignature, amzDate, scope, signingKey),
+        // Node's fetch (undici) requires `duplex: "half"` for stream bodies;
+        // other runtimes ignore it.
+        duplex: "half",
+      } as RequestInit);
+
+      if (!response.ok) {
+        const body = await response.text().catch(() => "");
+        throw new Error(`S3 upload failed: ${response.status} ${response.statusText}${body ? ` — ${body}` : ""}`);
+      }
+
+      const etag = response.headers.get("etag") ?? undefined;
+
+      return {
+        id,
+        url: `${this.baseUrl}/${urlEncodePath(key)}`,
+        path: key,
+        size: options.size,
+        meta: {
+          bucket: this.config.bucket,
+          ...(etag ? { etag } : {}),
+        },
+      };
+    }
+
+    // Buffered path: size unknown, so hash the whole payload for a single PUT.
     const reader = stream.getReader();
     const chunks: Uint8Array[] = [];
     let totalSize = 0;
@@ -55,22 +120,6 @@ export class S3Driver implements BaseDriver<{ bucket: string; etag?: string }> {
     }
 
     const payloadHash = await sha256(fullBody);
-
-    const now = new Date();
-    const { url, canonicalPath, host } = buildEndpoint(this.config, key);
-
-    const cred = getCredentials(this.config);
-
-    const metaHeaders = options.metadata
-      ? Object.fromEntries(
-          Object.entries(options.metadata).map(([k, v]) => [
-            `x-amz-meta-${k.toLowerCase()}`,
-            v,
-          ]),
-        )
-      : {};
-
-    const typeHeader = options.mimeType ?? "application/octet-stream";
 
     const sigHeaders = await sign(
       "PUT",

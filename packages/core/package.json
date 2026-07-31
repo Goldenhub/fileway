@@ -2,6 +2,16 @@
   "name": "@fileway/core",
   "version": "0.0.5",
   "license": "MIT",
+  "keywords": [
+    "fileway",
+    "file-upload",
+    "storage",
+    "readable-stream",
+    "whatwg-streams",
+    "edge",
+    "serverless",
+    "typescript"
+  ],
   "repository": {
     "type": "git",
     "url": "git+https://github.com/Goldenhub/fileway.git"

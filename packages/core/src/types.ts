@@ -3,6 +3,8 @@ export interface UploadOptions {
   mimeType?: string;
   path?: string;
   metadata?: Record<string, string>;
+  /** Known byte length of the stream. Enables zero-buffer streaming uploads on drivers that need it (e.g. S3). */
+  size?: number;
 }
 
 export interface UploadResult<TMeta extends Record<string, unknown>> {

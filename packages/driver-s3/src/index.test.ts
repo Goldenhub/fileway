@@ -95,6 +95,115 @@ describe("S3Driver (AWS S3)", () => {
   });
 });
 
+describe("S3Driver streaming upload (known size)", () => {
+  let driver: S3Driver;
+
+  beforeEach(() => {
+    driver = new S3Driver({
+      bucket: "test-bucket",
+      region: "us-east-1",
+      credentials: { accessKeyId: "AKID", secretAccessKey: "secret" },
+    });
+  });
+
+  it("should use the aws-chunked streaming path and never set content-length", async () => {
+    mockFetch.mockResolvedValue(okResponse('"abc123"'));
+
+    const payload = new TextEncoder().encode("hello streaming s3");
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(payload);
+        controller.close();
+      },
+    });
+
+    const result = await driver.upload(stream, {
+      filename: "stream.txt",
+      size: payload.byteLength,
+    });
+
+    const [url, opts] = mockFetch.mock.calls[0]!;
+    expect(url).toContain("test-bucket.s3.us-east-1.amazonaws.com");
+    expect(opts.method).toBe("PUT");
+    expect(opts.headers["x-amz-content-sha256"]).toBe(
+      "STREAMING-AWS4-HMAC-SHA256-PAYLOAD",
+    );
+    expect(opts.headers["content-encoding"]).toBe("aws-chunked");
+    expect(opts.headers["x-amz-decoded-content-length"]).toBe(String(payload.byteLength));
+    expect(opts.headers["content-length"]).toBeUndefined();
+    expect(opts.body).toBeInstanceOf(ReadableStream);
+
+    const decoded = await decodeAwsChunked(opts.body as ReadableStream<Uint8Array>);
+    expect(decoded).toEqual(payload);
+    expect(result.size).toBe(payload.byteLength);
+  });
+
+  it("should fall back to a buffered PUT when size is unknown", async () => {
+    mockFetch.mockResolvedValue(okResponse());
+
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode("buffered"));
+        controller.close();
+      },
+    });
+
+    await driver.upload(stream, { filename: "b.txt" });
+
+    const [, opts] = mockFetch.mock.calls[0]!;
+    expect(opts.headers["x-amz-content-sha256"]).toMatch(/^[0-9a-f]{64}$/);
+    expect(opts.headers["content-encoding"]).toBeUndefined();
+    expect(opts.headers["content-length"]).toBe("8");
+    expect(opts.body).toBeInstanceOf(Uint8Array);
+  });
+});
+
+async function decodeAwsChunked(body: ReadableStream<Uint8Array>): Promise<Uint8Array> {
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+  }
+
+  let total = 0;
+  for (const c of chunks) total += c.byteLength;
+  const all = new Uint8Array(total);
+  let off = 0;
+  for (const c of chunks) {
+    all.set(c, off);
+    off += c.byteLength;
+  }
+
+  const out: number[] = [];
+  const textDecoder = new TextDecoder();
+  let i = 0;
+  let sawTerminal = false;
+  while (i < all.length) {
+    let j = i;
+    while (j < all.length && all[j] !== 0x0d) j++;
+    if (j >= all.length) throw new Error("malformed aws-chunked body: no CR found");
+    const header = textDecoder.decode(all.subarray(i, j));
+    i = j + 2;
+
+    const semi = header.indexOf(";");
+    const sizeHex = semi === -1 ? header : header.slice(0, semi);
+    const size = parseInt(sizeHex, 16);
+    if (size === 0) {
+      sawTerminal = true;
+      break;
+    }
+    if (!header.slice(semi + 1).startsWith("chunk-signature=")) {
+      throw new Error(`malformed chunk header: ${header}`);
+    }
+    for (let k = 0; k < size; k++) out.push(all[i + k] as number);
+    i += size + 2;
+  }
+  if (!sawTerminal) throw new Error("missing terminal chunk");
+  return new Uint8Array(out);
+}
+
 describe("S3Driver with custom endpoint (MinIO)", () => {
   let driver: S3Driver;
 

@@ -9,6 +9,7 @@ export function validateUploadOptions(options: {
   filename: string;
   path?: string;
   mimeType?: string;
+  size?: number;
 }): void {
   if (!options.filename || typeof options.filename !== "string") {
     throw new ValidationError("filename is required and must be a string");
@@ -33,6 +34,11 @@ export function validateUploadOptions(options: {
   }
   if (options.mimeType && !/^[a-zA-Z0-9!#$%^&*_\-+.]+\/[a-zA-Z0-9!#$%^&*_\-+.]+$/.test(options.mimeType)) {
     throw new ValidationError("mimeType must be a valid MIME type");
+  }
+  if (options.size !== undefined) {
+    if (!Number.isInteger(options.size) || options.size < 0) {
+      throw new ValidationError("size must be a non-negative integer");
+    }
   }
 }
 

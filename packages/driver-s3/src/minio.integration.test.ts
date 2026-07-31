@@ -120,6 +120,37 @@ describeEnv("S3Driver integration against MinIO", () => {
     await client.delete(a.path);
     await client.delete(b.path);
   });
+
+  it("streams a known-size file via aws-chunked and reads it back intact", async () => {
+    const bytes = new TextEncoder().encode("streamed-payload-".repeat(5000));
+    const chunkSize = 1024;
+
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (let i = 0; i < bytes.length; i += chunkSize) {
+          controller.enqueue(bytes.subarray(i, i + chunkSize));
+        }
+        controller.close();
+      },
+    });
+
+    const result = await client.upload(stream, {
+      filename: "streamed.bin",
+      path: "uploads",
+      size: bytes.length,
+      mimeType: "application/octet-stream",
+    });
+
+    expect(result.size).toBe(bytes.length);
+    expect(result.meta.bucket).toBe(bucket);
+
+    const read = await s3Request("GET", result.path);
+    expect(read.ok).toBe(true);
+    expect(new Uint8Array(await read.arrayBuffer())).toEqual(bytes);
+
+    const deleted = await client.delete(result.path);
+    expect(deleted).toBe(true);
+  });
 });
 
 async function sha256Hex(data: Uint8Array): Promise<string> {

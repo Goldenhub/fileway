@@ -3,52 +3,33 @@
 [![CI](https://img.shields.io/github/actions/workflow/status/Goldenhub/fileway/ci.yml?branch=main&style=flat-square)](https://github.com/Goldenhub/fileway/actions)
 [![npm version](https://img.shields.io/npm/v/@fileway/core?style=flat-square)](https://www.npmjs.com/package/@fileway/core)
 [![bundle size](https://img.shields.io/bundlephobia/minzip/@fileway/core?style=flat-square)](https://bundlephobia.com/package/@fileway/core)
+[![license](https://img.shields.io/npm/l/@fileway/core?style=flat-square)](https://github.com/Goldenhub/fileway/blob/main/LICENSE)
 
-**Runtime-agnostic file storage engine for JavaScript/TypeScript.**
+**Fileway is a runtime-agnostic file storage engine for JavaScript/TypeScript.** One standard API for every storage provider and every runtime — with zero core dependencies.
 
-Fileway is a thin, type-safe wrapper around any storage backend. Upload files via `ReadableStream<Uint8Array>`, get back typed results. Swap drivers without changing your application code.
+Instead of learning a different SDK for S3, Cloudinary, and local disk — and fighting Node-specific shims on every edge runtime — Fileway gives you one typed API. Upload a WHATWG `ReadableStream<Uint8Array>`, get back a typed result. Swap drivers by changing **one line of code**. No rewrites. No provider lock-in.
 
-```ts
-import { FilewayClient } from "@fileway/core";
-import { S3Driver } from "@fileway/driver-s3";
-
-const client = new FilewayClient({
-  driver: new S3Driver({ bucket: "my-bucket", region: "us-east-1" }),
-});
-
-const result = await client.upload(stream, { filename: "photo.jpg" });
-//    ^ result.meta.bucket — inferred from driver type
-```
+- **Node.js 20+**, **Cloudflare Workers**, **Bun**, and **Deno 2** — the same code, everywhere.
+- **Zero core dependencies.** `@fileway/core` ships with no runtime deps. The S3 driver is pure `fetch` + Web Crypto — no AWS SDK, no shims.
+- **Real streaming** via `ReadableStream<Uint8Array>` — never buffer whole files into memory.
+- **Type inference** — every driver returns its own metadata shape automatically.
 
 ---
 
-## Packages
+## Runtime & driver support
 
-| Package                      | Description                      | Dependencies | Runtime       |
-| ---------------------------- | -------------------------------- | ------------ | ------------- |
-| `@fileway/core`              | Client engine, types, validation | Zero         | Universal     |
-| `@fileway/driver-local`      | Local filesystem storage         | `node:fs`    | Node.js / Bun |
-| `@fileway/driver-s3`         | AWS S3 & compatible (MinIO, R2)  | AWS SDK v3   | Universal     |
-| `@fileway/driver-cloudinary` | Cloudinary uploads via Fetch API | Zero         | Universal     |
+| Package | Description | Runtime deps | Node | Workers | Bun | Deno |
+| --- | --- | --- | :-: | :-: | :-: | :-: |
+| `@fileway/core` | Client engine, types, middleware | **Zero** | ✅ | ✅ | ✅ | ✅ |
+| `@fileway/driver-local` | Local filesystem | `node:fs` | ✅ | — | ✅ | ✅ |
+| `@fileway/driver-s3` | AWS S3, MinIO, Cloudflare R2 | **Zero** *(pure `fetch` + Web Crypto)* | ✅ | ✅ | ✅ | ✅ |
+| `@fileway/driver-cloudinary` | Cloudinary | **Zero** *(pure `fetch` + Web Crypto)* | ✅ | ✅ | ✅ | ✅ |
 
-## Features
-
-- **Zero-core-deps** — `@fileway/core` has no runtime dependencies.
-- **Streaming** — Files transfer via WHATWG `ReadableStream<Uint8Array>`. No buffering entire files in memory.
-- **Type inference** — Each driver returns its own metadata shape automatically.
-- **Middleware pipeline** — Hook into upload lifecycle (`beforeUpload`, `afterUpload`).
-- **All runtimes** — Works on Node.js, Bun, Deno, Cloudflare Workers, and edge environments.
-- **Dual module** — Published as both ESM (`.js`) and CJS (`.cjs`) with TypeScript declarations.
-
-## Install
+## 30-second quickstart
 
 ```bash
-npm install @fileway/core
-# Add a driver:
-npm install @fileway/driver-s3
+npm install @fileway/core @fileway/driver-local @fileway/driver-s3
 ```
-
-## Usage
 
 ```ts
 import { FilewayClient } from "@fileway/core";
@@ -58,51 +39,250 @@ const client = new FilewayClient({
   driver: new LocalDriver({ directory: "./storage" }),
 });
 
-// Upload a stream
 const result = await client.upload(
   new ReadableStream({
     start(controller) {
-      controller.enqueue(new TextEncoder().encode("file content"));
+      controller.enqueue(new TextEncoder().encode("Hello, Fileway!"));
       controller.close();
     },
   }),
-  { filename: "readme.txt", path: "docs", mimeType: "text/plain" },
+  { filename: "hello.txt", mimeType: "text/plain" },
 );
 
-// Get a public URL
-const url = await client.getUrl(result.path);
-
-// Delete
-const deleted = await client.delete(result.path);
+console.log(result.path); // <uuid>.txt
+console.log(result.size); // 15
 ```
 
-## Drivers
-
-### Local
-
-```ts
-import { LocalDriver } from "@fileway/driver-local";
-
-const driver = new LocalDriver({
-  directory: "./uploads",
-  baseUrl: "https://cdn.example.com/files", // optional, defaults to file://
-  maxSizeBytes: 10 * 1024 * 1024, // optional
-});
-```
-
-### S3 (AWS, MinIO, Cloudflare R2)
+**Move to S3 with one line.** Same client, same call — only the driver changes:
 
 ```ts
 import { S3Driver } from "@fileway/driver-s3";
 
-// AWS
+const client = new FilewayClient({
+  driver: new S3Driver({
+    bucket: "my-bucket",
+    region: "us-east-1",
+    credentials: { accessKeyId: "...", secretAccessKey: "..." },
+  }),
+});
+```
+
+To Cloudinary? Swap in `CloudinaryDriver`. Your application code never changes.
+
+---
+
+## Examples by runtime
+
+### Node.js
+
+```ts
+import { FilewayClient } from "@fileway/core";
+import { LocalDriver } from "@fileway/driver-local";
+import { S3Driver } from "@fileway/driver-s3";
+
+const driver =
+  process.env.S3_DRIVER === "1"
+    ? new S3Driver({
+        bucket: process.env.S3_BUCKET ?? "fileway-demo",
+        region: process.env.AWS_REGION ?? "us-east-1",
+        endpoint: process.env.S3_ENDPOINT, // e.g. http://localhost:9000 (MinIO)
+        forcePathStyle: true,
+        credentials: {
+          accessKeyId: process.env.AWS_ACCESS_KEY_ID ?? "minioadmin",
+          secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY ?? "minioadmin",
+        },
+      })
+    : new LocalDriver({ directory: "./storage" });
+
+const client = new FilewayClient({ driver });
+
+const result = await client.upload(
+  new ReadableStream({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode("Hello, Fileway!"));
+      controller.close();
+    },
+  }),
+  { filename: "hello.txt", path: "quickstart", mimeType: "text/plain" },
+);
+
+console.log(`Uploaded with "${driver.name}" driver:`, result.url);
+```
+
+```bash
+node quickstart.mjs                       # local disk
+S3_DRIVER=1 S3_ENDPOINT=http://localhost:9000 node quickstart.mjs   # S3/MinIO
+```
+
+### Cloudflare Workers
+
+No Node.js, no shims, no AWS SDK. In a Worker, `request.body` *is* the `ReadableStream<Uint8Array>` Fileway streams to S3:
+
+```ts
+import { FilewayClient } from "@fileway/core";
+import { S3Driver } from "@fileway/driver-s3";
+
+export default {
+  async fetch(request: Request, env: Env): Promise<Response> {
+    if (request.method !== "POST") return new Response("POST a file", { status: 405 });
+
+    const client = new FilewayClient({
+      driver: new S3Driver({
+        bucket: env.BUCKET,
+        region: env.AWS_REGION,
+        credentials: {
+          accessKeyId: env.AWS_ACCESS_KEY_ID,
+          secretAccessKey: env.AWS_SECRET_ACCESS_KEY,
+        },
+      }),
+    });
+
+    const result = await client.upload(request.body!, {
+      filename: new URL(request.url).searchParams.get("filename") ?? "upload.bin",
+      path: "uploads",
+    });
+
+    return Response.json({ ok: true, ...result });
+  },
+};
+```
+
+```bash
+npm install
+npx wrangler secret put AWS_ACCESS_KEY_ID
+npx wrangler secret put AWS_SECRET_ACCESS_KEY
+npx wrangler dev
+```
+
+Cloudflare **R2** is S3-compatible — keep this exact code, just point `S3Driver` at your R2 endpoint (`region: "auto"`, `endpoint: "https://<ACCOUNT_ID>.r2.cloudflarestorage.com"`).
+
+### Bun
+
+Identical to Node.js — Fileway runs on Bun's built-in `node:fs` and WHATWG streams:
+
+```ts
+import { FilewayClient } from "@fileway/core";
+import { LocalDriver } from "@fileway/driver-local";
+
+const client = new FilewayClient({
+  driver: new LocalDriver({ directory: "./storage" }),
+});
+
+const result = await client.upload(
+  new ReadableStream({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode("Hello, Fileway!"));
+      controller.close();
+    },
+  }),
+  { filename: "hello.txt", mimeType: "text/plain" },
+);
+
+console.log(result);
+```
+
+```bash
+bun run quickstart.ts
+```
+
+### Deno
+
+Deno resolves the same packages straight from npm:
+
+```ts
+import { FilewayClient } from "npm:@fileway/core@0.0.5";
+import { LocalDriver } from "npm:@fileway/driver-local@0.0.5";
+
+const client = new FilewayClient({
+  driver: new LocalDriver({ directory: "./storage" }),
+});
+
+const result = await client.upload(
+  new ReadableStream({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode("Hello, Fileway!"));
+      controller.close();
+    },
+  }),
+  { filename: "hello.txt", mimeType: "text/plain" },
+);
+
+console.log(result);
+```
+
+```bash
+deno run --allow-read --allow-write quickstart.ts
+```
+
+---
+
+## How it works
+
+Files flow as WHATWG `ReadableStream<Uint8Array>` through the `FilewayClient`:
+
+```
+stream ──▶ middleware.beforeUpload ──▶ driver.upload ──▶ middleware.afterUpload ──▶ UploadResult
+```
+
+- **Core is dependency-free** — `@fileway/core` has no runtime dependencies at all.
+- **Universal drivers** — `driver-s3` and `driver-cloudinary` contain zero `node:*` imports. SigV4 signing uses Web Crypto (`crypto.subtle`); uploads use platform `fetch`. That's why they run on Workers, Bun, Deno, and Node alike.
+- **Local is server-only** — `driver-local` uses `node:fs` streams and guards against path traversal.
+
+## AWS SDK comparison
+
+| | Fileway `@fileway/driver-s3` | `@aws-sdk/client-s3` |
+| --- | --- | --- |
+| Runtime dependencies | 1 (`@fileway/core`, itself zero-dep) | ~30 transitive packages |
+| Bundle size | **~2 KB** min+gzip | ~85 KB min+gzip |
+| Cloudflare Workers | Native — pure `fetch` + Web Crypto | Requires Node built-in shims/polyfills |
+| Deno / Bun | Native | Partial — needs Node compatibility |
+| Upload body | WHATWG `ReadableStream<Uint8Array>` | Node stream / `Buffer` internals |
+| Setup | One driver, one `upload()` call | Service client, command classes, middleware config |
+| Result typing | Inferred per driver (`meta.bucket`, `meta.etag`) | Manual typing of `PutObjectOutput` |
+| Signature | Hand-rolled SigV4 (~100 lines, auditable) | Internal signing pipeline |
+
+*Bundle sizes measured at time of writing: `driver-s3` built + minified + gzipped locally; `@aws-sdk/client-s3` v3.1099.0 from Bundlephobia.*
+
+## Middleware
+
+Hook into the upload lifecycle with `beforeUpload` (transform the stream or options) and `afterUpload` (post-processing):
+
+```ts
+import { FilewayClient } from "@fileway/core";
+import { LocalDriver } from "@fileway/driver-local";
+
+const client = new FilewayClient({
+  driver: new LocalDriver({ directory: "./uploads" }),
+  middlewares: [
+    {
+      async beforeUpload(stream, options) {
+        console.log(`Uploading ${options.filename}...`);
+        return { options: { ...options, path: options.path ?? "inbox" } };
+      },
+      async afterUpload(result) {
+        console.log(`Done: ${result.path} (${result.size} bytes)`);
+      },
+    },
+  ],
+});
+```
+
+## Drivers
+
+| Driver | Install | Notes |
+| --- | --- | --- |
+| `@fileway/driver-local` | `npm i @fileway/driver-local` | `directory`, optional `baseUrl`, `maxSizeBytes` |
+| `@fileway/driver-s3` | `npm i @fileway/driver-s3` | AWS, MinIO, Cloudflare R2, any S3-compatible endpoint |
+| `@fileway/driver-cloudinary` | `npm i @fileway/driver-cloudinary` | `cloudName`, `apiKey`, `apiSecret` |
+
+```ts
+// S3 — AWS, MinIO, or Cloudflare R2
 const aws = new S3Driver({
   bucket: "my-bucket",
   region: "us-east-1",
   credentials: { accessKeyId: "...", secretAccessKey: "..." },
 });
 
-// MinIO
 const minio = new S3Driver({
   bucket: "my-bucket",
   endpoint: "http://localhost:9000",
@@ -110,125 +290,94 @@ const minio = new S3Driver({
   credentials: { accessKeyId: "minioadmin", secretAccessKey: "minioadmin" },
 });
 
-// Cloudflare R2
 const r2 = new S3Driver({
   bucket: "my-bucket",
-  endpoint: "https://<accountid>.r2.cloudflarestorage.com",
+  endpoint: "https://<ACCOUNT_ID>.r2.cloudflarestorage.com",
   region: "auto",
-  baseUrl: "https://pub-<hash>.r2.dev", // optional
+  baseUrl: "https://pub-<HASH>.r2.dev",
   credentials: { accessKeyId: "...", secretAccessKey: "..." },
 });
-```
 
-### Cloudinary
-
-```ts
-import { CloudinaryDriver } from "@fileway/driver-cloudinary";
-
-const driver = new CloudinaryDriver({
+// Cloudinary
+const cloudinary = new CloudinaryDriver({
   cloudName: "my-cloud",
   apiKey: "...",
   apiSecret: "...",
-  maxSizeBytes: 10 * 1024 * 1024, // optional
 });
-```
-
-## Middleware
-
-```ts
-const logger = {
-  async afterUpload(result) {
-    console.log(`Uploaded ${result.path} (${result.size} bytes)`);
-  },
-};
-
-const client = new FilewayClient({ driver, middlewares: [logger] });
 ```
 
 ## API
 
 ### `client.upload(stream, options)`
 
-| Parameter          | Type                         | Description                  |
-| ------------------ | ---------------------------- | ---------------------------- |
-| `stream`           | `ReadableStream<Uint8Array>` | File data                    |
-| `options.filename` | `string`                     | Original file name           |
-| `options.path`     | `string`                     | Optional storage path prefix |
-| `options.mimeType` | `string`                     | Optional MIME type           |
-| `options.metadata` | `Record<string, string>`     | Optional metadata            |
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `stream` | `ReadableStream<Uint8Array>` | File data |
+| `options.filename` | `string` | Original file name |
+| `options.path` | `string` | Optional storage path prefix |
+| `options.mimeType` | `string` | Optional MIME type |
+| `options.metadata` | `Record<string, string>` | Optional metadata |
 
-Returns `UploadResult<TMeta>` — includes `id`, `url`, `path`, `size`, `meta`.
+Returns `UploadResult<TMeta>` — `{ id, url, path, size, meta }` where `meta` is inferred from the driver.
 
-### `client.delete(path)`
+### `client.delete(path)` / `client.getUrl(path)`
 
-Returns `Promise<boolean>` — `true` if the file existed and was deleted.
+Delete returns `Promise<boolean>`; `getUrl` returns the public URL for a stored path.
 
-### `client.getUrl(path)`
+---
 
-Returns `Promise<string>` — public URL for the file.
+## Roadmap
+
+**Toward v1.0.0** (see the [v1 release note](CHANGELOG.md#upcoming--v100)):
+
+- [ ] Streaming S3 multipart uploads with per-chunk SigV4 signing (`aws-chunked`)
+- [ ] Stream transformation in `beforeUpload` middlewares
+- [ ] Upload progress / lifecycle hooks
+- [ ] Retries with exponential backoff and classified errors
+- [ ] Presigned (signed) URL support for downloads
+
+**Planned drivers:** Cloudflare R2 (native), Google Cloud Storage, Backblaze B2, Azure Blob Storage, DigitalOcean Spaces (S3-compatible).
+
+## Community
+
+- 💬 **Ask questions & share ideas** — [GitHub Discussions](https://github.com/Goldenhub/fileway/discussions)
+- 🐛 **Report a bug** — open an [issue](https://github.com/Goldenhub/fileway/issues)
+- ⭐ **Star the repo** to show support — it drives discovery
+- 📦 **npm org** — [`@fileway` on npm](https://www.npmjs.com/org/fileway)
+
+Contributions welcome: fork, branch off `main`, and open a PR. CI runs typecheck, unit tests, and MinIO integration tests on every push.
+
+---
 
 ## CI & Releases
 
 ### Continuous integration
 
-Every push to `main` and every pull request runs [`.github/workflows/ci.yml`](.github/workflows/ci.yml):
-
-- Typecheck all packages and the docs site
-- Build all packages
-- Unit tests across all four packages
-- S3 integration tests against a real MinIO server (Docker service container)
-- Docs typecheck
+Every push to `main` and every pull request runs [`.github/workflows/ci.yml`](.github/workflows/ci.yml): build → typecheck → unit tests across all four packages → S3 integration tests against a real MinIO server → docs typecheck.
 
 ### Releasing
 
-Releases are fully automated. Bump the versions, tag, and push — GitHub publishes all four packages to npm:
+Releases are fully automated. Bump, tag, push — GitHub publishes all four packages to npm:
 
 ```bash
-pnpm -r version patch   # bumps all packages (0.0.3 -> 0.0.4)
-git add -A && git commit -m "chore: release v0.0.4"
-git tag v0.0.4
+pnpm -r version patch   # bumps all packages (0.0.5 -> 0.0.6)
+git add -A && git commit -m "chore: release v0.0.6"
+git tag v0.0.6
 git push origin main --tags
 ```
 
-[`.github/workflows/release.yml`](.github/workflows/release.yml) then:
+[`.github/workflows/release.yml`](.github/workflows/release.yml) verifies every `package.json` version matches the tag, builds all packages, and runs `pnpm -r publish --access public --provenance`.
 
-1. Verifies every `package.json` version matches the tag (`v0.0.4` -> `0.0.4`)
-2. Builds all packages
-3. Runs `pnpm -r publish --access public --provenance`
-
-**No `NPM_TOKEN` is stored anywhere.** Publishing uses **npm Trusted Publishers (OIDC)**: GitHub mints a short-lived identity token that npm exchanges for publish permission, and every release ships with SLSA provenance attestation (cryptographic proof of build origin).
-
-One-time npm setup (per package, on the package's npm page → Settings → **Trusted Publisher** → GitHub Actions):
-
-| Field              | Value          |
-| ------------------ | -------------- |
-| Organization / user| `Goldenhub`    |
-| Repository         | `fileway`      |
-| Workflow filename  | `release.yml`  |
-| Environment name   | *(blank)*      |
-| Allowed actions    | `npm publish`  |
+**No `NPM_TOKEN` is stored anywhere.** Publishing uses npm Trusted Publishers (OIDC): GitHub mints a short-lived identity token that npm exchanges for publish permission, and every release ships with SLSA provenance attestation.
 
 ## Development
 
 ```bash
-# Install
 pnpm install
-
-# Build all packages
-pnpm build
-
-# Typecheck all packages
-pnpm typecheck
-
-# Run tests across all packages
-pnpm test
-
-# S3 integration tests against a local MinIO (needs Docker running)
-pnpm test:integration
-
-# Test a driver manually
-pnpm test:local
-S3_BUCKET=my-bucket S3_ENDPOINT=http://localhost:9000 MINIO_ACCESS_KEY=minioadmin MINIO_SECRET_KEY=minioadmin pnpm test:s3:minio
+pnpm build         # build all packages
+pnpm typecheck     # typecheck all packages
+pnpm test          # unit tests across all packages
+pnpm test:integration  # S3 integration tests against local MinIO (Docker)
 ```
 
 ### Project structure
@@ -248,4 +397,4 @@ fileway/
 
 ## License
 
-MIT
+MIT © 2026 Azubuike Golden
