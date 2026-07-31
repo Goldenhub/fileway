@@ -20,12 +20,12 @@ const result = await client.upload(stream, { filename: "photo.jpg" });
 
 ## Packages
 
-| Package | Description | Dependencies | Runtime |
-|---|---|---|---|
-| `@fileway/core` | Client engine, types, validation | Zero | Universal |
-| `@fileway/driver-local` | Local filesystem storage | `node:fs` | Node.js / Bun |
-| `@fileway/driver-s3` | AWS S3 & compatible (MinIO, R2) | AWS SDK v3 | Universal |
-| `@fileway/driver-cloudinary` | Cloudinary uploads via Fetch API | Zero | Universal |
+| Package                      | Description                      | Dependencies | Runtime       |
+| ---------------------------- | -------------------------------- | ------------ | ------------- |
+| `@fileway/core`              | Client engine, types, validation | Zero         | Universal     |
+| `@fileway/driver-local`      | Local filesystem storage         | `node:fs`    | Node.js / Bun |
+| `@fileway/driver-s3`         | AWS S3 & compatible (MinIO, R2)  | AWS SDK v3   | Universal     |
+| `@fileway/driver-cloudinary` | Cloudinary uploads via Fetch API | Zero         | Universal     |
 
 ## Features
 
@@ -62,7 +62,7 @@ const result = await client.upload(
       controller.close();
     },
   }),
-  { filename: "readme.txt", path: "docs", mimeType: "text/plain" }
+  { filename: "readme.txt", path: "docs", mimeType: "text/plain" },
 );
 
 // Get a public URL
@@ -82,7 +82,7 @@ import { LocalDriver } from "@fileway/driver-local";
 const driver = new LocalDriver({
   directory: "./uploads",
   baseUrl: "https://cdn.example.com/files", // optional, defaults to file://
-  maxSizeBytes: 10 * 1024 * 1024,           // optional
+  maxSizeBytes: 10 * 1024 * 1024, // optional
 });
 ```
 
@@ -145,13 +145,13 @@ const client = new FilewayClient({ driver, middlewares: [logger] });
 
 ### `client.upload(stream, options)`
 
-| Parameter | Type | Description |
-|---|---|---|
-| `stream` | `ReadableStream<Uint8Array>` | File data |
-| `options.filename` | `string` | Original file name |
-| `options.path` | `string` | Optional storage path prefix |
-| `options.mimeType` | `string` | Optional MIME type |
-| `options.metadata` | `Record<string, string>` | Optional metadata |
+| Parameter          | Type                         | Description                  |
+| ------------------ | ---------------------------- | ---------------------------- |
+| `stream`           | `ReadableStream<Uint8Array>` | File data                    |
+| `options.filename` | `string`                     | Original file name           |
+| `options.path`     | `string`                     | Optional storage path prefix |
+| `options.mimeType` | `string`                     | Optional MIME type           |
+| `options.metadata` | `Record<string, string>`     | Optional metadata            |
 
 Returns `UploadResult<TMeta>` — includes `id`, `url`, `path`, `size`, `meta`.
 
