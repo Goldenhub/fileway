@@ -1,6 +1,6 @@
 {
   "name": "@fileway/core",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "type": "module",
   "types": "./dist/index.d.ts",
   "exports": {
@@ -13,7 +13,9 @@
       "require": "./dist/index.cjs"
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "publishConfig": {
     "access": "public"
   },
@@ -23,8 +25,8 @@
     "test": "vitest run"
   },
   "devDependencies": {
-    "typescript": "catalog:",
     "tsup": "catalog:",
+    "typescript": "catalog:",
     "vitest": "catalog:"
   }
 }

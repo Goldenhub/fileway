@@ -1,6 +1,6 @@
 {
   "name": "fileway",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "private": true,
   "description": "",
   "engines": {
@@ -17,10 +17,10 @@
     "test:cloudinary": "npx tsx scripts/test-cloudinary.mjs"
   },
   "devDependencies": {
+    "@edge-runtime/vm": "catalog:",
     "@fileway/core": "workspace:*",
     "@fileway/driver-cloudinary": "workspace:*",
     "@fileway/driver-local": "workspace:*",
-    "@fileway/driver-s3": "workspace:*",
-    "@edge-runtime/vm": "catalog:"
+    "@fileway/driver-s3": "workspace:*"
   }
 }

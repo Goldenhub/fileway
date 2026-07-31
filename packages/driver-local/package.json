@@ -1,6 +1,6 @@
 {
   "name": "@fileway/driver-local",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
@@ -12,7 +12,9 @@
       "require": "./dist/index.cjs"
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "publishConfig": {
     "access": "public"
   },
@@ -25,9 +27,9 @@
     "@fileway/core": "workspace:*"
   },
   "devDependencies": {
-    "typescript": "catalog:",
+    "@types/node": "catalog:",
     "tsup": "catalog:",
-    "vitest": "catalog:",
-    "@types/node": "catalog:"
+    "typescript": "catalog:",
+    "vitest": "catalog:"
   }
 }
