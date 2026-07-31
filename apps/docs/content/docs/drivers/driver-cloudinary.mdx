@@ -84,6 +84,19 @@ The optional `options` argument is the same `{ resourceType, version }` hint use
 
 Throws with the HTTP status on a non-2xx response (e.g. 404 for a missing asset).
 
+## Presigned URLs
+
+`getPresignedUrl(publicId, { expiresIn, deliveryType })` returns a Cloudinary signed delivery URL valid until `expiresIn` seconds from now:
+
+```ts
+const url = await client.getPresignedUrl(result.meta.publicId, { expiresIn: 300 });
+// https://res.cloudinary.com/demo/image/upload/s--BUKMRPuV--/v123/sample?expires_at=...
+```
+
+- The signature is the first 8 characters of a URL-safe base64 `SHA-1` digest of the resource path (everything after the `s--` component, e.g. `v123/sample`) concatenated with the API secret. It is generated purely with Web Crypto — no SDK and no network call. `expiresIn` defaults to `3600` and must be a positive integer.
+- The URL uses the same resolution chain as `getUrl` (`{ resourceType, version }` hints, upload cache, Admin API lookup) to pick the correct `resource_type` and `version` for the signed path.
+- **Security caveat:** the signature only restricts access for assets with `authenticated` or `private` delivery — pass `deliveryType: "authenticated"` (or `"private"`) for those. `CloudinaryDriver.upload` creates public `upload` assets, so the default signed URL resolves but does not restrict anything (the asset is already public). The `deliveryType` must match the asset's actual delivery type or Cloudinary returns 404.
+
 ## Delete
 
 `delete(publicId, options?)` removes an asset via the Cloudinary Admin API, using the same resolution chain as `getUrl` to pick the correct `resource_type` path (`/resources/{type}/upload`). Returns `true` only when Cloudinary confirms the deletion, and `false` when the asset is unknown or the request fails.

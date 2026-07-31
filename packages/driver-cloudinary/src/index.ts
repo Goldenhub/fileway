@@ -1,7 +1,9 @@
-import type { BaseDriver, UploadOptions, UploadResult } from "@fileway/core";
+import type { BaseDriver, PresignedUrlOptions, UploadOptions, UploadResult } from "@fileway/core";
 import { validateUploadOptions, ValidationError, urlEncodePath } from "@fileway/core";
 
 const randomUUID = () => globalThis.crypto.randomUUID();
+const PRESIGN_DEFAULT_EXPIRY = 3600;
+const PRESIGN_MIN_EXPIRY = 1;
 
 export interface CloudinaryDriverConfig {
   cloudName: string;
@@ -31,6 +33,17 @@ export interface CloudinaryLookupOptions {
   resourceType?: "image" | "video" | "raw";
   /** Explicit asset version, used to build the CDN URL. */
   version?: number;
+}
+
+export interface CloudinaryPresignOptions extends PresignedUrlOptions, CloudinaryLookupOptions {
+  /**
+   * Delivery type used in the signed URL. Defaults to `upload` to match assets
+   * created by `CloudinaryDriver.upload`. Use `authenticated` (or `private`)
+   * for assets stored under those delivery types — this is where the signature
+   * actually restricts access until `expires_at`. The value must match the
+   * asset's delivery type or Cloudinary returns 404.
+   */
+  deliveryType?: "upload" | "authenticated" | "private";
 }
 
 interface ResolvedAsset {
@@ -164,6 +177,31 @@ export class CloudinaryDriver implements BaseDriver<CloudinaryMeta> {
   }
 
   /**
+   * Returns a signed Cloudinary delivery URL valid until `expiresIn` seconds
+   * from now. The signature is the first 8 characters of a URL-safe base64
+   * SHA-1 digest of the resource path (everything after the `s--` component)
+   * concatenated with the API secret. Generated purely with Web Crypto.
+   *
+   * The signature only restricts access for assets with `authenticated` or
+   * `private` delivery; for public `upload` assets it is decorative. See
+   * `CloudinaryPresignOptions.deliveryType`.
+   */
+  async getPresignedUrl(publicId: string, options?: CloudinaryPresignOptions): Promise<string> {
+    const expiresIn = options?.expiresIn ?? PRESIGN_DEFAULT_EXPIRY;
+    if (!Number.isInteger(expiresIn) || expiresIn < PRESIGN_MIN_EXPIRY) {
+      throw new ValidationError(`expiresIn must be a positive integer`);
+    }
+
+    const asset = await this.resolveAsset(publicId, options);
+    const resourcePath = asset.version !== undefined ? `v${asset.version}/${publicId}` : publicId;
+    const expiresAt = Math.floor(Date.now() / 1000) + expiresIn;
+    const signature = await this.generateDeliverySignature(resourcePath);
+    const deliveryType = options?.deliveryType ?? "upload";
+
+    return `https://res.cloudinary.com/${this.cloudName}/${asset.resourceType}/${deliveryType}/s--${signature}--/${resourcePath}?expires_at=${expiresAt}`;
+  }
+
+  /**
    * Resolve the resource type and version for a public ID: explicit hint →
    * in-memory cache → Admin API lookup → default `image`.
    */
@@ -231,6 +269,14 @@ export class CloudinaryDriver implements BaseDriver<CloudinaryMeta> {
     return `Basic ${btoa(`${this.apiKey}:${this.apiSecret}`)}`;
   }
 
+  private async generateDeliverySignature(resourcePath: string): Promise<string> {
+    const hash = await globalThis.crypto.subtle.digest(
+      "SHA-1",
+      new TextEncoder().encode(resourcePath + this.apiSecret),
+    );
+    return base64UrlEncode(new Uint8Array(hash)).slice(0, 8);
+  }
+
   private async generateSignature(params: Record<string, string | undefined>): Promise<string> {
     const sortedKeys = Object.keys(params)
       .filter((k) => params[k] !== undefined)
@@ -244,4 +290,10 @@ export class CloudinaryDriver implements BaseDriver<CloudinaryMeta> {
     const hashArray = Array.from(new Uint8Array(hashBuffer));
     return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
   }
+}
+
+function base64UrlEncode(bytes: Uint8Array): string {
+  let binary = "";
+  for (const b of bytes) binary += String.fromCharCode(b);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }

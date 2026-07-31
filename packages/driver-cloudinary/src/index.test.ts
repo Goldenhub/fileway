@@ -501,4 +501,69 @@ describe("CloudinaryDriver", () => {
       );
     });
   });
+
+  describe("getPresignedUrl", () => {
+    it("should match the Cloudinary documented signature vector", async () => {
+      mockFetch.mockImplementation(async () => {
+        throw new Error("should not fetch");
+      });
+
+      // to_sign = "v123/sample" + "secret456" → base64url(sha1)[:8] = BUKMRPuV
+      const url = await driver.getPresignedUrl("sample", {
+        resourceType: "image",
+        version: 123,
+      });
+      expect(url.startsWith(
+        "https://res.cloudinary.com/demo/image/upload/s--BUKMRPuV--/v123/sample?expires_at=",
+      )).toBe(true);
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    it("should default to a 3600s expiry and upload delivery type", async () => {
+      mockSearch({ resource_type: "image", version: 1 });
+
+      const url = await driver.getPresignedUrl("abc123");
+
+      const parsed = new URL(url);
+      expect(parsed.pathname).toMatch(/^\/demo\/image\/upload\/s--[A-Za-z0-9_-]{8}--\/v1\/abc123$/);
+      const expiresAt = Number(parsed.searchParams.get("expires_at"));
+      expect(Number.isInteger(expiresAt)).toBe(true);
+      expect(Math.abs(expiresAt - (Math.floor(Date.now() / 1000) + 3600))).toBeLessThan(5);
+    });
+
+    it("should honor a custom expiresIn and delivery type", async () => {
+      mockFetch.mockImplementation(async () => {
+        throw new Error("should not fetch");
+      });
+
+      const url = await driver.getPresignedUrl("clip1", {
+        resourceType: "video",
+        version: 42,
+        expiresIn: 300,
+        deliveryType: "authenticated",
+      });
+
+      const parsed = new URL(url);
+      expect(parsed.pathname.startsWith("/demo/video/authenticated/s--")).toBe(true);
+      const expiresAt = Number(parsed.searchParams.get("expires_at"));
+      expect(Math.abs(expiresAt - (Math.floor(Date.now() / 1000) + 300))).toBeLessThan(5);
+    });
+
+    it("should sign without a version when the version is unknown", async () => {
+      mockSearch({ resource_type: "image" });
+
+      const url = await driver.getPresignedUrl("abc123");
+
+      expect(new URL(url).pathname).toMatch(/^\/demo\/image\/upload\/s--[A-Za-z0-9_-]{8}--\/abc123$/);
+    });
+
+    it("should reject non-positive or fractional expiries", async () => {
+      await expect(driver.getPresignedUrl("abc123", { expiresIn: 0 })).rejects.toThrow(
+        /expiresIn must be a positive integer/,
+      );
+      await expect(driver.getPresignedUrl("abc123", { expiresIn: 1.5 })).rejects.toThrow(
+        /expiresIn must be a positive integer/,
+      );
+    });
+  });
 });

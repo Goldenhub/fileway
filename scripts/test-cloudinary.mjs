@@ -67,5 +67,11 @@ if (result.meta.height) console.log("    height:    ", result.meta.height);
 const url = await driver.getUrl(result.path);
 console.log("\nGenerated URL:", url);
 
+const signedUrl = await client.getPresignedUrl(result.path, { expiresIn: 300 });
+console.log("Presigned URL:", signedUrl);
+const signedRes = await fetch(signedUrl);
+console.log("Presigned fetch status:", signedRes.status);
+if (!signedRes.ok) throw new Error(`Presigned URL fetch failed: ${signedRes.status}`);
+
 const deleted = await client.delete(result.path);
 console.log("Deleted:", deleted);
