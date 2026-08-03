@@ -1,4 +1,4 @@
-import Link from "next/link";
+import { TrackedLink } from "./tracked-link";
 
 const drivers = [
   {
@@ -47,9 +47,11 @@ export function DriversSection() {
 
         <div className="mx-auto mt-12 grid max-w-[800px] gap-3">
           {drivers.map((d) => (
-            <Link
+            <TrackedLink
               key={d.name}
               href={d.link}
+              event="driver_click"
+              data={{ driver: d.name }}
               className="group flex items-center justify-between rounded-lg border px-5 py-4 transition-colors"
               style={{ borderColor: "var(--lp-border)", backgroundColor: "var(--lp-card-bg)" }}
             >
@@ -83,7 +85,7 @@ export function DriversSection() {
                   {d.status}
                 </span>
               </div>
-            </Link>
+            </TrackedLink>
           ))}
         </div>
       </div>
