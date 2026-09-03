@@ -9,6 +9,32 @@ export interface UploadProgress {
   progress?: number;
 }
 
+/**
+ * Controls retry behavior for `FilewayClient` operations. Retries apply to
+ * idempotent operations (`delete`, `get`, `getUrl`, `getPresignedUrl`) and to
+ * `upload` when `UploadOptions.streamFactory` is provided (so each attempt can
+ * produce a fresh stream). Only transient failures are retried: `network` and
+ * `provider-error` codes, plus any error carrying HTTP 429/5xx. Validation,
+ * config, auth, not-found, size, and abort errors are never retried.
+ */
+export interface RetryConfig {
+  /** Maximum number of retry attempts after the initial one. `0` disables retry. Default: 3. */
+  maxRetries?: number;
+  /** Base delay (ms) for the first retry. Default: 300. */
+  baseDelayMs?: number;
+  /** Cap on any single delay (ms), in case a retry is interrupted. Default: 10000. */
+  maxDelayMs?: number;
+  /** Exponential backoff multiplier applied to the delay each attempt. Default: 2. */
+  multiplier?: number;
+  /** Apply full jitter (uniform over `[0, delay]`) to avoid thundering herd. Default: true. */
+  jitter?: boolean;
+  /** Extra HTTP status codes (beyond 429 and 5xx) to treat as retryable. Default: none. */
+  retryHttpStatuses?: number[];
+  /** Whether non-`StorageError` failures (e.g. bare `TypeError: fetch failed`)
+   * are treated as retryable. Default: true. */
+  retryGenericErrors?: boolean;
+}
+
 export interface UploadOptions {
   filename: string;
   mimeType?: string;
@@ -25,6 +51,15 @@ export interface UploadOptions {
    * throttled to at most one event per 100 ms. A final event always reports the
    * exact total. Not called on abort. */
   onProgress?: (progress: UploadProgress) => void;
+  /**
+   * Returns a fresh stream for retry attempts. A `ReadableStream` is consumed
+   * after one read, so without this retrying an `upload` is impossible — the
+   * data is gone after the first attempt. When provided, the client calls this
+   * on each retry to re-produce the payload. The data source must be re-readable
+   * (a file path, in-memory bytes, re-fetchable URL); a one-shot feed is not.
+   * Ignored when no retry occurs.
+   */
+  streamFactory?: () => ReadableStream<Uint8Array>;
 }
 
 export interface UploadResult<TMeta extends Record<string, unknown>> {
@@ -83,4 +118,6 @@ export interface FilewayConfig<TDriver extends BaseDriver> {
    * error (a `StorageError` for driver failures) plus context. Aborts are
    * skipped. A throwing/`onError` never masks the original error. */
   onError?: (error: unknown, context: ErrorContext) => void | Promise<void>;
+  /** Optional retry behavior for transient failures. See `RetryConfig`. */
+  retry?: RetryConfig;
 }

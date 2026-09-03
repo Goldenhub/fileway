@@ -56,6 +56,47 @@ try {
 
 Abort signals are never wrapped: cancelling an upload rejects with a plain `DOMException` named `AbortError` (see [Cancelling uploads](/docs/guide/uploads#cancelling-uploads)), which `isAbortError()` recognizes. This is the same error `fetch` itself throws on abort, so your cancellation handling works uniformly.
 
+## Retries
+
+Fileway retries **transient failures** automatically at the client layer — no driver changes, no manual loops. `isRetryable(err)` (exported from `@fileway/core`) decides what's worth retrying using the same rules as the client:
+
+- **Retryable:** `network`, `provider-error`, or any error carrying HTTP `429` / `5xx`.
+- **Never retried:** `validation`, `config`, `auth-failed`, `not-found`, `bucket-not-found`, `size-exceeded`, and `AbortError`.
+
+```ts
+const client = new FilewayClient({
+  driver,
+  retry: {
+    maxRetries: 3,        // attempts after the first (default 3, 0 disables)
+    baseDelayMs: 300,     // first delay (default 300)
+    maxDelayMs: 10_000,   // cap on any delay (default 10_000)
+    multiplier: 2,        // exponential backoff (default 2)
+    jitter: true,         // full jitter to avoid thundering herd (default true)
+    // retryHttpStatuses: [408],   // opt-in extra statuses
+    // retryGenericErrors: true,   // whether bare errors (e.g. TypeError: fetch failed) retry
+  },
+});
+```
+
+### Which operations retry
+
+- **`delete`, `get`, `getUrl`, `getPresignedUrl`** retry automatically (they're idempotent).
+- **`upload`** retries only when you pass `streamFactory`. A `ReadableStream` is consumed after one read, so without a way to re-produce the payload a failed upload can't be retried. Provide `streamFactory` to create a fresh stream per attempt — the source must be re-readable (a file path, in-memory bytes, a re-fetchable URL):
+
+```ts
+const result = await client.upload(createReadStream(file), {
+  filename: "photo.jpg",
+  size: stat.size,
+  streamFactory: () => createReadStream(file), // fresh stream per retry
+});
+```
+
+If `streamFactory` is absent, a failed upload throws immediately (no retry). Because each retry re-transmits the payload, retried uploads cost `N+1` egresss on `N` failures.
+
+### Backoff & logging
+
+Retries use exponential backoff with full jitter, capped at `maxDelayMs`; the wait is interruptible by an abort signal. Each retry emits a `warn`-level log (`"<operation> failed, retrying"` with `{ attempt, maxRetries, delayMs, error }`), and `onError` fires only on the **final** failure — not per attempt.
+
 ### Note on breaking changes
 
 `ValidationError` is now a `StorageError` subclass, and driver messages are unchanged — existing `try/catch`, `err.message`, and `instanceof ValidationError` checks keep working. Adding the `code` field is additive.

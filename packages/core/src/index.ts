@@ -3,12 +3,14 @@ export * from "./validation.js";
 export * from "./progress.js";
 export * from "./errors.js";
 export * from "./logging.js";
+export * from "./retry.js";
 
 export const version = "0.0.1";
 
-import { BaseDriver, FilewayConfig, PresignedUrlOptions, UploadOptions } from "./types.js";
+import { BaseDriver, FilewayConfig, PresignedUrlOptions, RetryConfig, UploadOptions } from "./types.js";
 import { withProgress } from "./progress.js";
 import { StorageError, isAbortError } from "./errors.js";
+import { delayWithJitter, isRetryable, sleep } from "./retry.js";
 import type { ErrorContext, Logger, LogLevel, Operation } from "./logging.js";
 
 export class FilewayClient<const TConfig extends FilewayConfig<BaseDriver>> {
@@ -16,12 +18,14 @@ export class FilewayClient<const TConfig extends FilewayConfig<BaseDriver>> {
   private middlewares: NonNullable<TConfig["middlewares"]>;
   private logger: Logger | undefined;
   private onError: ((error: unknown, context: ErrorContext) => void | Promise<void>) | undefined;
+  private retry: RetryConfig;
 
   constructor(config: TConfig) {
     this.driver = config.driver;
     this.middlewares = config.middlewares ?? [];
     this.logger = config.logger;
     this.onError = config.onError;
+    this.retry = config.retry ?? {};
   }
 
   async upload(
@@ -29,6 +33,10 @@ export class FilewayClient<const TConfig extends FilewayConfig<BaseDriver>> {
     options: UploadOptions,
   ): Promise<ReturnType<TConfig["driver"]["upload"]>> {
     const started = Date.now();
+    const maxRetries = this.retry.maxRetries ?? 3;
+    const canRetry = options.streamFactory !== undefined && maxRetries > 0;
+
+    let attempt = 1;
     let activeStream = stream;
     let activeOptions = { ...options };
 
@@ -40,96 +48,86 @@ export class FilewayClient<const TConfig extends FilewayConfig<BaseDriver>> {
       ...(activeOptions.size !== undefined ? { size: activeOptions.size } : {}),
     });
 
-    try {
-      for (const middleware of this.middlewares) {
-        if (middleware.beforeUpload) {
-          const result = await middleware.beforeUpload(activeStream, activeOptions);
-          if (result?.stream) activeStream = result.stream;
-          if (result?.options) activeOptions = result.options;
+    for (;;) {
+      try {
+        for (const middleware of this.middlewares) {
+          if (middleware.beforeUpload) {
+            const result = await middleware.beforeUpload(activeStream, activeOptions);
+            if (result?.stream) activeStream = result.stream;
+            if (result?.options) activeOptions = result.options;
+          }
         }
-      }
 
-      const progressStream = activeOptions.onProgress
-        ? withProgress(activeStream, activeOptions.onProgress, activeOptions.size)
-        : activeStream;
+        const progressStream = activeOptions.onProgress
+          ? withProgress(activeStream, activeOptions.onProgress, activeOptions.size)
+          : activeStream;
 
-      const uploadResult = await this.driver.upload(progressStream, activeOptions);
+        const uploadResult = await this.driver.upload(progressStream, activeOptions);
 
-      for (const middleware of this.middlewares) {
-        if (middleware.afterUpload) {
-          await middleware.afterUpload(uploadResult);
+        for (const middleware of this.middlewares) {
+          if (middleware.afterUpload) {
+            await middleware.afterUpload(uploadResult);
+          }
         }
+
+        this.emit("info", "upload succeeded", {
+          operation: "upload",
+          id: uploadResult.id,
+          url: uploadResult.url,
+          path: uploadResult.path,
+          size: uploadResult.size,
+          durationMs: Date.now() - started,
+        });
+
+        return uploadResult as ReturnType<TConfig["driver"]["upload"]>;
+      } catch (error) {
+        const delay = delayWithJitter(attempt, this.retry);
+        const canRetryNow = canRetry && isRetryable(error, this.retry) && attempt <= maxRetries;
+        if (!canRetryNow) {
+          await this.reportFailure(error, {
+            operation: "upload",
+            durationMs: Date.now() - started,
+            ...(activeOptions.filename !== undefined ? { filename: activeOptions.filename } : {}),
+            ...(activeOptions.path !== undefined ? { path: activeOptions.path } : {}),
+            ...(activeOptions.mimeType !== undefined ? { mimeType: activeOptions.mimeType } : {}),
+            ...(activeOptions.size !== undefined ? { size: activeOptions.size } : {}),
+          });
+          throw error;
+        }
+
+        this.emit("warn", "upload failed, retrying", {
+          operation: "retry",
+          attempt,
+          maxRetries,
+          delayMs: delay,
+          error: error instanceof Error ? { name: error.name, message: error.message } : {},
+        });
+
+        await sleep(delay, activeOptions.signal);
+        attempt += 1;
+        activeStream = activeOptions.streamFactory!();
+        activeOptions = { ...activeOptions };
       }
-
-      this.emit("info", "upload succeeded", {
-        operation: "upload",
-        id: uploadResult.id,
-        url: uploadResult.url,
-        path: uploadResult.path,
-        size: uploadResult.size,
-        durationMs: Date.now() - started,
-      });
-
-      return uploadResult as ReturnType<TConfig["driver"]["upload"]>;
-    } catch (error) {
-      await this.reportFailure(error, {
-        operation: "upload",
-        durationMs: Date.now() - started,
-        ...(activeOptions.filename !== undefined ? { filename: activeOptions.filename } : {}),
-        ...(activeOptions.path !== undefined ? { path: activeOptions.path } : {}),
-        ...(activeOptions.mimeType !== undefined ? { mimeType: activeOptions.mimeType } : {}),
-        ...(activeOptions.size !== undefined ? { size: activeOptions.size } : {}),
-      });
-      throw error;
     }
   }
 
   async delete(path: string): Promise<boolean> {
-    const started = Date.now();
-    this.emit("info", "delete started", { operation: "delete", path });
-    try {
-      const result = await this.driver.delete(path);
-      this.emit("info", "delete succeeded", { operation: "delete", path, durationMs: Date.now() - started });
-      return result;
-    } catch (error) {
-      await this.reportFailure(error, { operation: "delete", durationMs: Date.now() - started, path });
-      throw error;
-    }
+    return this.runWithRetry("delete", path, async () => this.driver.delete(path));
   }
 
   async getUrl(path: string): Promise<string> {
-    const started = Date.now();
-    this.emit("info", "getUrl started", { operation: "getUrl", path });
-    try {
-      const url = await this.driver.getUrl(path);
-      this.emit("info", "getUrl succeeded", { operation: "getUrl", path, durationMs: Date.now() - started });
-      return url;
-    } catch (error) {
-      await this.reportFailure(error, { operation: "getUrl", durationMs: Date.now() - started, path });
-      throw error;
-    }
+    return this.runWithRetry("getUrl", path, async () => this.driver.getUrl(path));
   }
 
   async get(path: string): Promise<ReadableStream<Uint8Array>> {
-    const started = Date.now();
-    this.emit("info", "get started", { operation: "get", path });
-    try {
-      const stream = await this.driver.get(path);
-      this.emit("info", "get succeeded", { operation: "get", path, durationMs: Date.now() - started });
-      return stream;
-    } catch (error) {
-      await this.reportFailure(error, { operation: "get", durationMs: Date.now() - started, path });
-      throw error;
-    }
+    return this.runWithRetry("get", path, async () => this.driver.get(path));
   }
 
   async getPresignedUrl(
     path: string,
     options?: PresignedUrlOptions,
   ): Promise<string> {
-    const started = Date.now();
-    this.emit("info", "getPresignedUrl started", { operation: "getPresignedUrl", path });
-    try {
+    return this.runWithRetry("getPresignedUrl", path, async () => {
       if (!this.driver.getPresignedUrl) {
         throw new StorageError(
           "config",
@@ -137,12 +135,45 @@ export class FilewayClient<const TConfig extends FilewayConfig<BaseDriver>> {
           { provider: this.driver.name },
         );
       }
-      const url = await this.driver.getPresignedUrl(path, options);
-      this.emit("info", "getPresignedUrl succeeded", { operation: "getPresignedUrl", path, durationMs: Date.now() - started });
-      return url;
-    } catch (error) {
-      await this.reportFailure(error, { operation: "getPresignedUrl", durationMs: Date.now() - started, path });
-      throw error;
+      return this.driver.getPresignedUrl!(path, options);
+    });
+  }
+
+  private async runWithRetry<T>(
+    operation: "delete" | "getUrl" | "get" | "getPresignedUrl",
+    path: string,
+    fn: () => Promise<T>,
+  ): Promise<T> {
+    const started = Date.now();
+    const maxRetries = this.retry.maxRetries ?? 3;
+
+    this.emit("info", `${operation} started`, { operation, path });
+
+    let attempt = 1;
+    for (;;) {
+      try {
+        const result = await fn();
+        this.emit("info", `${operation} succeeded`, { operation, path, durationMs: Date.now() - started });
+        return result;
+      } catch (error) {
+        const delay = delayWithJitter(attempt, this.retry);
+        const canRetryNow = isRetryable(error, this.retry) && attempt <= maxRetries;
+        if (!canRetryNow) {
+          await this.reportFailure(error, { operation, durationMs: Date.now() - started, path });
+          throw error;
+        }
+
+        this.emit("warn", `${operation} failed, retrying`, {
+          operation: "retry",
+          attempt,
+          maxRetries,
+          delayMs: delay,
+          error: error instanceof Error ? { name: error.name, message: error.message } : {},
+        });
+
+        await sleep(delay);
+        attempt += 1;
+      }
     }
   }
 

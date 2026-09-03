@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { FilewayClient, version, abortError, isAbortError, StorageError, ValidationError } from "./index.js";
+import { FilewayClient, version, abortError, isAbortError, StorageError, ValidationError, isRetryable } from "./index.js";
 import type { BaseDriver, UploadOptions, UploadResult } from "./types.js";
 
 describe("version", () => {
@@ -562,5 +562,176 @@ describe("FilewayClient logging & onError", () => {
     await client.getUrl("x");
 
     expect(debug).not.toHaveBeenCalled();
+  });
+});
+
+describe("isRetryable", () => {
+  it("classifies network and provider-error as retryable", () => {
+    expect(isRetryable(new StorageError("network", "boom", { provider: "s3" }))).toBe(true);
+    expect(isRetryable(new StorageError("provider-error", "boom", { provider: "s3" }))).toBe(true);
+  });
+
+  it("classifies 429 and 5xx statuses as retryable", () => {
+    expect(isRetryable(new StorageError("provider-error", "boom", { statusCode: 429 }))).toBe(true);
+    expect(isRetryable(new StorageError("provider-error", "boom", { statusCode: 500 }))).toBe(true);
+    expect(isRetryable(new StorageError("provider-error", "boom", { statusCode: 503 }))).toBe(true);
+  });
+
+  it("never retries validation, config, auth, not-found, or size errors", () => {
+    expect(isRetryable(new StorageError("validation", "no"))).toBe(false);
+    expect(isRetryable(new StorageError("config", "no"))).toBe(false);
+    expect(isRetryable(new StorageError("auth-failed", "no"))).toBe(false);
+    expect(isRetryable(new StorageError("not-found", "no"))).toBe(false);
+    expect(isRetryable(new StorageError("size-exceeded", "no"))).toBe(false);
+  });
+
+  it("never retries abort errors", () => {
+    expect(isRetryable(abortError("aborted"))).toBe(false);
+  });
+
+  it("treats generic (non-StorageError) errors as retryable by default", () => {
+    expect(isRetryable(new TypeError("fetch failed"))).toBe(true);
+    expect(isRetryable(new Error("boom"))).toBe(true);
+  });
+
+  it("honors retryHttpStatuses and retryGenericErrors config", () => {
+    // A non-retryable code (not-found) can still be made retryable via status.
+    const err = new StorageError("not-found", "boom", { statusCode: 400 });
+    expect(isRetryable(err, { retryHttpStatuses: [400] })).toBe(true);
+    expect(isRetryable(err)).toBe(false);
+    expect(isRetryable(new Error("boom"), { retryGenericErrors: false })).toBe(false);
+  });
+});
+
+describe("FilewayClient retry", () => {
+  const streamOfBytes = (...lengths: number[]): ReadableStream<Uint8Array> => {
+    const encoder = new TextEncoder();
+    return new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (const len of lengths) controller.enqueue(encoder.encode("x".repeat(len)));
+        controller.close();
+      },
+    });
+  };
+
+  it("retries delete until it succeeds", async () => {
+    const driver: BaseDriver = {
+      name: "mock",
+      upload: vi.fn(async () => ({ id: "f", url: "u", path: "p", size: 0, meta: {} })),
+      delete: vi
+        .fn()
+        .mockRejectedValueOnce(new StorageError("network", "flaky", { provider: "s3" }))
+        .mockRejectedValueOnce(new StorageError("network", "flaky", { provider: "s3" }))
+        .mockResolvedValueOnce(true),
+      getUrl: vi.fn(async (p) => `u${p}`),
+      get: vi.fn(async () => new ReadableStream()),
+    };
+    const client = new FilewayClient({ driver, retry: { maxRetries: 5, baseDelayMs: 1, maxDelayMs: 5, jitter: false } });
+
+    const result = await client.delete("x");
+
+    expect(result).toBe(true);
+    expect(driver.delete).toHaveBeenCalledTimes(3);
+  });
+
+  it("throws after exhausting retries and fires onError once", async () => {
+    const onError = vi.fn();
+    const driver: BaseDriver = {
+      name: "mock",
+      upload: vi.fn(async () => ({ id: "f", url: "u", path: "p", size: 0, meta: {} })),
+      delete: vi.fn(async () => {
+        throw new StorageError("network", "down", { provider: "s3" });
+      }),
+      getUrl: vi.fn(async (p) => `u${p}`),
+      get: vi.fn(async () => new ReadableStream()),
+    };
+    const client = new FilewayClient({ driver, onError, retry: { maxRetries: 2, baseDelayMs: 1, maxDelayMs: 5, jitter: false } });
+
+    await expect(client.delete("x")).rejects.toMatchObject({ code: "network" });
+    expect(driver.delete).toHaveBeenCalledTimes(3);
+    expect(onError).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not retry non-retryable errors", async () => {
+    const driver: BaseDriver = {
+      name: "mock",
+      upload: vi.fn(async () => ({ id: "f", url: "u", path: "p", size: 0, meta: {} })),
+      delete: vi.fn(async () => {
+        throw new StorageError("auth-failed", "denied", { provider: "s3" });
+      }),
+      getUrl: vi.fn(async (p) => `u${p}`),
+      get: vi.fn(async () => new ReadableStream()),
+    };
+    const client = new FilewayClient({ driver, retry: { maxRetries: 5, baseDelayMs: 1, jitter: false } });
+
+    await expect(client.delete("x")).rejects.toMatchObject({ code: "auth-failed" });
+    expect(driver.delete).toHaveBeenCalledTimes(1);
+  });
+
+  it("retries upload using streamFactory to produce fresh streams", async () => {
+    let attempt = 0;
+    const driver: BaseDriver = {
+      name: "mock",
+      upload: vi.fn(async (): Promise<UploadResult<Record<string, unknown>>> => {
+        attempt++;
+        if (attempt < 3) throw new StorageError("network", "flaky", { provider: "s3" });
+        return { id: `f${attempt}`, url: "u", path: "p", size: 0, meta: {} };
+      }),
+      delete: vi.fn(async () => true),
+      getUrl: vi.fn(async (p) => `u${p}`),
+      get: vi.fn(async () => new ReadableStream()),
+    };
+    const factory = vi.fn(() => streamOfBytes(5));
+    const client = new FilewayClient({ driver, retry: { maxRetries: 5, baseDelayMs: 1, maxDelayMs: 5, jitter: false } });
+
+    const result = await client.upload(streamOfBytes(5), {
+      filename: "a.txt",
+      size: 5,
+      streamFactory: factory,
+    });
+
+    expect(result.id).toBe("f3");
+    expect(driver.upload).toHaveBeenCalledTimes(3);
+    // 1 initial stream + 2 fresh streams for retries
+    expect(factory).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not retry upload without streamFactory", async () => {
+    const driver: BaseDriver = {
+      name: "mock",
+      upload: vi.fn(async () => {
+        throw new StorageError("network", "flaky", { provider: "s3" });
+      }),
+      delete: vi.fn(async () => true),
+      getUrl: vi.fn(async (p) => `u${p}`),
+      get: vi.fn(async () => new ReadableStream()),
+    };
+    const client = new FilewayClient({ driver, retry: { maxRetries: 5, baseDelayMs: 1, jitter: false } });
+
+    await expect(client.upload(streamOfBytes(1), { filename: "a.txt" })).rejects.toMatchObject({ code: "network" });
+    expect(driver.upload).toHaveBeenCalledTimes(1);
+  });
+
+  it("emits a warn log on each retry", async () => {
+    const warn = vi.fn();
+    const driver: BaseDriver = {
+      name: "mock",
+      upload: vi.fn(async () => ({ id: "f", url: "u", path: "p", size: 0, meta: {} })),
+      delete: vi
+        .fn()
+        .mockRejectedValueOnce(new StorageError("network", "x", { provider: "s3" }))
+        .mockResolvedValueOnce(true),
+      getUrl: vi.fn(async (p) => `u${p}`),
+      get: vi.fn(async () => new ReadableStream()),
+    };
+    const client = new FilewayClient({ driver, logger: { warn }, retry: { maxRetries: 3, baseDelayMs: 1, maxDelayMs: 5, jitter: false } });
+
+    await client.delete("x");
+
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(
+      "delete failed, retrying",
+      expect.objectContaining({ operation: "retry", attempt: 1, maxRetries: 3, delayMs: expect.any(Number) }),
+    );
   });
 });

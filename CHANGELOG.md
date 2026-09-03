@@ -10,12 +10,16 @@ The first stable release. Target scope, tracked on the [roadmap](README.md#roadm
 - **True streaming uploads** — ✅ landed for S3: `aws-chunked` per-chunk SigV4 signing via `options.size`, plus bounded-memory multipart uploads for unknown sizes and very large objects.
 - **Upload cancellation** — ✅ landed for all drivers: `options.signal` rejects with `AbortError` and cleans up partial artifacts.
 - **Middleware stream transformation** — `beforeUpload` will be able to transform the stream itself, not just options.
-- **Operational hardening** — progress events ✅ landed (`options.onProgress`); classified error types ✅ landed (`StorageError` codes); retries with backoff still to come.
+- **Operational hardening** — progress events ✅ landed (`options.onProgress`); classified error types ✅ landed (`StorageError` codes); retries with backoff ✅ landed (`retry` config + `isRetryable`).
 - **Signed downloads** — ✅ landed for S3 (`getPresignedUrl`) and Cloudinary (signed delivery URLs).
 
 Expected: once the roadmap items above land and the API has gone through real-world feedback via [GitHub Discussions](https://github.com/Goldenhub/fileway/discussions).
 
-## v0.2.0 — 2026-08-01
+## v0.2.1 — 2026-09-03
+
+- **Automatic retries with backoff** — `FilewayClient` retries transient failures at the client layer via a new `retry` config (`{ maxRetries, baseDelayMs, maxDelayMs, multiplier, jitter, retryHttpStatuses, retryGenericErrors }`). `delete`, `get`, `getUrl`, and `getPresignedUrl` retry automatically (idempotent); `upload` retries only when `UploadOptions.streamFactory` is provided to re-produce the stream per attempt (a `ReadableStream` is single-use). Uses exponential backoff with full jitter (interruptible by abort). Only `network`, `provider-error`, and HTTP 429/5xx statuses retry — `validation`/`config`/`auth-failed`/`not-found`/`bucket-not-found`/`size-exceeded`/`AbortError` never do. Exports `isRetryable(err, config)` for reuse, and `retry` as an `Operation`. Each retry logs a `warn`; `onError` fires only on the final failure.
+
+## v0.2.0 — 2026-09-03
 
 **BREAKING: Package rename** — `@fileway/driver-local`, `@fileway/driver-s3`, and `@fileway/driver-cloudinary` are now `@fileway/local`, `@fileway/s3`, and `@fileway/cloudinary`. The old package names are deprecated on npm; install the new names instead.
 

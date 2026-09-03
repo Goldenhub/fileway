@@ -7,7 +7,8 @@ export type Operation =
   | "delete"
   | "get"
   | "getUrl"
-  | "getPresignedUrl";
+  | "getPresignedUrl"
+  | "retry";
 
 /**
  * Dependency-free logger contract. Every method is optional, so you can pass
