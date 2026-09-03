@@ -1,21 +1,21 @@
-# @fileway/driver-cloudinary
+# @fileway/cloudinary
 
-[![npm version](https://img.shields.io/npm/v/@fileway/driver-cloudinary?style=flat-square)](https://www.npmjs.com/package/@fileway/driver-cloudinary)
-[![bundle size](https://img.shields.io/bundlephobia/minzip/@fileway/driver-cloudinary?style=flat-square)](https://bundlephobia.com/package/@fileway/driver-cloudinary)
+[![npm version](https://img.shields.io/npm/v/@fileway/cloudinary?style=flat-square)](https://www.npmjs.com/package/@fileway/cloudinary)
+[![bundle size](https://img.shields.io/bundlephobia/minzip/@fileway/cloudinary?style=flat-square)](https://bundlephobia.com/package/@fileway/cloudinary)
 
 **Cloudinary driver for [Fileway](https://github.com/Goldenhub/fileway) — uploads via `fetch` + `FormData`, no SDK.**
 
 Pure Web Platform APIs (`fetch`, `FormData`, `Blob`, Web Crypto for signing), so it runs on Node.js, Bun, Deno, and edge runtimes.
 
 ```bash
-npm install @fileway/driver-cloudinary
+npm install @fileway/cloudinary
 ```
 
 ## Usage
 
 ```ts
 import { FilewayClient } from "@fileway/core";
-import { CloudinaryDriver } from "@fileway/driver-cloudinary";
+import { CloudinaryDriver } from "@fileway/cloudinary";
 
 const driver = new CloudinaryDriver({
   cloudName: "my-cloud",

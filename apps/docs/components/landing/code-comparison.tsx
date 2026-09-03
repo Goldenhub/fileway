@@ -68,13 +68,13 @@ async function uploadToS3(
               <div className="h-2.5 w-2.5 rounded-full opacity-30" style={{ backgroundColor: "var(--lp-muted)" }} />
               <div className="h-2.5 w-2.5 rounded-full opacity-30" style={{ backgroundColor: "var(--lp-muted)" }} />
               <span className="ml-3 font-mono text-[11px] font-[500]" style={{ color: "var(--lp-accent)" }}>
-                The Fileway Way
+                The Fileway
               </span>
             </div>
             <div className="p-5">
               <pre className="overflow-x-auto font-mono text-[13px] leading-[1.7]">
                 <CodeBlock code={`import { FilewayClient } from "@fileway/core"
-import { S3Driver } from "@fileway/driver-s3"
+import { S3Driver } from "@fileway/s3"
 
 const client = new FilewayClient({
   driver: new S3Driver({

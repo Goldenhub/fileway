@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync, existsSync, readFileSync, readdirSync } from "node:fs";
+import { mkdtempSync, rmSync, existsSync, readFileSync, readdirSync, symlinkSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { FilewayClient } from "@fileway/core";
@@ -10,7 +10,7 @@ describe("LocalDriver", () => {
   let driver: LocalDriver;
 
   beforeEach(() => {
-    tmpDir = mkdtempSync(join(tmpdir(), "driver-local-test-"));
+    tmpDir = mkdtempSync(join(tmpdir(), "fileway-local-test-"));
     driver = new LocalDriver({ directory: tmpDir });
   });
 
@@ -168,5 +168,113 @@ describe("LocalDriver", () => {
     expect(last.bytes).toBe(content.length);
     expect(last.total).toBe(content.length);
     expect(last.progress).toBe(1);
+  });
+
+  it("should reject sibling-prefix path escape on upload", async () => {
+    const sibling = join(tmpDir, "../storage2");
+    mkdirSync(sibling, { recursive: true });
+    writeFileSync(join(sibling, "secret.txt"), "sensitive");
+
+    await expect(
+      driver.upload(
+        new ReadableStream({
+          start(c) {
+            c.enqueue(new TextEncoder().encode("data"));
+            c.close();
+          },
+        }),
+        { filename: "test.txt", path: "../storage2" },
+      ),
+    ).rejects.toThrow(/escapes/);
+
+    expect(existsSync(join(sibling, "secret.txt"))).toBe(true);
+  });
+
+  it("should reject nested path escape on upload", async () => {
+    await expect(
+      driver.upload(
+        new ReadableStream({
+          start(c) {
+            c.enqueue(new TextEncoder().encode("data"));
+            c.close();
+          },
+        }),
+        { filename: "test.txt", path: "a/../../evil" },
+      ),
+    ).rejects.toThrow(/escapes/);
+  });
+
+  it("should reject sibling-prefix path escape on get", async () => {
+    const sibling = join(tmpDir, "../storage2");
+    mkdirSync(sibling, { recursive: true });
+    writeFileSync(join(sibling, "secret.txt"), "sensitive");
+
+    await expect(driver.get("../storage2/secret.txt")).rejects.toThrow(/escapes/);
+  });
+
+  it("should return false on delete with escaping path and preserve sibling file", async () => {
+    const sibling = join(tmpDir, "../storage2");
+    mkdirSync(sibling, { recursive: true });
+    writeFileSync(join(sibling, "secret.txt"), "sensitive");
+
+    const deleted = await driver.delete("../storage2/secret.txt");
+
+    expect(deleted).toBe(false);
+    expect(existsSync(join(sibling, "secret.txt"))).toBe(true);
+  });
+
+  it("should reject upload through a symlinked directory", async () => {
+    const target = join(tmpDir, "target");
+    mkdirSync(target, { recursive: true });
+    symlinkSync(target, join(tmpDir, "link"));
+
+    await expect(
+      driver.upload(
+        new ReadableStream({
+          start(c) {
+            c.enqueue(new TextEncoder().encode("data"));
+            c.close();
+          },
+        }),
+        { filename: "test.txt", path: "link" },
+      ),
+    ).rejects.toThrow(/symbolic link/);
+  });
+
+  it("should reject get on a symlinked file", async () => {
+    const outside = join(tmpDir, "../escape-target.txt");
+    writeFileSync(outside, "leaked");
+
+    const result = await driver.upload(
+      new ReadableStream({
+        start(c) {
+          c.enqueue(new TextEncoder().encode("original"));
+          c.close();
+        },
+      }),
+      { filename: "file.txt" },
+    );
+
+    rmSync(result.meta.localPath);
+    symlinkSync(outside, result.meta.localPath);
+
+    await expect(driver.get(result.path)).rejects.toThrow(/symbolic link/);
+  });
+
+  it("should allow deep path normalization that stays inside root", async () => {
+    const content = "normalized";
+    const result = await driver.upload(
+      new ReadableStream({
+        start(c) {
+          c.enqueue(new TextEncoder().encode(content));
+          c.close();
+        },
+      }),
+      { filename: "file.txt", path: "sub/../flat" },
+    );
+
+    const stream = await driver.get(result.path);
+    const text = await new Response(stream).text();
+    expect(text).toBe(content);
   });
 })

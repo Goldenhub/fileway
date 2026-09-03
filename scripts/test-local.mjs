@@ -1,5 +1,5 @@
 import { FilewayClient } from "@fileway/core";
-import { LocalDriver } from "@fileway/driver-local";
+import { LocalDriver } from "@fileway/local";
 import { mkdtempSync, rmSync, readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";

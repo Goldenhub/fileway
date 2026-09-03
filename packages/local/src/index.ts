@@ -1,8 +1,8 @@
 import type { BaseDriver, UploadOptions, UploadResult } from "@fileway/core";
 import { validateUploadOptions, ValidationError, urlEncodePath, abortError, StorageError } from "@fileway/core";
 import { createWriteStream, createReadStream } from "node:fs";
-import { mkdir, unlink, access } from "node:fs/promises";
-import { join, dirname, resolve, relative } from "node:path";
+import { mkdir, unlink, access, lstat } from "node:fs/promises";
+import { join, dirname, resolve, relative, isAbsolute } from "node:path";
 import { Readable } from "node:stream";
 
 const randomUUID = () => globalThis.crypto.randomUUID();
@@ -16,13 +16,38 @@ export interface LocalDriverConfig {
 export class LocalDriver implements BaseDriver<{ localPath: string }> {
   readonly name = "local";
   private directory: string;
+  private resolvedDir: string;
   private baseUrl: string;
   private maxSizeBytes: number | undefined;
 
   constructor(config: LocalDriverConfig) {
     this.directory = config.directory;
+    this.resolvedDir = resolve(config.directory);
     this.baseUrl = config.baseUrl ?? `file://${config.directory}`;
     this.maxSizeBytes = config.maxSizeBytes;
+  }
+
+  private resolveInside(userPath: string): string {
+    const full = resolve(this.directory, userPath);
+    const rel = relative(this.resolvedDir, full);
+    if (rel === "" || rel.startsWith("..") || isAbsolute(rel)) {
+      throw new ValidationError("path escapes the configured storage directory");
+    }
+    return full;
+  }
+
+  private async assertSafePath(fullPath: string): Promise<void> {
+    const rel = relative(this.resolvedDir, fullPath);
+    if (!rel) return;
+    const parts = rel.split(/[\\/]/).filter(Boolean);
+    let current = this.resolvedDir;
+    for (const part of parts) {
+      current = join(current, part);
+      const st = await lstat(current).catch(() => null);
+      if (st?.isSymbolicLink()) {
+        throw new ValidationError("path traverses a symbolic link");
+      }
+    }
   }
 
   async upload(
@@ -35,13 +60,10 @@ export class LocalDriver implements BaseDriver<{ localPath: string }> {
     const ext = options.filename.includes(".") ? options.filename.split(".").pop()! : "";
     const filename = ext ? `${id}.${ext}` : id;
     const relativePath = options.path ? join(options.path, filename) : filename;
-    const fullPath = resolve(join(this.directory, relativePath));
-
-    if (!fullPath.startsWith(resolve(this.directory))) {
-      throw new ValidationError("path escapes the configured storage directory");
-    }
+    const fullPath = this.resolveInside(relativePath);
 
     await mkdir(dirname(fullPath), { recursive: true });
+    await this.assertSafePath(fullPath);
 
     const nodeStream = Readable.fromWeb(stream as any);
     const writeStream = createWriteStream(fullPath);
@@ -102,10 +124,7 @@ export class LocalDriver implements BaseDriver<{ localPath: string }> {
 
   async delete(path: string): Promise<boolean> {
     try {
-      const fullPath = resolve(join(this.directory, path));
-      if (!fullPath.startsWith(resolve(this.directory))) {
-        return false;
-      }
+      const fullPath = this.resolveInside(path);
       await unlink(fullPath);
       return true;
     } catch {
@@ -118,10 +137,8 @@ export class LocalDriver implements BaseDriver<{ localPath: string }> {
   }
 
   async get(path: string): Promise<ReadableStream<Uint8Array>> {
-    const fullPath = resolve(join(this.directory, path));
-    if (!fullPath.startsWith(resolve(this.directory))) {
-      throw new ValidationError(`path escapes the configured storage directory: ${path}`);
-    }
+    const fullPath = this.resolveInside(path);
+    await this.assertSafePath(fullPath);
 
     try {
       await access(fullPath);

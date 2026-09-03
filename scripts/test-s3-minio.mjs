@@ -13,7 +13,7 @@
 //   S3_BUCKET=my-bucket S3_ENDPOINT=http://localhost:9000 MINIO_ACCESS_KEY=minioadmin MINIO_SECRET_KEY=minioadmin npx tsx scripts/test-s3-minio.mjs
 
 import { FilewayClient } from "@fileway/core";
-import { S3Driver } from "@fileway/driver-s3";
+import { S3Driver } from "@fileway/s3";
 
 const { S3_BUCKET, S3_ENDPOINT, MINIO_ACCESS_KEY, MINIO_SECRET_KEY } = process.env;
 

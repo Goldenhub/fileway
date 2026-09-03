@@ -11,8 +11,8 @@
   "scripts": {
     "build": "pnpm --filter \"@fileway/*\" run build",
     "test": "pnpm --filter \"@fileway/*\" run test",
-    "typecheck": "pnpm --filter \"@fileway/core\" --filter \"@fileway/driver-*\" exec tsc --noEmit -p tsconfig.json",
-    "test:integration": "RUN_MINIO_TESTS=1 pnpm --filter @fileway/driver-s3 exec vitest run src/minio.integration.test.ts",
+    "typecheck": "pnpm --filter @fileway/core --filter @fileway/local --filter @fileway/s3 --filter @fileway/cloudinary exec tsc --noEmit -p tsconfig.json",
+    "test:integration": "RUN_MINIO_TESTS=1 pnpm --filter @fileway/s3 exec vitest run src/minio.integration.test.ts",
     "version:patch": "pnpm -r version patch --no-git-tag-version",
     "version:minor": "pnpm -r version minor --no-git-tag-version",
     "version:major": "pnpm -r version major --no-git-tag-version",
@@ -29,8 +29,8 @@
   "devDependencies": {
     "@edge-runtime/vm": "catalog:",
     "@fileway/core": "workspace:*",
-    "@fileway/driver-cloudinary": "workspace:*",
-    "@fileway/driver-local": "workspace:*",
-    "@fileway/driver-s3": "workspace:*"
+    "@fileway/cloudinary": "workspace:*",
+    "@fileway/local": "workspace:*",
+    "@fileway/s3": "workspace:*"
   }
 }

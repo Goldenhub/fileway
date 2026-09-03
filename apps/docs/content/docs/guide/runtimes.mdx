@@ -3,7 +3,7 @@ title: Cross-Runtime Usage
 description: Run Fileway on Bun, Deno, and Cloudflare Workers
 ---
 
-Fileway universal packages (`@fileway/core`, `@fileway/driver-s3`, `@fileway/driver-cloudinary`) contain zero `node:*` imports and work on any JavaScript runtime. Only `@fileway/driver-local` requires Node.js (uses `node:fs`).
+Fileway universal packages (`@fileway/core`, `@fileway/s3`, `@fileway/cloudinary`) contain zero `node:*` imports and work on any JavaScript runtime. Only `@fileway/local` requires Node.js (uses `node:fs`).
 
 ## Bun
 
@@ -12,14 +12,14 @@ Bun has built-in Node.js compatibility and TypeScript support — run scripts di
 ```bash
 # S3
 S3_BUCKET=my-bucket AWS_ACCESS_KEY_ID=xxx AWS_SECRET_ACCESS_KEY=yyy \
-bun run packages/driver-s3/test-upload.mjs
+bun run packages/s3/test-upload.mjs
 
 # Cloudinary
 CLOUDINARY_CLOUD_NAME=my-cloud CLOUDINARY_API_KEY=xxx CLOUDINARY_API_SECRET=yyy \
-bun run packages/driver-cloudinary/test-upload.mjs
+bun run packages/cloudinary/test-upload.mjs
 
 # Local (works via Bun's Node API compat)
-bun run packages/driver-local/test-upload.mjs
+bun run packages/local/test-upload.mjs
 ```
 
 Run vitest tests with Bun's test runner:
@@ -34,27 +34,27 @@ Deno can import npm packages via `npm:` specifiers:
 
 ```bash
 deno run --allow-read --allow-env --allow-net \
-  packages/driver-cloudinary/test-upload.mjs
+  packages/cloudinary/test-upload.mjs
 ```
 
 If workspace resolution fails, use explicit npm paths:
 
 ```bash
 deno run --allow-read --allow-env --allow-net \
-  npm:@fileway/driver-cloudinary packages/driver-cloudinary/test-upload.mjs
+  npm:@fileway/cloudinary packages/cloudinary/test-upload.mjs
 ```
 
-`driver-local` is **not supported** on Deno (no `node:fs`).
+`@fileway/local` is **not supported** on Deno (no `node:fs`).
 
 ## Cloudflare Workers
 
 ### Vitest (unit tests)
 
-`@fileway/core` and `@fileway/driver-cloudinary` already run tests under `@edge-runtime/vm` via vitest. Run:
+`@fileway/core` and `@fileway/cloudinary` already run tests under `@edge-runtime/vm` via vitest. Run:
 
 ```bash
 pnpm --filter @fileway/core test
-pnpm --filter @fileway/driver-cloudinary test
+pnpm --filter @fileway/cloudinary test
 ```
 
 ### Wrangler (integration tests)
@@ -65,11 +65,11 @@ Create a minimal worker to test uploads locally:
 npx wrangler init test-worker
 ```
 
-Add `@fileway/core` and `@fileway/driver-s3` as dependencies, then write:
+Add `@fileway/core` and `@fileway/s3` as dependencies, then write:
 
 ```ts
 import { FilewayClient } from "@fileway/core";
-import { S3Driver } from "@fileway/driver-s3";
+import { S3Driver } from "@fileway/s3";
 
 export default {
   async fetch(req: Request): Promise<Response> {
@@ -100,7 +100,7 @@ npx wrangler dev
 
 ## Compatibility Matrix
 
-| Runtime | `@fileway/core` | `driver-local` | `driver-s3` | `driver-cloudinary` |
+| Runtime | `@fileway/core` | `@fileway/local` | `@fileway/s3` | `@fileway/cloudinary` |
 |---|---|---|---|---|
 | Node.js 18+ | <span className="text-green-500">✓</span> | <span className="text-green-500">✓</span> | <span className="text-green-500">✓</span> | <span className="text-green-500">✓</span> |
 | Bun | <span className="text-green-500">✓</span> | <span className="text-green-500">✓</span> | <span className="text-green-500">✓</span> | <span className="text-green-500">✓</span> |

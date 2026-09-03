@@ -1,5 +1,5 @@
 import { FilewayClient } from "@fileway/core";
-import { CloudinaryDriver } from "@fileway/driver-cloudinary";
+import { CloudinaryDriver } from "@fileway/cloudinary";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 

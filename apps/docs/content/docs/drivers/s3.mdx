@@ -7,7 +7,7 @@ Uploads files to S3-compatible storage (AWS S3, Cloudflare R2, MinIO) with pure 
 
 ```ts
 import { FilewayClient } from "@fileway/core";
-import { S3Driver } from "@fileway/driver-s3";
+import { S3Driver } from "@fileway/s3";
 
 const client = new FilewayClient({
   driver: new S3Driver({

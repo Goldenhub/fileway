@@ -1,31 +1,27 @@
 {
-  "name": "@fileway/driver-s3",
+  "name": "@fileway/local",
   "version": "0.1.0",
   "license": "MIT",
   "keywords": [
     "fileway",
     "file-upload",
     "storage",
-    "aws",
-    "s3",
-    "minio",
-    "cloudflare-r2",
-    "r2",
-    "stream",
-    "sigv4"
+    "filesystem",
+    "local",
+    "node",
+    "stream"
   ],
   "repository": {
     "type": "git",
     "url": "git+https://github.com/Goldenhub/fileway.git"
   },
   "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "worker": "./dist/index.js",
-      "deno": "./dist/index.js",
-      "bun": "./dist/index.js",
       "import": "./dist/index.js",
       "require": "./dist/index.cjs"
     }
@@ -46,6 +42,7 @@
     "@fileway/core": "workspace:*"
   },
   "devDependencies": {
+    "@types/node": "catalog:",
     "tsup": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"

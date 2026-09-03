@@ -13,7 +13,7 @@ Unify cloud and local file storage behind a single, edge-compatible, type-safe A
 
 ```ts
 import { FilewayClient } from "@fileway/core";
-import { LocalDriver } from "@fileway/driver-local";
+import { LocalDriver } from "@fileway/local";
 
 const client = new FilewayClient({
   driver: new LocalDriver({ directory: "./uploads" }),
@@ -29,21 +29,21 @@ console.log(result.url);
   <Card
     title="Local"
     icon="folder"
-    href="/docs/drivers/driver-local"
+    href="/docs/drivers/local"
   >
     Local filesystem storage via native Node.js streams.
   </Card>
   <Card
     title="S3"
     icon="cloud"
-    href="/docs/drivers/driver-s3"
+    href="/docs/drivers/s3"
   >
     AWS S3, MinIO, and Cloudflare R2 via pure fetch + Web Crypto.
   </Card>
   <Card
     title="Cloudinary"
     icon="image"
-    href="/docs/drivers/driver-cloudinary"
+    href="/docs/drivers/cloudinary"
   >
     Cloudinary media CDN via pure fetch + Web Crypto.
   </Card>

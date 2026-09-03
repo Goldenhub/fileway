@@ -10,14 +10,14 @@
 ```bash
 npm install @fileway/core
 # plus at least one driver:
-npm install @fileway/driver-local
+npm install @fileway/local
 ```
 
 ## Quick start
 
 ```ts
 import { FilewayClient } from "@fileway/core";
-import { LocalDriver } from "@fileway/driver-local";
+import { LocalDriver } from "@fileway/local";
 
 const client = new FilewayClient({
   driver: new LocalDriver({ directory: "./storage" }),

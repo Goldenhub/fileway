@@ -68,7 +68,7 @@ export function Hero() {
                   <div className="flex items-center gap-2">
                     <span className="font-mono text-[13px] opacity-50" style={{ color: "var(--lp-muted)" }}>$</span>
                     <code className="font-mono text-[14px]" style={{ color: "var(--lp-text)" }}>
-                      npm install @fileway/core @fileway/driver-s3
+                      npm install @fileway/core @fileway/s3
                     </code>
                   </div>
                 </Tab>
@@ -76,7 +76,7 @@ export function Hero() {
                   <div className="flex items-center gap-2">
                     <span className="font-mono text-[13px] opacity-50" style={{ color: "var(--lp-muted)" }}>$</span>
                     <code className="font-mono text-[14px]" style={{ color: "var(--lp-text)" }}>
-                      pnpm add @fileway/core @fileway/driver-s3
+                      pnpm add @fileway/core @fileway/s3
                     </code>
                   </div>
                 </Tab>
@@ -84,7 +84,7 @@ export function Hero() {
                   <div className="flex items-center gap-2">
                     <span className="font-mono text-[13px] opacity-50" style={{ color: "var(--lp-muted)" }}>$</span>
                     <code className="font-mono text-[14px]" style={{ color: "var(--lp-text)" }}>
-                      yarn add @fileway/core @fileway/driver-s3
+                      yarn add @fileway/core @fileway/s3
                     </code>
                   </div>
                 </Tab>
@@ -92,7 +92,7 @@ export function Hero() {
                   <div className="flex items-center gap-2">
                     <span className="font-mono text-[13px] opacity-50" style={{ color: "var(--lp-muted)" }}>$</span>
                     <code className="font-mono text-[14px]" style={{ color: "var(--lp-text)" }}>
-                      bun add @fileway/core @fileway/driver-s3
+                      bun add @fileway/core @fileway/s3
                     </code>
                   </div>
                 </Tab>

@@ -21,19 +21,19 @@ Instead of learning a different SDK for S3, Cloudinary, and local disk — and f
 | Package | Description | Runtime deps | Node | Workers | Bun | Deno |
 | --- | --- | --- | :-: | :-: | :-: | :-: |
 | `@fileway/core` | Client engine, types, middleware | **Zero** | ✅ | ✅ | ✅ | ✅ |
-| `@fileway/driver-local` | Local filesystem | `node:fs` | ✅ | — | ✅ | ✅ |
-| `@fileway/driver-s3` | AWS S3, MinIO, Cloudflare R2 | **Zero** *(pure `fetch` + Web Crypto)* | ✅ | ✅ | ✅ | ✅ |
-| `@fileway/driver-cloudinary` | Cloudinary | **Zero** *(pure `fetch` + Web Crypto)* | ✅ | ✅ | ✅ | ✅ |
+| `@fileway/local` | Local filesystem | `node:fs` | ✅ | — | ✅ | ✅ |
+| `@fileway/s3` | AWS S3, MinIO, Cloudflare R2 | **Zero** *(pure `fetch` + Web Crypto)* | ✅ | ✅ | ✅ | ✅ |
+| `@fileway/cloudinary` | Cloudinary | **Zero** *(pure `fetch` + Web Crypto)* | ✅ | ✅ | ✅ | ✅ |
 
 ## 30-second quickstart
 
 ```bash
-npm install @fileway/core @fileway/driver-local @fileway/driver-s3
+npm install @fileway/core @fileway/local @fileway/s3
 ```
 
 ```ts
 import { FilewayClient } from "@fileway/core";
-import { LocalDriver } from "@fileway/driver-local";
+import { LocalDriver } from "@fileway/local";
 
 const client = new FilewayClient({
   driver: new LocalDriver({ directory: "./storage" }),
@@ -56,7 +56,7 @@ console.log(result.size); // 15
 **Move to S3 with one line.** Same client, same call — only the driver changes:
 
 ```ts
-import { S3Driver } from "@fileway/driver-s3";
+import { S3Driver } from "@fileway/s3";
 
 const client = new FilewayClient({
   driver: new S3Driver({
@@ -77,8 +77,8 @@ To Cloudinary? Swap in `CloudinaryDriver`. Your application code never changes.
 
 ```ts
 import { FilewayClient } from "@fileway/core";
-import { LocalDriver } from "@fileway/driver-local";
-import { S3Driver } from "@fileway/driver-s3";
+import { LocalDriver } from "@fileway/local";
+import { S3Driver } from "@fileway/s3";
 
 const driver =
   process.env.S3_DRIVER === "1"
@@ -120,7 +120,7 @@ No Node.js, no shims, no AWS SDK. In a Worker, `request.body` *is* the `Readable
 
 ```ts
 import { FilewayClient } from "@fileway/core";
-import { S3Driver } from "@fileway/driver-s3";
+import { S3Driver } from "@fileway/s3";
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -162,7 +162,7 @@ Identical to Node.js — Fileway runs on Bun's built-in `node:fs` and WHATWG str
 
 ```ts
 import { FilewayClient } from "@fileway/core";
-import { LocalDriver } from "@fileway/driver-local";
+import { LocalDriver } from "@fileway/local";
 
 const client = new FilewayClient({
   driver: new LocalDriver({ directory: "./storage" }),
@@ -191,7 +191,7 @@ Deno resolves the same packages straight from npm:
 
 ```ts
 import { FilewayClient } from "npm:@fileway/core@0.1.0";
-import { LocalDriver } from "npm:@fileway/driver-local@0.1.0";
+import { LocalDriver } from "npm:@fileway/local@0.1.0";
 
 const client = new FilewayClient({
   driver: new LocalDriver({ directory: "./storage" }),
@@ -225,12 +225,12 @@ stream ──▶ middleware.beforeUpload ──▶ driver.upload ──▶ middl
 ```
 
 - **Core is dependency-free** — `@fileway/core` has no runtime dependencies at all.
-- **Universal drivers** — `driver-s3` and `driver-cloudinary` contain zero `node:*` imports. SigV4 signing uses Web Crypto (`crypto.subtle`); uploads use platform `fetch`. That's why they run on Workers, Bun, Deno, and Node alike.
-- **Local is server-only** — `driver-local` uses `node:fs` streams and guards against path traversal.
+- **Universal drivers** — `s3` and `cloudinary` contain zero `node:*` imports. SigV4 signing uses Web Crypto (`crypto.subtle`); uploads use platform `fetch`. That's why they run on Workers, Bun, Deno, and Node alike.
+- **Local is server-only** — `local` uses `node:fs` streams and guards against path traversal.
 
 ## AWS SDK comparison
 
-| | Fileway `@fileway/driver-s3` | `@aws-sdk/client-s3` |
+| | Fileway `@fileway/s3` | `@aws-sdk/client-s3` |
 | --- | --- | --- |
 | Runtime dependencies | 1 (`@fileway/core`, itself zero-dep) | ~30 transitive packages |
 | Bundle size | **~2 KB** min+gzip | ~85 KB min+gzip |
@@ -241,7 +241,7 @@ stream ──▶ middleware.beforeUpload ──▶ driver.upload ──▶ middl
 | Result typing | Inferred per driver (`meta.bucket`, `meta.etag`) | Manual typing of `PutObjectOutput` |
 | Signature | Hand-rolled SigV4 (~100 lines, auditable) | Internal signing pipeline |
 
-*Bundle sizes measured at time of writing: `driver-s3` built + minified + gzipped locally; `@aws-sdk/client-s3` v3.1099.0 from Bundlephobia.*
+*Bundle sizes measured at time of writing: `s3` built + minified + gzipped locally; `@aws-sdk/client-s3` v3.1099.0 from Bundlephobia.*
 
 ## Middleware
 
@@ -249,7 +249,7 @@ Hook into the upload lifecycle with `beforeUpload` (transform the stream or opti
 
 ```ts
 import { FilewayClient } from "@fileway/core";
-import { LocalDriver } from "@fileway/driver-local";
+import { LocalDriver } from "@fileway/local";
 
 const client = new FilewayClient({
   driver: new LocalDriver({ directory: "./uploads" }),
@@ -271,9 +271,9 @@ const client = new FilewayClient({
 
 | Driver | Install | Notes |
 | --- | --- | --- |
-| `@fileway/driver-local` | `npm i @fileway/driver-local` | `directory`, optional `baseUrl`, `maxSizeBytes` |
-| `@fileway/driver-s3` | `npm i @fileway/driver-s3` | AWS, MinIO, Cloudflare R2, any S3-compatible endpoint |
-| `@fileway/driver-cloudinary` | `npm i @fileway/driver-cloudinary` | `cloudName`, `apiKey`, `apiSecret` |
+| `@fileway/local` | `npm i @fileway/local` | `directory`, optional `baseUrl`, `maxSizeBytes` |
+| `@fileway/s3` | `npm i @fileway/s3` | AWS, MinIO, Cloudflare R2, any S3-compatible endpoint |
+| `@fileway/cloudinary` | `npm i @fileway/cloudinary` | `cloudName`, `apiKey`, `apiSecret` |
 
 ```ts
 // S3 — AWS, MinIO, or Cloudflare R2
@@ -446,9 +446,9 @@ pnpm test:integration  # S3 integration tests against local MinIO (Docker)
 fileway/
 ├── packages/
 │   ├── core/              # @fileway/core
-│   ├── driver-local/      # @fileway/driver-local
-│   ├── driver-s3/         # @fileway/driver-s3
-│   └── driver-cloudinary/ # @fileway/driver-cloudinary
+│   ├── local/      # @fileway/local
+│   ├── s3/         # @fileway/s3
+│   └── cloudinary/ # @fileway/cloudinary
 ├── apps/
 │   └── docs/              # Documentation site (Fumadocs + Next.js)
 ├── scripts/               # Manual test scripts

@@ -13,7 +13,7 @@ new FilewayClient<TConfig extends FilewayConfig>(config: TConfig)
 
 | Option | Type | Description |
 |--------|------|-------------|
-| `driver` | `BaseDriver` | The storage driver. See [Drivers](/docs/drivers/driver-local). |
+| `driver` | `BaseDriver` | The storage driver. See [Drivers](/docs/drivers/local). |
 | `middlewares` | `MiddlewareHook[]` | Optional. Middleware run around uploads. See [Middleware](/docs/guide/middleware). |
 | `logger` | `Logger` | Optional. Structured logger; receives `info` per operation and `error` on failure. See [Observability](/docs/guide/observability#logger). |
 | `onError` | `(error, context) => void \| Promise<void>` | Optional. Called (and awaited) before an error is re-thrown. Aborts are skipped. See [Observability](/docs/guide/observability#onerror). |

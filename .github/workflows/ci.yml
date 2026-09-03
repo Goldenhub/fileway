@@ -30,7 +30,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Build packages
-        run: pnpm --filter "@fileway/core" --filter "@fileway/driver-*" run build
+        run: pnpm --filter @fileway/core --filter @fileway/local --filter @fileway/s3 --filter @fileway/cloudinary run build
 
       - name: Typecheck packages
         run: pnpm typecheck
@@ -55,7 +55,7 @@ jobs:
           curl -sf http://localhost:9000/minio/health/live >/dev/null || { echo "MinIO failed to start" >&2; exit 1; }
 
       - name: S3 integration tests (MinIO)
-        run: pnpm --filter @fileway/driver-s3 exec vitest run src/minio.integration.test.ts
+        run: pnpm --filter @fileway/s3 exec vitest run src/minio.integration.test.ts
         env:
           RUN_MINIO_TESTS: "1"
           S3_ENDPOINT: http://localhost:9000

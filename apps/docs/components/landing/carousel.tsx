@@ -6,7 +6,7 @@ const drivers = [
   {
     name: "Local",
     desc: "Native Node.js streams for local filesystem storage. Perfect for development and single-server deployments.",
-    href: "/docs/drivers/driver-local",
+    href: "/docs/drivers/local",
     code: `new FilewayClient({
   driver: new LocalDriver({
     directory: "./storage"
@@ -17,7 +17,7 @@ const drivers = [
   {
     name: "S3",
     desc: "AWS S3 and Cloudflare R2 via FetchHttpHandler. Multipart uploads, edge-compatible, no native modules.",
-    href: "/docs/drivers/driver-s3",
+    href: "/docs/drivers/s3",
     code: `new FilewayClient({
   driver: new S3Driver({
     bucket: "my-bucket",
@@ -29,7 +29,7 @@ const drivers = [
   {
     name: "Cloudinary",
     desc: "Pure fetch + Web Crypto signatures. Zero Node deps — works on any runtime with zero polyfills.",
-    href: "/docs/drivers/driver-cloudinary",
+    href: "/docs/drivers/cloudinary",
     code: `new FilewayClient({
   driver: new CloudinaryDriver({
     cloudName: "my-cloud"

@@ -2,23 +2,23 @@ import { TrackedLink } from "./tracked-link";
 
 const drivers = [
   {
-    name: "@fileway/driver-local",
+    name: "@fileway/local",
     status: "Stable",
-    link: "/docs/drivers/driver-local",
+    link: "/docs/drivers/local",
     desc: "Local filesystem via Node.js streams",
     supports: "Node.js, Bun",
   },
   {
-    name: "@fileway/driver-s3",
+    name: "@fileway/s3",
     status: "Stable",
-    link: "/docs/drivers/driver-s3",
+    link: "/docs/drivers/s3",
     desc: "AWS S3, Cloudflare R2, MinIO, DigitalOcean Spaces",
     supports: "Universal",
   },
   {
-    name: "@fileway/driver-cloudinary",
+    name: "@fileway/cloudinary",
     status: "Stable",
-    link: "/docs/drivers/driver-cloudinary",
+    link: "/docs/drivers/cloudinary",
     desc: "Pure fetch + Web Crypto, zero Node dependencies",
     supports: "Universal",
   },

@@ -9,7 +9,7 @@
 Implement Phase 1 and Phase 2 of the Fileway monorepo:
 
 1. Initialize `@fileway/core` with zero production dependencies, standard WHATWG Web Stream interfaces, and dynamic type inference.
-2. Build `@fileway/driver-local` using native Node.js streams to handle local filesystem storage.
+2. Build `@fileway/local` using native Node.js streams to handle local filesystem storage.
 3. Write comprehensive unit and integration tests using `vitest` to verify stream uploads and middleware execution.
 
 ---
@@ -21,8 +21,8 @@ Implement Phase 1 and Phase 2 of the Fileway monorepo:
 3. **Strict Type Safety:** Use strict TypeScript flags (`noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`). Never return `any` types.
 4. **Dual Module Compilation:** Build all packages using `tsup` targeting both CommonJS (`.cjs`) and ES Modules (`.js`) with TypeScript declarations (`.d.ts`).
 5. **Workspace Linking:** Link internal packages inside `package.json` using `"@fileway/core": "workspace:*"`.
-6. **Universal Cross-Runtime Drivers:** `@fileway/core`, `@fileway/driver-s3`, and `@fileway/driver-cloudinary` MUST contain ZERO Node-built-in imports (`node:*`). Use only WHATWG `ReadableStream<Uint8Array>`, `fetch`, `FormData`, `Blob`, `globalThis.crypto.subtle`, `TextEncoder`, and `TextDecoder`.
-7. **Server-Only Packages:** `@fileway/driver-local` may use `node:fs` / `node:stream` but should fail gracefully in environments without filesystem access.
+6. **Universal Cross-Runtime Drivers:** `@fileway/core`, `@fileway/s3`, and `@fileway/cloudinary` MUST contain ZERO Node-built-in imports (`node:*`). Use only WHATWG `ReadableStream<Uint8Array>`, `fetch`, `FormData`, `Blob`, `globalThis.crypto.subtle`, `TextEncoder`, and `TextDecoder`.
+7. **Server-Only Packages:** `@fileway/local` may use `node:fs` / `node:stream` but should fail gracefully in environments without filesystem access.
 
 ---
 
@@ -123,20 +123,20 @@ export class FilewayClient<const TConfig extends FilewayConfig> {
 ## Implementation Roadmap & Milestones
 
 - [x] **Phase 1: Core Contract & Type Mechanics** — Implement zero-dependency core types and FilewayClient. Validate clean ESM/CJS build output via tsup.
-- [x] **Phase 2: Local & S3 Driver Implementations** — Build @fileway/driver-local using node:fs streams. Build @fileway/driver-s3 using @aws-sdk/lib-storage for multipart Web Stream uploads.
+- [x] **Phase 2: Local & S3 Driver Implementations** — Build @fileway/local using node:fs streams. Build @fileway/s3 using @aws-sdk/lib-storage for multipart Web Stream uploads.
 - [ ] **Phase 3: Middleware Execution Pipeline** — Implement stream transformation in beforeUpload. Implement post-processing triggers in afterUpload.
 - [x] **Phase 4: Multi-Runtime Test Coverage** — Configure vitest unit tests across all sub-packages. Test compatibility on Node.js, Bun, and Edge worker environments.
 - [x] **Phase 5: Documentation & Open-Source Distribution** — Scaffold apps/docs with code-first usage examples via Fumadocs + Next.js 16. Publish @fileway workspace packages to npm (not yet done).
 
 ## Cross-Runtime Refactor (Complete)
 
-- [x] **Audit Node imports** — All `node:*` imports eliminated from universal packages (`core`, `driver-cloudinary`, `driver-s3`). Only `driver-local` retains `node:fs`/`node:path`/`node:stream`.
-- [x] **Refactor `driver-cloudinary`** — Replaced `cloudinary` SDK + `Readable.fromWeb()` with pure `fetch` + `FormData` + `crypto.subtle.digest("SHA-1")`. Zero deps beyond `@fileway/core`.
-- [x] **Refactor `driver-s3`** — Replaced `@aws-sdk/lib-storage` + `Readable.fromWeb()` with pure `fetch` + Web Crypto. SigV4 is hand-rolled; streams are sent directly as WHATWG `ReadableStream` bodies.
-- [x] **Remove edge duplicates** — `driver-cloudinary-edge` and `driver-s3-edge` deleted; their functionality is now in the universal `driver-cloudinary` and `driver-s3`.
+- [x] **Audit Node imports** — All `node:*` imports eliminated from universal packages (`core`, `cloudinary`, `s3`). Only `local` retains `node:fs`/`node:path`/`node:stream`.
+- [x] **Refactor `cloudinary`** — Replaced `cloudinary` SDK + `Readable.fromWeb()` with pure `fetch` + `FormData` + `crypto.subtle.digest("SHA-1")`. Zero deps beyond `@fileway/core`.
+- [x] **Refactor `s3`** — Replaced `@aws-sdk/lib-storage` + `Readable.fromWeb()` with pure `fetch` + Web Crypto. SigV4 is hand-rolled; streams are sent directly as WHATWG `ReadableStream` bodies.
+- [x] **Remove edge duplicates** — `driver-cloudinary-edge` and `driver-s3-edge` deleted; their functionality is now in the universal `cloudinary` and `s3`.
 - [x] **Conditional exports** — All packages declare `worker`, `deno`, `bun`, `import`, `require` in `exports` map.
-- [x] **Edge-runtime tests** — `@fileway/core` and `@fileway/driver-cloudinary` run vitest with `environment: "edge-runtime"` via `@edge-runtime/vm`.
-- [x] **All builds & tests pass** — 117 unit tests across 4 packages, plus 8 S3 integration tests against MinIO.
+- [x] **Edge-runtime tests** — `@fileway/core` and `@fileway/cloudinary` run vitest with `environment: "edge-runtime"` via `@edge-runtime/vm`.
+- [x] **All builds & tests pass** — 124 unit tests across 4 packages, plus 8 S3 integration tests against MinIO.
 
 ## Typed Error Taxonomy (Complete)
 
@@ -154,17 +154,17 @@ export class FilewayClient<const TConfig extends FilewayConfig> {
 | Package | Node deps | Runtime | Tests |
 |---|---|---|---|
 | `@fileway/core` | None | Universal | 30 |
-| `@fileway/driver-local` | `node:fs`, `node:path`, `node:stream` | Node.js, Bun | 12 |
-| `@fileway/driver-s3` | None (pure fetch + Web Crypto SigV4) | Universal | 42 unit + 8 MinIO |
-| `@fileway/driver-cloudinary` | None | Universal | 33 |
+| `@fileway/local` | `node:fs`, `node:path`, `node:stream` | Node.js, Bun | 19 |
+| `@fileway/s3` | None (pure fetch + Web Crypto SigV4) | Universal | 42 unit + 8 MinIO |
+| `@fileway/cloudinary` | None | Universal | 33 |
 
 ## Relevant Files
 
 - `AGENTS.md`: project spec, roadmap, agent rules, reference architecture
 - `packages/core/src/types.ts`: core interfaces (BaseDriver, UploadOptions, UploadResult, MiddlewareHook, FilewayConfig)
 - `packages/core/src/index.ts`: FilewayClient class
-- `packages/driver-local/src/index.ts`: LocalDriver (node:fs)
-- `packages/driver-s3/src/index.ts`: S3Driver (pure fetch + Web Crypto SigV4, aws-chunked streaming + multipart)
-- `packages/driver-cloudinary/src/index.ts`: CloudinaryDriver (pure fetch, FormData, Web Crypto)
+- `packages/local/src/index.ts`: LocalDriver (node:fs)
+- `packages/s3/src/index.ts`: S3Driver (pure fetch + Web Crypto SigV4, aws-chunked streaming + multipart)
+- `packages/cloudinary/src/index.ts`: CloudinaryDriver (pure fetch, FormData, Web Crypto)
 - `apps/docs/`: Fumadocs + Next.js 16 documentation site
 - `pnpm-workspace.yaml`: workspace config, catalog

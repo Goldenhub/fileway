@@ -45,7 +45,7 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          for p in core driver-local driver-s3 driver-cloudinary; do
+          for p in core local s3 cloudinary; do
             v=$(node -p "require('./packages/$p/package.json').version")
             if [ "$v" != "$VERSION" ]; then
               echo "::error::packages/$p is at $v but the tag is $VERSION"
@@ -55,7 +55,7 @@ jobs:
 
       - name: Build packages
         timeout-minutes: 10
-        run: pnpm --filter "@fileway/core" --filter "@fileway/driver-*" run build
+        run: pnpm --filter @fileway/core --filter @fileway/local --filter @fileway/s3 --filter @fileway/cloudinary run build
 
       - name: Publish to npm (provenance)
         run: pnpm -r publish --access public --provenance --no-git-checks

@@ -1,5 +1,5 @@
 import { FilewayClient } from "@fileway/core";
-import { S3Driver } from "@fileway/driver-s3";
+import { S3Driver } from "@fileway/s3";
 
 const { S3_BUCKET, S3_ENDPOINT, S3_PUBLIC_URL, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY } = process.env;
 

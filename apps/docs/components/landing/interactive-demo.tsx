@@ -9,7 +9,7 @@ const drivers = [
     label: "Local",
     description: "Local filesystem via Node.js streams",
     code: `import { FilewayClient } from "@fileway/core"
-import { LocalDriver } from "@fileway/driver-local"
+import { LocalDriver } from "@fileway/local"
 
 const client = new FilewayClient({
   driver: new LocalDriver({
@@ -29,7 +29,7 @@ const result = await client.upload(stream, {
     label: "Amazon S3",
     description: "AWS S3, Cloudflare R2, MinIO, DigitalOcean",
     code: `import { FilewayClient } from "@fileway/core"
-import { S3Driver } from "@fileway/driver-s3"
+import { S3Driver } from "@fileway/s3"
 
 const client = new FilewayClient({
   driver: new S3Driver({
@@ -50,7 +50,7 @@ const result = await client.upload(stream, {
     label: "Cloudflare R2",
     description: "S3-compatible, zero egress fees",
     code: `import { FilewayClient } from "@fileway/core"
-import { S3Driver } from "@fileway/driver-s3"
+import { S3Driver } from "@fileway/s3"
 
 const client = new FilewayClient({
   driver: new S3Driver({
@@ -70,7 +70,7 @@ const result = await client.upload(stream, {
     label: "Cloudinary",
     description: "Pure fetch + Web Crypto, zero Node deps",
     code: `import { FilewayClient } from "@fileway/core"
-import { CloudinaryDriver } from "@fileway/driver-cloudinary"
+import { CloudinaryDriver } from "@fileway/cloudinary"
 
 const client = new FilewayClient({
   driver: new CloudinaryDriver({

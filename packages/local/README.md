@@ -1,21 +1,21 @@
-# @fileway/driver-local
+# @fileway/local
 
-[![npm version](https://img.shields.io/npm/v/@fileway/driver-local?style=flat-square)](https://www.npmjs.com/package/@fileway/driver-local)
-[![bundle size](https://img.shields.io/bundlephobia/minzip/@fileway/driver-local?style=flat-square)](https://bundlephobia.com/package/@fileway/driver-local)
+[![npm version](https://img.shields.io/npm/v/@fileway/local?style=flat-square)](https://www.npmjs.com/package/@fileway/local)
+[![bundle size](https://img.shields.io/bundlephobia/minzip/@fileway/local?style=flat-square)](https://bundlephobia.com/package/@fileway/local)
 
 **Local filesystem driver for [Fileway](https://github.com/Goldenhub/fileway).**
 
 Stores uploads on disk using native Node.js streams. This is the only driver that streams files end-to-end without buffering the whole file in memory.
 
 ```bash
-npm install @fileway/driver-local
+npm install @fileway/local
 ```
 
 ## Usage
 
 ```ts
 import { FilewayClient } from "@fileway/core";
-import { LocalDriver } from "@fileway/driver-local";
+import { LocalDriver } from "@fileway/local";
 
 const driver = new LocalDriver({
   directory: "./uploads",
