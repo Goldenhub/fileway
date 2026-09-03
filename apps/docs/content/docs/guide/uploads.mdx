@@ -97,3 +97,17 @@ const result = await client.upload(stream, {
 ```
 
 Event cadence is adaptive: a significant chunk (≥ 256 KiB, or ≥ 5% of a known total) reports immediately, while small chunks on fast streams are coalesced to at most one event per 100 ms. An exact final event always fires (`bytes === total`, `progress === 1`), and no event fires on abort. Progress is measured at the client layer as bytes leave the source stream — Local reports as bytes hit disk, S3 as bytes are streamed or buffered into parts, and Cloudinary during its pre-signature `Blob` buffering (its `fetch` upload itself exposes no progress).
+
+## Retrying uploads
+
+A `ReadableStream` is consumed after one read, so to retry an upload Fileway needs a way to **re-produce** the payload per attempt. Pass `streamFactory` — a function returning a fresh stream — to enable retry. The source must be re-readable (a file path, in-memory bytes, or a re-fetchable URL); a one-shot feed cannot be retried.
+
+```ts
+const result = await client.upload(createReadStream(file), {
+  filename: "photo.jpg",
+  size: stat.size,
+  streamFactory: () => createReadStream(file), // fresh stream per retry attempt
+});
+```
+
+Configure backoff with the client's `retry` option (e.g. `maxRetries`, `baseDelayMs`). Without `streamFactory`, a failed upload throws immediately — no retry. Retried uploads re-transmit the payload, so they cost `N+1` egresss on `N` failures. See [Retries](/docs/guide/observability#retries) for the full configuration and which failures are retried.

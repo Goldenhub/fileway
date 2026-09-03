@@ -16,6 +16,7 @@ interface UploadOptions {
   size?: number;
   signal?: AbortSignal;
   onProgress?: (progress: UploadProgress) => void;
+  streamFactory?: () => ReadableStream<Uint8Array>; // fresh stream per retry attempt
 }
 ```
 
@@ -46,6 +47,22 @@ interface UploadResult<TMeta extends Record<string, unknown>> {
 ```ts
 interface PresignedUrlOptions {
   expiresIn?: number; // seconds; default 3600, bounds driver-specific
+}
+```
+
+## `RetryConfig`
+
+Controls automatic retries for transient failures. Passed as `retry` in `FilewayConfig`. Only `network`, `provider-error`, and HTTP `429`/`5xx` statuses are retried — `validation`, `config`, `auth-failed`, `not-found`, `bucket-not-found`, `size-exceeded`, and `AbortError` are never retried. See [Retries](/docs/guide/observability#retries) for how it behaves.
+
+```ts
+interface RetryConfig {
+  maxRetries?: number;           // attempts after the first; default 3, 0 disables
+  baseDelayMs?: number;          // first delay; default 300
+  maxDelayMs?: number;           // cap on any single delay; default 10000
+  multiplier?: number;           // exponential backoff factor; default 2
+  jitter?: boolean;              // full jitter over [0, delay]; default true
+  retryHttpStatuses?: number[];  // extra HTTP statuses to treat as retryable
+  retryGenericErrors?: boolean;  // retry non-StorageError failures; default true
 }
 ```
 
@@ -88,6 +105,7 @@ interface FilewayConfig<TDriver extends BaseDriver> {
   middlewares?: MiddlewareHook[];
   logger?: Logger;
   onError?: (error: unknown, context: ErrorContext) => void | Promise<void>;
+  retry?: RetryConfig;
 }
 ```
 
@@ -106,7 +124,7 @@ interface Logger {
 
 ```ts
 interface ErrorContext {
-  operation: "upload" | "delete" | "get" | "getUrl" | "getPresignedUrl";
+  operation: "upload" | "delete" | "get" | "getUrl" | "getPresignedUrl" | "retry";
   durationMs: number;
   filename?: string;
   path?: string;
