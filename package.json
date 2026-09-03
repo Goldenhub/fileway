@@ -1,6 +1,6 @@
 {
   "name": "fileway",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "Runtime-agnostic file storage engine for JavaScript/TypeScript: one standard API for every storage provider and runtime, with zero core dependencies.",
   "packageManager": "pnpm@11.11.0",
@@ -28,8 +28,8 @@
   },
   "devDependencies": {
     "@edge-runtime/vm": "catalog:",
-    "@fileway/core": "workspace:*",
     "@fileway/cloudinary": "workspace:*",
+    "@fileway/core": "workspace:*",
     "@fileway/local": "workspace:*",
     "@fileway/s3": "workspace:*"
   }
