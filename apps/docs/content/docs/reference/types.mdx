@@ -16,7 +16,7 @@ interface UploadOptions {
   size?: number;
   signal?: AbortSignal;
   onProgress?: (progress: UploadProgress) => void;
-  streamFactory?: () => ReadableStream<Uint8Array>; // fresh stream per retry attempt
+  streamFactory?: () => ReadableStream<Uint8Array>; // sync today; async return is a planned future feature
 }
 ```
 

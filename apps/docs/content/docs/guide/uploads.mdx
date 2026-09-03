@@ -111,3 +111,5 @@ const result = await client.upload(createReadStream(file), {
 ```
 
 Configure backoff with the client's `retry` option (e.g. `maxRetries`, `baseDelayMs`). Without `streamFactory`, a failed upload throws immediately — no retry. Retried uploads re-transmit the payload, so they cost `N+1` egresss on `N` failures. See [Retries](/docs/guide/observability#retries) for the full configuration and which failures are retried.
+
+> **Future: async producers (planned).** `streamFactory` is currently **sync-only** — it must return the stream directly. An async (Promise-returning) variant is a planned enhancement, which would let you pass sources like `fetch(url).then((r) => r.body)` to re-fetch the payload per attempt without holding it in memory. Until then, on non-Node runtimes use a sync in-memory producer such as `new Blob([bytes]).stream()` in browsers/edge/Workers, or `Deno.open(path).readable` in Deno.
