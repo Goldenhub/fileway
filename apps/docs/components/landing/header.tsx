@@ -8,7 +8,7 @@ export function Header() {
       <header className="fixed left-1/2 top-4 z-50 -translate-x-1/2 rounded-lg border px-4 py-2 md:hidden backdrop-blur-xl" style={{ borderColor: "var(--lp-border)", backgroundColor: "var(--lp-glass)" }}>
         <div className="flex items-center gap-4">
           <Link href="/" className="font-sans text-[13px] font-semibold tracking-[-0.3px]" style={{ color: "var(--lp-text)" }}>
-            <Image src="/icon.png" width={16} height={16} alt="Logo" />
+            <Image src="/icon.png" width={32} height={16} alt="Logo" />
           </Link>
           <div className="h-3 w-px" style={{ backgroundColor: "var(--lp-border)" }} />
           <Link href="/docs" className="font-sans text-[11px] font-medium transition-colors hover:text-white" style={{ color: "var(--lp-muted)" }}>
