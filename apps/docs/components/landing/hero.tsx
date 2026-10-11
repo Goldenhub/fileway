@@ -54,7 +54,7 @@ export function Hero() {
           </TrackedLink>
         </div>
 
-        <div className="mt-8 flex items-center justify-center">
+        {/*<div className="mt-8 flex items-center justify-center">
           <TrackedLink
             href="https://www.producthunt.com/products/fileway?embed=true&utm_source=badge-featured&utm_medium=badge&utm_campaign=badge-fileway"
             target="_blank"
@@ -69,7 +69,7 @@ export function Hero() {
               src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1239466&theme=light&t=1788454137857"
             />
           </TrackedLink>
-        </div>
+        </div>*/}
 
         <div className="mx-auto mt-16 max-w-[560px]">
           <div className="overflow-hidden rounded-lg border" style={{ borderColor: "var(--lp-border)", backgroundColor: "var(--lp-surface)" }}>
