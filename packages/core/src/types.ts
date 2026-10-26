@@ -30,8 +30,9 @@ export interface RetryConfig {
   jitter?: boolean;
   /** Extra HTTP status codes (beyond 429 and 5xx) to treat as retryable. Default: none. */
   retryHttpStatuses?: number[];
-  /** Whether non-`StorageError` failures (e.g. bare `TypeError: fetch failed`)
-   * are treated as retryable. Default: true. */
+  /** Whether non-`StorageError` failures are treated as retryable. `true`
+   * retries all of them, `false` none. Default: only `TypeError` (what `fetch`
+   * throws on a network failure), so bugs in user code fail fast. */
   retryGenericErrors?: boolean;
 }
 
@@ -70,6 +71,14 @@ export interface UploadResult<TMeta extends Record<string, unknown>> {
   meta: TMeta;
 }
 
+/** Per-call options for `FilewayClient.delete`, `get`, `getUrl` and
+ * `getPresignedUrl`. */
+export interface OperationOptions {
+  /** Cancels the operation: no further retry attempts are made and a pending
+   * retry delay rejects with a `DOMException` named `AbortError`. */
+  signal?: AbortSignal;
+}
+
 export interface PresignedUrlOptions {
   /** Lifetime of the URL in seconds. Bounds are driver-specific
    * (e.g. S3 allows 1..604800). Defaults to 3600 when omitted. */
@@ -96,14 +105,26 @@ export interface BaseDriver<TMeta extends Record<string, unknown> = Record<strin
   getPresignedUrl?(path: string, options?: PresignedUrlOptions): Promise<string>;
 }
 
+export interface BeforeUploadResult {
+  /** Replacement stream for the driver to upload. */
+  stream?: ReadableStream<Uint8Array>;
+  /** Replacement upload options. */
+  options?: UploadOptions;
+  /**
+   * Byte length of the returned `stream`. A new stream may not be the same
+   * length as the old one (compression, encryption), so when `stream` is
+   * returned the known size is dropped unless it is given here or as a changed
+   * `options.size`. A transform that keeps the length (a checksum tap, say)
+   * returns `size: options.size` to keep it.
+   */
+  size?: number;
+}
+
 export interface MiddlewareHook {
   beforeUpload?: (
     stream: ReadableStream<Uint8Array>,
     options: UploadOptions,
-  ) => Promise<
-    | { stream?: ReadableStream<Uint8Array>; options?: UploadOptions }
-    | void
-  >;
+  ) => Promise<BeforeUploadResult | void>;
   afterUpload?: (result: UploadResult<Record<string, unknown>>) => Promise<void>;
 }
 

@@ -1,17 +1,16 @@
 import type { ReactNode } from "react";
 import type { Metadata } from "next";
-import { Space_Grotesk, JetBrains_Mono } from "next/font/google";
+import { Inter, JetBrains_Mono } from "next/font/google";
 import { RootProvider } from "fumadocs-ui/provider/next";
 import { Analytics } from "@vercel/analytics/react";
 import { SpeedInsights } from "@vercel/speed-insights/next";
 import { SITE_NAME, SITE_DESCRIPTION, SITE_URL, GITHUB_URL, NPM_URL } from "@/lib/site";
 import "./global.css";
 
-const sans = Space_Grotesk({
+const sans = Inter({
   subsets: ["latin"],
   display: "swap",
   variable: "--font-sans",
-  weight: ["400", "500", "600", "700"],
 });
 
 const mono = JetBrains_Mono({
@@ -24,7 +23,7 @@ const mono = JetBrains_Mono({
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
   title: {
-    default: `${SITE_NAME} — Runtime-agnostic file storage for JavaScript & TypeScript`,
+    default: `${SITE_NAME}: Runtime-agnostic file storage for JavaScript & TypeScript`,
     template: `%s · ${SITE_NAME}`,
   },
   description: SITE_DESCRIPTION,
@@ -56,14 +55,14 @@ export const metadata: Metadata = {
   openGraph: {
     type: "website",
     siteName: SITE_NAME,
-    title: `${SITE_NAME} — Runtime-agnostic file storage for JavaScript & TypeScript`,
+    title: `${SITE_NAME}: Runtime-agnostic file storage for JavaScript & TypeScript`,
     description: SITE_DESCRIPTION,
     url: SITE_URL,
     locale: "en_US",
   },
   twitter: {
     card: "summary",
-    title: `${SITE_NAME} — Runtime-agnostic file storage for JavaScript & TypeScript`,
+    title: `${SITE_NAME}: Runtime-agnostic file storage for JavaScript & TypeScript`,
     description: SITE_DESCRIPTION,
   },
   robots: {
@@ -89,9 +88,9 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en" className={`${sans.variable} ${mono.variable} dark`} suppressHydrationWarning>
+    <html lang="en" className={`${sans.variable} ${mono.variable}`} suppressHydrationWarning>
       <body>
-        <RootProvider theme={{ defaultTheme: "dark" }}>{children}</RootProvider>
+        <RootProvider theme={{ defaultTheme: "light" }}>{children}</RootProvider>
         <Analytics />
         <SpeedInsights />
       </body>

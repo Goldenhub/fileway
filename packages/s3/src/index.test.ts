@@ -139,10 +139,15 @@ describe("S3Driver (AWS S3)", () => {
     expect(opts.method).toBe("DELETE");
   });
 
-  it("should return false on delete failure", async () => {
-    mockFetch.mockResolvedValue(new Response(null, { status: 404 }));
-    const result = await driver.delete("missing.txt");
-    expect(result).toBe(false);
+  it("should throw a typed error when delete fails", async () => {
+    mockFetch.mockResolvedValue(
+      new Response("<Error><Code>AccessDenied</Code></Error>", { status: 403, statusText: "Forbidden" }),
+    );
+    await expect(driver.delete("test.txt")).rejects.toMatchObject({
+      code: "auth-failed",
+      statusCode: 403,
+      provider: "s3",
+    });
   });
 
   it("should generate a URL", async () => {
@@ -161,6 +166,40 @@ describe("S3Driver (AWS S3)", () => {
     expect(query.get("X-Amz-Expires")).toBe("3600");
     expect(query.get("X-Amz-SignedHeaders")).toBe("host");
     expect(query.get("X-Amz-Signature")).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it("sends and signs x-amz-security-token for temporary credentials", async () => {
+    const stsDriver = new S3Driver({
+      bucket: "test-bucket",
+      region: "us-east-1",
+      credentials: { accessKeyId: "ASIA", secretAccessKey: "secret", sessionToken: "session-token" },
+    });
+    mockFetch.mockResolvedValue(okResponse('"abc"'));
+
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array([1, 2, 3]));
+        controller.close();
+      },
+    });
+    await stsDriver.upload(stream, { filename: "a.bin", size: 3 });
+    await stsDriver.delete("a.bin");
+
+    for (const [, opts] of mockFetch.mock.calls) {
+      const headers = (opts as RequestInit).headers as Record<string, string>;
+      expect(headers["x-amz-security-token"]).toBe("session-token");
+      expect(headers.authorization).toMatch(/SignedHeaders=[^,]*x-amz-security-token/);
+    }
+  });
+
+  it("includes the session token in presigned URLs", async () => {
+    const stsDriver = new S3Driver({
+      bucket: "test-bucket",
+      region: "us-east-1",
+      credentials: { accessKeyId: "ASIA", secretAccessKey: "secret", sessionToken: "tok/en+=" },
+    });
+    const url = await stsDriver.getPresignedUrl("test.txt");
+    expect(new URL(url).searchParams.get("X-Amz-Security-Token")).toBe("tok/en+=");
   });
 
   it("should presign a URL with a custom expiry", async () => {
@@ -370,6 +409,48 @@ describe("S3Driver multipart upload", () => {
     const xml = new TextDecoder().decode(completeOpts.body as Uint8Array);
     expect(xml).toContain('<Part><PartNumber>1</PartNumber><ETag>"part-etag"</ETag></Part>');
     expect(xml).toContain('<Part><PartNumber>2</PartNumber><ETag>"part-etag"</ETag></Part>');
+  });
+
+  it("signs each multipart request with the time it is sent", async () => {
+    driver = new S3Driver({
+      bucket: "test-bucket",
+      region: "us-east-1",
+      credentials: { accessKeyId: "AKID", secretAccessKey: "secret" },
+      partSize: 5 * 1024 * 1024,
+    });
+    mockMultipart();
+
+    const start = new Date("2026-01-01T00:00:00Z").getTime();
+    vi.useFakeTimers({ toFake: ["Date"], now: start });
+    try {
+      const chunk = new Uint8Array(5 * 1024 * 1024);
+      let pulls = 0;
+      const stream = new ReadableStream<Uint8Array>({
+        pull(controller) {
+          // Simulate a slow producer: 20 minutes pass before each chunk.
+          vi.setSystemTime(start + ++pulls * 20 * 60 * 1000);
+          if (pulls <= 2) controller.enqueue(chunk);
+          else controller.close();
+        },
+      });
+
+      await driver.upload(stream, { filename: "slow.bin" });
+
+      const dates = mockFetch.mock.calls.map(
+        (c) => ((c[1] as RequestInit).headers as Record<string, string>)["x-amz-date"],
+      );
+      // create, part 1, part 2, complete. The stream reads ahead, so exact
+      // times depend on buffering; what matters is that later requests are
+      // not stuck at the upload's start time.
+      expect(dates).toHaveLength(4);
+      expect(dates[0]).toBe("20260101T000000Z");
+      for (const date of dates.slice(1)) {
+        expect(date! > dates[0]!).toBe(true);
+      }
+      expect(dates[3]).toBe("20260101T010000Z");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("routes >5 GiB uploads to multipart and aborts on size mismatch", async () => {
@@ -605,6 +686,66 @@ describe("S3Driver (Cloudflare R2)", () => {
     expect(url).toBe(
       "https://accountid.r2.cloudflarestorage.com/my-bucket/path/to/file.txt",
     );
+  });
+});
+
+describe("S3Driver forcePathStyle", () => {
+  const credentials = { accessKeyId: "AKID", secretAccessKey: "secret" };
+
+  it("uses path-style AWS URLs when forcePathStyle is true", async () => {
+    const driver = new S3Driver({ bucket: "b", region: "eu-west-1", forcePathStyle: true, credentials });
+    expect(await driver.getUrl("a/b.txt")).toBe("https://s3.eu-west-1.amazonaws.com/b/a/b.txt");
+
+    mockFetch.mockResolvedValue(new Response(null, { status: 204 }));
+    await driver.delete("a/b.txt");
+    const [url, opts] = mockFetch.mock.calls[0]!;
+    expect(url).toBe("https://s3.eu-west-1.amazonaws.com/b/a/b.txt");
+    expect((opts as RequestInit).headers as Record<string, string>).toHaveProperty("authorization");
+  });
+
+  it("uses virtual-hosted URLs on a custom endpoint when forcePathStyle is false", async () => {
+    const driver = new S3Driver({
+      bucket: "b",
+      endpoint: "https://storage.example.com",
+      forcePathStyle: false,
+      credentials,
+    });
+    expect(await driver.getUrl("x.txt")).toBe("https://b.storage.example.com/x.txt");
+
+    const presigned = new URL(await driver.getPresignedUrl("x.txt"));
+    expect(presigned.host).toBe("b.storage.example.com");
+    expect(presigned.pathname).toBe("/x.txt");
+  });
+});
+
+describe("S3Driver multipart ETag handling", () => {
+  it("aborts and explains when a part response has no ETag", async () => {
+    const driver = new S3Driver({
+      bucket: "test-bucket",
+      credentials: { accessKeyId: "AKID", secretAccessKey: "secret" },
+    });
+    mockMultipart();
+    const base = mockFetch.getMockImplementation()!;
+    mockFetch.mockImplementation((input: string | URL, init?: RequestInit) => {
+      if (String(input).includes("partNumber=") && init?.method === "PUT") {
+        return Promise.resolve(new Response(null, { status: 200 }));
+      }
+      return base(input, init);
+    });
+
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array([1, 2, 3]));
+        controller.close();
+      },
+    });
+
+    await expect(driver.upload(stream, { filename: "a.bin" })).rejects.toMatchObject({
+      code: "provider-error",
+      message: expect.stringContaining("ExposeHeaders"),
+    });
+    const methods = mockFetch.mock.calls.map((c) => (c[1] as RequestInit).method);
+    expect(methods).toEqual(["POST", "PUT", "DELETE"]);
   });
 });
 

@@ -40,10 +40,10 @@ An `upload` retries on transient failures only when `options.streamFactory` is p
 | `path` | `string` | | Folder/path prefix for the stored object. |
 | `mimeType` | `string` | | Content type. |
 | `metadata` | `Record<string, string>` | | Provider user metadata (see [Metadata](/docs/guide/metadata)). |
-| `size` | `number` | | Known byte length — unlocks zero-buffer streaming (see [Uploads](/docs/guide/uploads)). |
+| `size` | `number` | | Known byte length: unlocks zero-buffer streaming (see [Uploads](/docs/guide/uploads)). |
 | `signal` | `AbortSignal` | | Cancels the upload in flight (see [Uploads](/docs/guide/uploads#cancelling-uploads)). |
 | `onProgress` | `(progress) => void` | | Progress callback (see [Uploads](/docs/guide/uploads#tracking-upload-progress)). |
-| `streamFactory` | `() => ReadableStream<Uint8Array>` | | Re-produces the stream for retry attempts. Required to retry an upload (see [Retries](/docs/guide/observability#retries)). Sync-only today; an async (Promise-returning) variant is planned — see [Retrying uploads](/docs/guide/uploads#retrying-uploads). |
+| `streamFactory` | `() => ReadableStream<Uint8Array>` | | Re-produces the stream for retry attempts. Required to retry an upload (see [Retries](/docs/guide/observability#retries)). Sync-only today; an async (Promise-returning) variant is planned; see [Retrying uploads](/docs/guide/uploads#retrying-uploads). |
 
 ## `get(path)`
 
@@ -55,15 +55,18 @@ Streams a stored file back as `ReadableStream<Uint8Array>` (see [Downloads](/doc
 
 Throws `StorageError("not-found")` when the file does not exist.
 
-## `delete(path)`
+## `delete(path, options?)`
 
 Deletes a stored file.
 
 | Param | Type | Description |
 |-------|------|-------------|
 | `path` | `string` | Path of the stored file. |
+| `options.signal` | `AbortSignal` | Cancels the call and any pending retries. |
 
-Returns `Promise<boolean>` — `true` when deleted, `false` when it was already gone.
+Returns `Promise<boolean>`: `true` when the file is gone, `false` when it did not exist. Any other failure throws a `StorageError`. (S3 cannot tell whether an object existed, so it always returns `true` on success.)
+
+`get`, `getUrl` and `getPresignedUrl` accept the same `options.signal`.
 
 ## `getUrl(path)`
 

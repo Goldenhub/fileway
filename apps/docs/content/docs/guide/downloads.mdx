@@ -9,15 +9,15 @@ Returns a static public URL built from the driver's `baseUrl` (or an auto-derive
 
 | Driver | URL format |
 |--------|------------|
-| `LocalDriver` | `<baseUrl>/<path>` — defaults to `file://<directory>/<path>`. Set `baseUrl` to a CDN/web URL in production. |
-| `S3Driver` | `<baseUrl>/<path>` — virtual-hosted or path-style based on `forcePathStyle`. Assumes the bucket is publicly readable. |
+| `LocalDriver` | `<baseUrl>/<path>`: defaults to `file://<directory>/<path>`. Set `baseUrl` to a CDN/web URL in production. |
+| `S3Driver` | `<baseUrl>/<path>`: virtual-hosted or path-style based on `forcePathStyle`. Assumes the bucket is publicly readable. |
 | `CloudinaryDriver` | The Cloudinary CDN URL for the asset. |
 
 ## Pre-signed URLs
 
 Both `S3Driver` and `CloudinaryDriver` can sign time-limited download URLs; only `LocalDriver` cannot (it has no access control to gate).
 
-**S3** — `getPresignedUrl(path, { expiresIn })` returns a SigV4-signed GET URL — anyone with the link can download the object without credentials until it expires. Hand these out for private buckets instead of `getUrl()` results, which assume a publicly readable bucket.
+**S3**: `getPresignedUrl(path, { expiresIn })` returns a SigV4-signed GET URL: anyone with the link can download the object without credentials until it expires. Hand these out for private buckets instead of `getUrl()` results, which assume a publicly readable bucket.
 
 ```ts
 const url = await client.getPresignedUrl("uploads/report.pdf", { expiresIn: 900 });
@@ -25,17 +25,17 @@ const url = await client.getPresignedUrl("uploads/report.pdf", { expiresIn: 900 
 ```
 
 - `expiresIn` defaults to 3600 seconds (1 hour) and must be an integer in `1..604800` (AWS's 7-day cap); invalid values throw a `ValidationError`.
-- Signing is done entirely with Web Crypto + your configured credentials — no SDK, no network call. Only the `host` header is signed with an `UNSIGNED-PAYLOAD` hash, so the URL works in any browser or client.
+- Signing is done entirely with Web Crypto + your configured credentials: no SDK, no network call. Only the `host` header is signed with an `UNSIGNED-PAYLOAD` hash, so the URL works in any browser or client.
 - Works with `endpoint`/`forcePathStyle` too (MinIO, R2, GCS-S3), as long as the endpoint validates SigV4 presigning (MinIO does).
 
-**Cloudinary** — `getPresignedUrl(publicId, { expiresIn, deliveryType })` returns a signed delivery URL (`/s--SIG--/` component + `expires_at`) using the same resource-type/version resolution chain as `getUrl`. The signature (first 8 chars of URL-safe base64 `SHA-1` of the resource path + API secret) only *restricts* access for assets with `authenticated` or `private` delivery — pass `deliveryType: "authenticated"` for those. `CloudinaryDriver.upload` creates public `upload` assets, so the default signed URL resolves but doesn't restrict anything.
+**Cloudinary**: `getPresignedUrl(publicId, { expiresIn, deliveryType })` returns a signed private download URL (`api.cloudinary.com/.../download`) that stops working after `expiresIn` seconds, using the same resource-type/version/format resolution chain as `getUrl`. For a signed but non-expiring `res.cloudinary.com` URL, use `CloudinaryDriver.getSignedUrl()` (see the [Cloudinary driver](/docs/drivers/cloudinary#presigned-urls)).
 
 - `expiresIn` defaults to 3600 seconds and must be a positive integer; no documented maximum.
-- Drivers that cannot presign (`LocalDriver`) omit the method — `FilewayClient.getPresignedUrl` throws a clear error in that case.
+- Drivers that cannot presign (`LocalDriver`) omit the method, and `FilewayClient.getPresignedUrl` throws a clear error in that case.
 
 ## Download / read-back (`get(path)`)
 
-Every driver streams a stored file back as a WHATWG `ReadableStream<Uint8Array>` — the same type it accepts on upload:
+Every driver streams a stored file back as a WHATWG `ReadableStream<Uint8Array>`: the same type it accepts on upload:
 
 ```ts
 const stream = await client.get("uploads/report.pdf"); // ReadableStream<Uint8Array>

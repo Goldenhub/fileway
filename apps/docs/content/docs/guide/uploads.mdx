@@ -1,6 +1,6 @@
 ---
 title: Uploads & Streaming
-description: How files flow into each driver — streaming, multipart uploads, cancellation, and progress
+description: How files flow into each driver: streaming, multipart uploads, cancellation, and progress
 ---
 
 All drivers accept a WHATWG `ReadableStream<Uint8Array>`:
@@ -25,8 +25,8 @@ const result = await client.upload(stream, {
 | Driver | Behavior |
 |--------|----------|
 | `LocalDriver` | **True streaming.** The web stream is piped to disk via Node.js streams with backpressure. Memory usage stays constant regardless of file size. Enforces `maxSizeBytes` while streaming. |
-| `S3Driver` | **Streams with bounded memory, always.** With `options.size` (≤ 5 GiB) the payload is sent as a SigV4 `aws-chunked` body whose chunks are signed lazily as they are read (backpressure preserved, zero buffering). Without a known size — or beyond 5 GiB — the driver falls back to a multipart upload, reading the stream into part-sized buffers (default 8 MiB, minimum 5 MiB), so peak memory stays bounded. |
-| `CloudinaryDriver` | **Buffers the full file** into a `Blob` for the multipart upload. Enforces `maxSizeBytes`. |
+| `S3Driver` | **Streams with bounded memory, always.** With `options.size` (≤ 5 GiB) the payload is sent as a SigV4 `aws-chunked` body whose chunks are signed lazily as they are read (backpressure preserved, zero buffering). Without a known size, or beyond 5 GiB, the driver falls back to a multipart upload, reading the stream into part-sized buffers (default 8 MiB, minimum 5 MiB), so peak memory stays bounded. |
+| `CloudinaryDriver` | **Streams with bounded memory.** Files up to `chunkSize` (default 20 MiB) go up in one request; larger ones use Cloudinary's chunked upload, holding about one chunk in memory at a time. Enforces `maxSizeBytes` while streaming. |
 
 When the size is known, pass it to unlock the leanest (single-request) streaming path:
 
@@ -45,13 +45,13 @@ Without `size`, `S3Driver` still streams with bounded memory via a multipart upl
 
 `S3Driver` splits large objects into parts via the S3 multipart flow (`CreateMultipartUpload` → `UploadPart` → `CompleteMultipartUpload`) in three situations:
 
-- the size is unknown — the stream is read into part-sized buffers instead of being buffered whole;
+- the size is unknown: the stream is read into part-sized buffers instead of being buffered whole;
 - the object exceeds 5 GiB, the single-`PUT` cap;
 - `forceMultipart: true` is set.
 
 Multipart parts are uploaded sequentially as the stream fills each buffer, so peak memory is bounded by `partSize` (default 8 MiB, minimum 5 MiB) regardless of object size. If the stream mismatches a declared `size`, the driver aborts the in-flight multipart upload and throws a validation error.
 
-`CloudinaryDriver` has no chunked multipart support: it buffers the full asset into a `Blob` and sends it as a single `multipart/form-data` request, which is why very large files are not recommended there. `LocalDriver` has no concept of parts because it streams straight to disk.
+`CloudinaryDriver` uploads files larger than `chunkSize` in chunks (`X-Unique-Upload-Id` + `Content-Range`), so very large files never sit in memory whole. `LocalDriver` has no concept of parts because it streams straight to disk.
 
 ## Cancelling uploads
 
@@ -71,7 +71,7 @@ try {
   await upload;
 } catch (err) {
   if (err.name === "AbortError") {
-    // cancelled — cleanly
+    // cancelled cleanly
   }
 }
 ```
@@ -96,11 +96,11 @@ const result = await client.upload(stream, {
 });
 ```
 
-Event cadence is adaptive: a significant chunk (≥ 256 KiB, or ≥ 5% of a known total) reports immediately, while small chunks on fast streams are coalesced to at most one event per 100 ms. An exact final event always fires (`bytes === total`, `progress === 1`), and no event fires on abort. Progress is measured at the client layer as bytes leave the source stream — Local reports as bytes hit disk, S3 as bytes are streamed or buffered into parts, and Cloudinary during its pre-signature `Blob` buffering (its `fetch` upload itself exposes no progress).
+Event cadence is adaptive: a significant chunk (≥ 256 KiB, or ≥ 5% of a known total) reports immediately, while small chunks on fast streams are coalesced to at most one event per 100 ms. An exact final event always fires (`bytes === total`, `progress === 1`), and no event fires on abort. Progress is measured at the client layer as bytes leave the source stream: Local reports as bytes hit disk, S3 as bytes are streamed or buffered into parts, and Cloudinary as bytes are read into each chunk.
 
 ## Retrying uploads
 
-A `ReadableStream` is consumed after one read, so to retry an upload Fileway needs a way to **re-produce** the payload per attempt. Pass `streamFactory` — a function returning a fresh stream — to enable retry. The source must be re-readable (a file path, in-memory bytes, or a re-fetchable URL); a one-shot feed cannot be retried.
+A `ReadableStream` is consumed after one read, so to retry an upload Fileway needs a way to **re-produce** the payload per attempt. Pass `streamFactory` (a function returning a fresh stream) to enable retry. The source must be re-readable (a file path, in-memory bytes, or a re-fetchable URL); a one-shot feed cannot be retried.
 
 ```ts
 const result = await client.upload(createReadStream(file), {
@@ -110,6 +110,6 @@ const result = await client.upload(createReadStream(file), {
 });
 ```
 
-Configure backoff with the client's `retry` option (e.g. `maxRetries`, `baseDelayMs`). Without `streamFactory`, a failed upload throws immediately — no retry. Retried uploads re-transmit the payload, so they cost `N+1` egresss on `N` failures. See [Retries](/docs/guide/observability#retries) for the full configuration and which failures are retried.
+Configure backoff with the client's `retry` option (e.g. `maxRetries`, `baseDelayMs`). Without `streamFactory`, a failed upload throws immediately, with no retry. Retried uploads re-transmit the payload, so they cost `N+1` egresss on `N` failures. See [Retries](/docs/guide/observability#retries) for the full configuration and which failures are retried.
 
-> **Future: async producers (planned).** `streamFactory` is currently **sync-only** — it must return the stream directly. An async (Promise-returning) variant is a planned enhancement, which would let you pass sources like `fetch(url).then((r) => r.body)` to re-fetch the payload per attempt without holding it in memory. Until then, on non-Node runtimes use a sync in-memory producer such as `new Blob([bytes]).stream()` in browsers/edge/Workers, or `Deno.open(path).readable` in Deno.
+> **Future: async producers (planned).** `streamFactory` is currently **sync-only**: it must return the stream directly. An async (Promise-returning) variant is a planned enhancement, which would let you pass sources like `fetch(url).then((r) => r.body)` to re-fetch the payload per attempt without holding it in memory. Until then, on non-Node runtimes use a sync in-memory producer such as `new Blob([bytes]).stream()` in browsers/edge/Workers, or `Deno.open(path).readable` in Deno.

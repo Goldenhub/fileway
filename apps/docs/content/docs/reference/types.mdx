@@ -52,7 +52,7 @@ interface PresignedUrlOptions {
 
 ## `RetryConfig`
 
-Controls automatic retries for transient failures. Passed as `retry` in `FilewayConfig`. Only `network`, `provider-error`, and HTTP `429`/`5xx` statuses are retried — `validation`, `config`, `auth-failed`, `not-found`, `bucket-not-found`, `size-exceeded`, and `AbortError` are never retried. See [Retries](/docs/guide/observability#retries) for how it behaves.
+Controls automatic retries for transient failures. Passed as `retry` in `FilewayConfig`. Only `network`, `provider-error`, and HTTP `429`/`5xx` statuses are retried; `validation`, `config`, `auth-failed`, `not-found`, `bucket-not-found`, `size-exceeded`, and `AbortError` are never retried. See [Retries](/docs/guide/observability#retries) for how it behaves.
 
 ```ts
 interface RetryConfig {

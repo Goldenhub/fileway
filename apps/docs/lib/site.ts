@@ -1,4 +1,8 @@
+import pkg from "../package.json";
+
 export const SITE_NAME = "Fileway";
+/** Released version; the site is versioned together with the packages. */
+export const SITE_VERSION = pkg.version;
 export const SITE_DESCRIPTION =
   "Runtime-agnostic file storage for JavaScript & TypeScript. Zero-dependency drivers for local disk, AWS S3, Cloudflare R2, MinIO, and Cloudinary with full type inference.";
 export const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? "https://www.usefileway.dev";

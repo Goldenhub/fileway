@@ -1,41 +1,73 @@
 import Link from "next/link";
+import { GITHUB_URL, NPM_URL } from "@/lib/site";
+import { GitHubIcon, Logo } from "../brand";
+
+const columns = [
+  {
+    title: "Docs",
+    links: [
+      { label: "Introduction", href: "/docs" },
+      { label: "Uploads", href: "/docs/guide/uploads" },
+      { label: "Middleware", href: "/docs/guide/middleware" },
+      { label: "Changelog", href: "/docs/reference/changelog" },
+    ],
+  },
+  {
+    title: "Drivers",
+    links: [
+      { label: "Local", href: "/docs/drivers/local" },
+      { label: "S3, R2 & MinIO", href: "/docs/drivers/s3" },
+      { label: "Cloudinary", href: "/docs/drivers/cloudinary" },
+    ],
+  },
+  {
+    title: "Community",
+    links: [
+      { label: "GitHub", href: GITHUB_URL },
+      { label: "Discussions", href: `${GITHUB_URL}/discussions` },
+      { label: "npm", href: NPM_URL },
+    ],
+  },
+];
 
 export function Footer() {
   return (
-    <footer className="border-t py-12" style={{ borderColor: "var(--lp-border)", backgroundColor: "var(--lp-bg)" }}>
-      <div className="mx-auto flex max-w-[1200px] flex-col items-center justify-between gap-8 px-6 md:flex-row">
-        <div className="flex items-center gap-4">
-          <span className="font-sans text-[14px] font-[600] tracking-[-0.3px]" style={{ color: "var(--lp-text)" }}>
-Fileway
-          </span>
-          <span className="font-sans text-[12px]" style={{ color: "var(--lp-muted)" }}>
-            MIT License — Open source
-          </span>
+    <footer className="border-t border-line">
+      <div className="mx-auto grid max-w-6xl gap-10 px-4 py-14 sm:px-6 md:grid-cols-[1.5fr_repeat(3,1fr)]">
+        <div>
+          <Logo />
+          <p className="mt-3 max-w-xs text-sm leading-relaxed text-ink-muted">
+            Runtime-agnostic file storage for JavaScript & TypeScript.
+          </p>
         </div>
-        <div className="flex items-center gap-6">
-          <Link href="/docs" className="font-sans text-[13px] transition-colors hover:text-white" style={{ color: "var(--lp-muted)" }}>
-            Documentation
-          </Link>
+        {columns.map((col) => (
+          <div key={col.title}>
+            <p className="text-sm font-semibold text-ink">{col.title}</p>
+            <ul className="mt-3 space-y-2">
+              {col.links.map((l) => (
+                <li key={l.label}>
+                  <Link href={l.href} className="text-sm text-ink-muted transition-colors hover:text-ink">
+                    {l.label}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </div>
+      <div className="border-t border-line">
+        <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-6 text-sm text-ink-muted sm:px-6">
+          <p>Open source under the MIT License</p>
           <a
-            href="https://github.com/Goldenhub/fileway"
-            className="font-sans text-[13px] transition-colors hover:text-white" style={{ color: "var(--lp-muted)" }}
+            href={GITHUB_URL}
             target="_blank"
             rel="noopener noreferrer"
+            aria-label="GitHub"
+            className="transition-colors hover:text-ink"
           >
-            GitHub
-          </a>
-          <a
-            href="https://www.npmjs.com/org/fileway"
-            className="font-sans text-[13px] transition-colors hover:text-white" style={{ color: "var(--lp-muted)" }}
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            npm
+            <GitHubIcon />
           </a>
         </div>
-        <p className="font-sans text-[12px]" style={{ color: "var(--lp-muted)" }}>
-          Built with open-source love
-        </p>
       </div>
     </footer>
   );

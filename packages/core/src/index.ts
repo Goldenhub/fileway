@@ -5,11 +5,14 @@ export * from "./errors.js";
 export * from "./logging.js";
 export * from "./retry.js";
 
-export const version = "0.0.1";
+// Replaced with the package.json version at build time (see tsup.config.ts).
+declare const __FILEWAY_VERSION__: string | undefined;
+export const version: string = typeof __FILEWAY_VERSION__ === "string" ? __FILEWAY_VERSION__ : "0.0.0-dev";
 
-import { BaseDriver, FilewayConfig, PresignedUrlOptions, RetryConfig, UploadOptions } from "./types.js";
+import { BaseDriver, FilewayConfig, OperationOptions, PresignedUrlOptions, RetryConfig, UploadOptions } from "./types.js";
 import { withProgress } from "./progress.js";
 import { StorageError, isAbortError } from "./errors.js";
+import { abortError } from "./validation.js";
 import { delayWithJitter, isRetryable, sleep } from "./retry.js";
 import type { ErrorContext, Logger, LogLevel, Operation } from "./logging.js";
 
@@ -30,31 +33,47 @@ export class FilewayClient<const TConfig extends FilewayConfig<BaseDriver>> {
 
   async upload(
     stream: ReadableStream<Uint8Array>,
-    options: UploadOptions,
+    // Accept the driver's own upload options (e.g. Cloudinary's
+    // `deliveryType`) on top of the core ones.
+    options: UploadOptions & Parameters<TConfig["driver"]["upload"]>[1],
   ): Promise<ReturnType<TConfig["driver"]["upload"]>> {
     const started = Date.now();
     const maxRetries = this.retry.maxRetries ?? 3;
     const canRetry = options.streamFactory !== undefined && maxRetries > 0;
 
     let attempt = 1;
-    let activeStream = stream;
     let activeOptions = { ...options };
 
     this.emit("info", "upload started", {
       operation: "upload",
-      ...(activeOptions.filename !== undefined ? { filename: activeOptions.filename } : {}),
-      ...(activeOptions.path !== undefined ? { path: activeOptions.path } : {}),
-      ...(activeOptions.mimeType !== undefined ? { mimeType: activeOptions.mimeType } : {}),
-      ...(activeOptions.size !== undefined ? { size: activeOptions.size } : {}),
+      ...(options.filename !== undefined ? { filename: options.filename } : {}),
+      ...(options.path !== undefined ? { path: options.path } : {}),
+      ...(options.mimeType !== undefined ? { mimeType: options.mimeType } : {}),
+      ...(options.size !== undefined ? { size: options.size } : {}),
     });
 
     for (;;) {
+      // Every attempt starts from the caller's original options, so
+      // `beforeUpload` middleware never transforms its own earlier output.
+      let activeStream = attempt === 1 ? stream : options.streamFactory!();
+      activeOptions = { ...options };
+
       try {
         for (const middleware of this.middlewares) {
           if (middleware.beforeUpload) {
             const result = await middleware.beforeUpload(activeStream, activeOptions);
-            if (result?.stream) activeStream = result.stream;
-            if (result?.options) activeOptions = result.options;
+            if (!result) continue;
+            const sizeBefore = activeOptions.size;
+            if (result.options) activeOptions = result.options;
+            if (result.stream) {
+              activeStream = result.stream;
+              // The new stream may not be the old length. Keep a size only if
+              // this middleware vouched for it; a spread `...options` carries
+              // the old size along by accident and does not count.
+              const size =
+                result.size ?? (activeOptions.size !== sizeBefore ? activeOptions.size : undefined);
+              activeOptions = withSize(activeOptions, size);
+            }
           }
         }
 
@@ -103,30 +122,29 @@ export class FilewayClient<const TConfig extends FilewayConfig<BaseDriver>> {
           error: error instanceof Error ? { name: error.name, message: error.message } : {},
         });
 
-        await sleep(delay, activeOptions.signal);
+        await sleep(delay, options.signal);
         attempt += 1;
-        activeStream = activeOptions.streamFactory!();
-        activeOptions = { ...activeOptions };
       }
     }
   }
 
-  async delete(path: string): Promise<boolean> {
-    return this.runWithRetry("delete", path, async () => this.driver.delete(path));
+  async delete(path: string, options?: OperationOptions): Promise<boolean> {
+    return this.runWithRetry("delete", path, async () => this.driver.delete(path), options?.signal);
   }
 
-  async getUrl(path: string): Promise<string> {
-    return this.runWithRetry("getUrl", path, async () => this.driver.getUrl(path));
+  async getUrl(path: string, options?: OperationOptions): Promise<string> {
+    return this.runWithRetry("getUrl", path, async () => this.driver.getUrl(path), options?.signal);
   }
 
-  async get(path: string): Promise<ReadableStream<Uint8Array>> {
-    return this.runWithRetry("get", path, async () => this.driver.get(path));
+  async get(path: string, options?: OperationOptions): Promise<ReadableStream<Uint8Array>> {
+    return this.runWithRetry("get", path, async () => this.driver.get(path), options?.signal);
   }
 
   async getPresignedUrl(
     path: string,
-    options?: PresignedUrlOptions,
+    options?: PresignedUrlOptions & OperationOptions,
   ): Promise<string> {
+    const { signal, ...presignOptions } = options ?? {};
     return this.runWithRetry("getPresignedUrl", path, async () => {
       if (!this.driver.getPresignedUrl) {
         throw new StorageError(
@@ -135,14 +153,15 @@ export class FilewayClient<const TConfig extends FilewayConfig<BaseDriver>> {
           { provider: this.driver.name },
         );
       }
-      return this.driver.getPresignedUrl!(path, options);
-    });
+      return this.driver.getPresignedUrl!(path, options ? presignOptions : undefined);
+    }, signal);
   }
 
   private async runWithRetry<T>(
     operation: "delete" | "getUrl" | "get" | "getPresignedUrl",
     path: string,
     fn: () => Promise<T>,
+    signal?: AbortSignal,
   ): Promise<T> {
     const started = Date.now();
     const maxRetries = this.retry.maxRetries ?? 3;
@@ -152,6 +171,7 @@ export class FilewayClient<const TConfig extends FilewayConfig<BaseDriver>> {
     let attempt = 1;
     for (;;) {
       try {
+        if (signal?.aborted) throw abortError(`${operation} aborted`);
         const result = await fn();
         this.emit("info", `${operation} succeeded`, { operation, path, durationMs: Date.now() - started });
         return result;
@@ -171,7 +191,12 @@ export class FilewayClient<const TConfig extends FilewayConfig<BaseDriver>> {
           error: error instanceof Error ? { name: error.name, message: error.message } : {},
         });
 
-        await sleep(delay);
+        try {
+          await sleep(delay, signal);
+        } catch (abort) {
+          await this.reportFailure(abort, { operation, durationMs: Date.now() - started, path });
+          throw abort;
+        }
         attempt += 1;
       }
     }
@@ -206,4 +231,10 @@ export class FilewayClient<const TConfig extends FilewayConfig<BaseDriver>> {
       await this.notifyError(error, context);
     }
   }
+}
+
+/** Returns a copy of `options` with `size` set, or removed when undefined. */
+function withSize<T extends UploadOptions>(options: T, size: number | undefined): T {
+  const { size: _stale, ...rest } = options;
+  return (size === undefined ? rest : { ...rest, size }) as T;
 }

@@ -98,7 +98,7 @@ export class LocalDriver implements BaseDriver<{ localPath: string }> {
       nodeStream.on("data", (chunk: Buffer) => {
         bytes += chunk.length;
         if (this.maxSizeBytes !== undefined && bytes > this.maxSizeBytes) {
-          cleanup(new ValidationError(`upload exceeds maxSizeBytes of ${this.maxSizeBytes}`));
+          cleanup(new StorageError("size-exceeded", `upload exceeds maxSizeBytes of ${this.maxSizeBytes}`, { provider: "local" }));
         }
       });
       nodeStream.pipe(writeStream);
@@ -122,13 +122,23 @@ export class LocalDriver implements BaseDriver<{ localPath: string }> {
     };
   }
 
+  /**
+   * Deletes the file. Returns `false` when it does not exist; throws a
+   * `ValidationError` for paths outside the storage directory and a
+   * `StorageError` for any other filesystem failure.
+   */
   async delete(path: string): Promise<boolean> {
+    const fullPath = this.resolveInside(path);
+    await this.assertSafePath(fullPath);
     try {
-      const fullPath = this.resolveInside(path);
       await unlink(fullPath);
       return true;
-    } catch {
-      return false;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") return false;
+      throw new StorageError("provider-error", `failed to delete ${path}: ${(err as Error).message}`, {
+        provider: "local",
+        cause: err,
+      });
     }
   }
 

@@ -1,10 +1,20 @@
 import type { Metadata } from "next";
-import { source } from "@/lib/source";
-import { DocsPage, DocsBody, DocsTitle, DocsDescription } from "fumadocs-ui/page";
+import { markdownUrl, source } from "@/lib/source";
+import {
+  DocsPage,
+  DocsBody,
+  DocsTitle,
+  DocsDescription,
+  MarkdownCopyButton,
+  ViewOptionsPopover,
+} from "fumadocs-ui/layouts/notebook/page";
 import { notFound } from "next/navigation";
 import defaultMdxComponents from "fumadocs-ui/mdx";
 import { Tab, Tabs } from "fumadocs-ui/components/tabs";
-import { SITE_NAME, absoluteUrl } from "@/lib/site";
+import { Step, Steps } from "fumadocs-ui/components/steps";
+import { getBreadcrumbItems } from "fumadocs-core/breadcrumb";
+import { PageFeedback } from "@/components/page-feedback";
+import { SITE_NAME, GITHUB_URL, absoluteUrl } from "@/lib/site";
 
 export default async function Page(props: { params: Promise<{ slug?: string[] }> }) {
   const params = await props.params;
@@ -16,6 +26,10 @@ export default async function Page(props: { params: Promise<{ slug?: string[] }>
     page.slugs.length === 2 && page.slugs[0] === "reference" && page.slugs[1] === "changelog";
 
   const MDX = page.data.body;
+  // Section name (e.g. "Guide") shown as an eyebrow above the title.
+  const section = getBreadcrumbItems(page.url, source.pageTree)[0]?.name;
+  const mdUrl = markdownUrl(page.slugs);
+  const sourceUrl = `${GITHUB_URL}/blob/main/apps/docs/content/docs/${page.path}`;
 
   const articleJsonLd = {
     "@context": "https://schema.org",
@@ -60,6 +74,8 @@ export default async function Page(props: { params: Promise<{ slug?: string[] }>
       toc={page.data.toc}
       full={page.data.full}
       footer={isChangelog ? { enabled: false } : undefined}
+      // The section eyebrow below replaces the built-in breadcrumb.
+      breadcrumb={{ enabled: false }}
     >
       <script
         type="application/ld+json"
@@ -69,11 +85,19 @@ export default async function Page(props: { params: Promise<{ slug?: string[] }>
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbJsonLd) }}
       />
-      <DocsTitle>{page.data.title}</DocsTitle>
+      {section ? <p className="mb-2 text-sm font-semibold text-brand-ink">{section}</p> : null}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <DocsTitle>{page.data.title}</DocsTitle>
+        <div className="flex shrink-0 items-center gap-2">
+          <MarkdownCopyButton markdownUrl={mdUrl} />
+          <ViewOptionsPopover markdownUrl={mdUrl} githubUrl={sourceUrl} />
+        </div>
+      </div>
       <DocsDescription>{page.data.description}</DocsDescription>
       <DocsBody>
-        <MDX components={{ ...defaultMdxComponents, Tab, Tabs }} />
+        <MDX components={{ ...defaultMdxComponents, Tab, Tabs, Step, Steps }} />
       </DocsBody>
+      <PageFeedback page={page.url} />
     </DocsPage>
   );
 }

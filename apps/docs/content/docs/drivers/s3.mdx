@@ -3,7 +3,7 @@ title: S3 Driver
 description: Upload files to S3-compatible storage
 ---
 
-Uploads files to S3-compatible storage (AWS S3, Cloudflare R2, MinIO) with pure `fetch` and hand-rolled SigV4 — no AWS SDK required, so it runs on Node.js, Bun, Deno, and edge runtimes.
+Uploads files to S3-compatible storage (AWS S3, Cloudflare R2, MinIO) with pure `fetch` and hand-rolled SigV4: no AWS SDK required, so it runs on Node.js, Bun, Deno, and edge runtimes.
 
 ```ts
 import { FilewayClient } from "@fileway/core";
@@ -35,9 +35,9 @@ console.log(result.meta.etag);
 
 The driver picks the S3 upload strategy automatically from `options.size`:
 
-- **Known size ≤ 5 GiB** — a single `PUT` with a SigV4 `aws-chunked` body. Each chunk is signed lazily as the stream is read, so memory stays constant regardless of file size.
-- **Unknown size** — a multipart upload (`CreateMultipartUpload` → `UploadPart` → `CompleteMultipartUpload`). The stream is read into part-sized buffers (default 8 MiB, minimum 5 MiB), so peak memory is bounded and the file is never buffered whole.
-- **Size > 5 GiB** — multipart upload, because a single `PUT` cannot exceed 5 GiB.
+- **Known size ≤ 5 GiB**: a single `PUT` with a SigV4 `aws-chunked` body. Each chunk is signed lazily as the stream is read, so memory stays constant regardless of file size.
+- **Unknown size**: a multipart upload (`CreateMultipartUpload` → `UploadPart` → `CompleteMultipartUpload`). The stream is read into part-sized buffers (default 8 MiB, minimum 5 MiB), so peak memory is bounded and the file is never buffered whole.
+- **Size > 5 GiB**: multipart upload, because a single `PUT` cannot exceed 5 GiB.
 
 Pass `options.size` when you know it to take the leanest path:
 
@@ -48,7 +48,7 @@ const result = await client.upload(fileStream, {
 });
 ```
 
-- If the stream ends before or after the declared `size`, the driver aborts the upload and throws a validation error — a truncated or oversized object is never stored.
+- If the stream ends before or after the declared `size`, the driver aborts the upload and throws a validation error, so a truncated or oversized object is never stored.
 - Use `partSize` to tune the multipart chunk size, and `forceMultipart` to always go through multipart.
 
 ## Cancellation
@@ -102,20 +102,20 @@ const result = await client.upload(stream, {
 
 ## Download
 
-Stream an object back with `get(path)` — an authenticated SigV4 `GET` whose response body is returned as a WHATWG `ReadableStream<Uint8Array>`:
+Stream an object back with `get(path)`: an authenticated SigV4 `GET` whose response body is returned as a WHATWG `ReadableStream<Uint8Array>`:
 
 ```ts
 const stream = await client.get("uploads/video.mp4");
 const bytes = new Uint8Array(await new Response(stream).arrayBuffer());
 ```
 
-`stream` is a WHATWG `ReadableStream<Uint8Array>`, so you can also pipe it straight to its destination (`stream.pipeTo(writable)`) with no buffering. Use `.arrayBuffer()`/`.blob()` for binary files — `.text()` would decode binary data as UTF-8 and corrupt it.
+`stream` is a WHATWG `ReadableStream<Uint8Array>`, so you can also pipe it straight to its destination (`stream.pipeTo(writable)`) with no buffering. Use `.arrayBuffer()`/`.blob()` for binary files, because `.text()` would decode binary data as UTF-8 and corrupt it.
 
 Throws with the HTTP status on failure (e.g. 404 when the object does not exist).
 
 ## Presigned URLs
 
-Generate a time-limited, SigV4-signed download link so anyone — even with no credentials — can fetch the object until it expires:
+Generate a time-limited, SigV4-signed download link so anyone, even with no credentials, can fetch the object until it expires:
 
 ```ts
 const url = await client.getPresignedUrl("uploads/report.pdf", { expiresIn: 900 });
@@ -123,7 +123,7 @@ const url = await client.getPresignedUrl("uploads/report.pdf", { expiresIn: 900 
 ```
 
 - `expiresIn` defaults to `3600` (1 hour) and must be an integer in `1..604800` (AWS's 7-day cap); invalid values throw a `ValidationError`.
-- Signing runs entirely with Web Crypto and your configured `credentials` — no network call and no SDK. Only the `host` header is signed with an `UNSIGNED-PAYLOAD` hash, so the URL works from any plain `fetch` or browser `<a href>`.
+- Signing runs entirely with Web Crypto and your configured `credentials`: no network call and no SDK. Only the `host` header is signed with an `UNSIGNED-PAYLOAD` hash, so the URL works from any plain `fetch` or browser `<a href>`.
 - Works with `endpoint`/`forcePathStyle` too, e.g. MinIO, which validates SigV4 presigning.
 
 ## MinIO
@@ -166,11 +166,11 @@ const client = new FilewayClient({
 
 | Option | Type | Default | Description |
 |---|---|---|---|
-| `bucket` | `string` | — | S3 bucket name |
+| `bucket` | `string` | Required | S3 bucket name |
 | `region` | `string` | `"us-east-1"` | AWS region |
-| `credentials` | `object` | — | `{ accessKeyId, secretAccessKey }` |
+| `credentials` | `object` | Required | `{ accessKeyId, secretAccessKey, sessionToken? }`. Pass `sessionToken` for temporary credentials (STS, Lambda/ECS roles, SSO). |
 | `endpoint` | `string` | AWS default | Custom endpoint (R2, MinIO) |
-| `forcePathStyle` | `boolean` | `false` | Use path-style URLs (`endpoint/bucket`) instead of virtual-hosted (`bucket.endpoint`). Required for MinIO. |
+| `forcePathStyle` | `boolean` | `true` with `endpoint`, else `false` | Use path-style URLs (`host/bucket`) instead of virtual-hosted (`bucket.host`). Set `false` to use virtual-hosted URLs on a custom endpoint. |
 | `baseUrl` | `string` | auto-derived | Base URL for generated URLs. For R2, set to the public dev URL or custom domain for browser-accessible links |
 | `partSize` | `number` | `8 MiB` | Multipart part size in bytes (clamped to a 5 MiB minimum) |
 | `forceMultipart` | `boolean` | `false` | Always use multipart uploads, regardless of size |
@@ -186,7 +186,7 @@ const client = new FilewayClient({
 
 ## Errors
 
-All failures are `StorageError`s from `@fileway/core` (see the [error reference](/docs/guide/observability#errors) for the full contract — codes, `statusCode`, `provider`, `cause`, and `isAbortError`). For this driver:
+All failures are `StorageError`s from `@fileway/core` (see the [error reference](/docs/guide/observability#errors) for the full contract: codes, `statusCode`, `provider`, `cause`, and `isAbortError`). For this driver:
 
 | Code | When |
 |------|------|

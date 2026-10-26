@@ -1,6 +1,7 @@
 import type { BaseDriver, PresignedUrlOptions, StorageErrorCode, UploadOptions, UploadResult } from "@fileway/core";
 import { validateUploadOptions, ValidationError, urlEncodePath, abortError, isAbortError, StorageError } from "@fileway/core";
 import { buildCanonicalQueryString, createStreamingBody, presignUrl, sign, signStreamingRequest, sha256 } from "./sigv4.js";
+import type { SigV4Credentials } from "./sigv4.js";
 
 const randomUUID = () => globalThis.crypto.randomUUID();
 const SERVICE = "s3";
@@ -15,12 +16,22 @@ const PRESIGN_DEFAULT_EXPIRY = 3600;
 const PRESIGN_MIN_EXPIRY = 1;
 const PRESIGN_MAX_EXPIRY = 604800;
 
+export interface S3Credentials {
+  accessKeyId: string;
+  secretAccessKey: string;
+  /** Session token for temporary credentials (STS, Lambda/ECS roles, SSO). */
+  sessionToken?: string;
+}
+
 export interface S3DriverConfig {
   bucket: string;
   region?: string;
-  credentials?: { accessKeyId: string; secretAccessKey: string };
+  credentials?: S3Credentials;
   baseUrl?: string;
   endpoint?: string;
+  /** Address the bucket in the URL path (`<host>/<bucket>/<key>`) instead of
+   * the hostname (`<bucket>.<host>/<key>`). Defaults to `true` with a custom
+   * `endpoint` (MinIO, R2) and `false` for AWS. */
   forcePathStyle?: boolean;
   /** Multipart part size in bytes. Default 8 MiB, clamped to a 5 MiB minimum. */
   partSize?: number;
@@ -152,14 +163,17 @@ export class S3Driver implements BaseDriver<{ bucket: string; etag?: string }> {
       key: string;
       metaHeaders: Record<string, string>;
       typeHeader: string;
-      cred: { accessKeyId: string; secretAccessKey: string };
+      cred: S3Credentials;
       signal?: AbortSignal;
       expectedSize?: number;
     },
   ): Promise<UploadResult<{ bucket: string; etag?: string }>> {
     const { id, key, metaHeaders, typeHeader, signal, expectedSize } = args;
     const cred = { ...args.cred, region: this.config.region!, service: SERVICE };
-    const now = new Date();
+
+    // Every request below is signed with its own timestamp: S3 rejects a
+    // signature more than ~15 minutes off the server clock, and a multipart
+    // upload can run far longer than that.
 
     // 1. CreateMultipartUpload — object metadata and content-type live here.
     const create = buildEndpoint(this.config, key, { uploads: "" });
@@ -169,7 +183,7 @@ export class S3Driver implements BaseDriver<{ bucket: string; etag?: string }> {
       { host: create.host, "content-type": typeHeader, ...metaHeaders },
       SHA256_EMPTY,
       cred,
-      now,
+      new Date(),
       { uploads: "" },
     );
     const createRes = await fetchWithAbort(create.url, {
@@ -186,7 +200,7 @@ export class S3Driver implements BaseDriver<{ bucket: string; etag?: string }> {
       throw new StorageError("provider-error", "S3 multipart create returned no UploadId", { provider: "s3" });
     }
 
-    const abort = () => this.abortMultipart(key, uploadId, cred, now);
+    const abort = () => this.abortMultipart(key, uploadId, cred);
 
     // 2. UploadPart — stream into one part-sized buffer at a time, so peak
     // memory is bounded by `partSize` regardless of file size.
@@ -226,7 +240,7 @@ export class S3Driver implements BaseDriver<{ bucket: string; etag?: string }> {
         { host: part.host },
         await sha256(bytes),
         cred,
-        now,
+        new Date(),
         { partNumber: String(partNumber), uploadId },
       );
       let res: Response;
@@ -248,7 +262,17 @@ export class S3Driver implements BaseDriver<{ bucket: string; etag?: string }> {
         throw s3Error(`S3 multipart part ${partNumber} failed: ${res.status} ${res.statusText}`, res.status);
       }
       const etag = res.headers.get("etag");
-      parts.push({ partNumber: partNumber++, etag: etag ?? `"${await sha256(bytes)}"` });
+      if (!etag) {
+        // Without the part's ETag the upload cannot be completed. In browsers
+        // this usually means the bucket's CORS rules do not expose `ETag`.
+        await abort();
+        throw new StorageError(
+          "provider-error",
+          `S3 multipart part ${partNumber} returned no ETag header (if uploading from a browser, add "ETag" to the bucket's CORS ExposeHeaders)`,
+          { provider: "s3" },
+        );
+      }
+      parts.push({ partNumber: partNumber++, etag });
     };
 
     try {
@@ -295,7 +319,7 @@ export class S3Driver implements BaseDriver<{ bucket: string; etag?: string }> {
         { host: complete.host },
         await sha256(xmlBytes),
         cred,
-        now,
+        new Date(),
         { uploadId },
       );
       const completeRes = await fetchWithAbort(complete.url, {
@@ -331,7 +355,7 @@ export class S3Driver implements BaseDriver<{ bucket: string; etag?: string }> {
     bytes: Uint8Array,
     metaHeaders: Record<string, string>,
     typeHeader: string,
-    baseCred: { accessKeyId: string; secretAccessKey: string },
+    baseCred: S3Credentials,
     signal?: AbortSignal,
   ): Promise<UploadResult<{ bucket: string; etag?: string }>> {
     const cred = { ...baseCred, region: this.config.region!, service: SERVICE };
@@ -379,12 +403,11 @@ export class S3Driver implements BaseDriver<{ bucket: string; etag?: string }> {
   private async abortMultipart(
     key: string,
     uploadId: string,
-    cred: { accessKeyId: string; secretAccessKey: string; region: string; service: string },
-    now: Date,
+    cred: SigV4Credentials,
   ): Promise<void> {
     try {
       const abort = buildEndpoint(this.config, key, { uploadId });
-      const headers = await sign("DELETE", abort.canonicalPath, { host: abort.host }, SHA256_EMPTY, cred, now);
+      const headers = await sign("DELETE", abort.canonicalPath, { host: abort.host }, SHA256_EMPTY, cred, new Date());
       await fetch(abort.url, { method: "DELETE", headers });
     } catch {
       // Best-effort cleanup; the original error is the important one.
@@ -406,7 +429,13 @@ export class S3Driver implements BaseDriver<{ bucket: string; etag?: string }> {
     );
 
     const response = await fetchWithAbort(url, { method: "DELETE", headers: sigHeaders }, "s3");
-    return response.ok;
+    if (!response.ok) {
+      const body = await response.text().catch(() => "");
+      throw s3Error(`S3 delete failed: ${response.status} ${response.statusText}${body ? ` — ${body}` : ""}`, response.status, body);
+    }
+    // S3 answers 204 whether or not the key existed, so `true` means
+    // "the object is gone now", not "an object was removed".
+    return true;
   }
 
   async getUrl(path: string): Promise<string> {
@@ -468,7 +497,7 @@ export class S3Driver implements BaseDriver<{ bucket: string; etag?: string }> {
   }
 }
 
-function getCredentials(config: S3DriverConfig): { accessKeyId: string; secretAccessKey: string } {
+function getCredentials(config: S3DriverConfig): S3Credentials {
   if (config.credentials) return config.credentials;
   throw new StorageError("config", "S3Driver requires credentials in config", { provider: "s3" });
 }
@@ -516,6 +545,23 @@ function s3Error(message: string, status: number, body?: string): StorageError {
   });
 }
 
+/** Resolves where the bucket lives: the origin and host to send requests to,
+ * and the path prefix (`/<bucket>` for path-style, empty for virtual-hosted). */
+function resolveBucketLocation(config: S3DriverConfig): { origin: string; host: string; prefix: string } {
+  const base = config.endpoint
+    ? new URL(config.endpoint.replace(/\/+$/, ""))
+    : new URL(`https://s3.${config.region ?? "us-east-1"}.amazonaws.com`);
+  const pathStyle = config.forcePathStyle ?? config.endpoint !== undefined;
+  // Keep any path on a custom endpoint (e.g. a reverse-proxy mount point).
+  const basePath = base.pathname.replace(/\/+$/, "");
+
+  if (pathStyle) {
+    return { origin: base.origin, host: base.host, prefix: `${basePath}/${config.bucket}` };
+  }
+  const host = `${config.bucket}.${base.host}`;
+  return { origin: `${base.protocol}//${host}`, host, prefix: basePath };
+}
+
 function buildEndpoint(
   config: S3DriverConfig,
   key: string,
@@ -524,23 +570,10 @@ function buildEndpoint(
   const encodedKey = key.split("/").map(encodeURIComponent).join("/");
   const qs = query ? buildCanonicalQueryString(query) : "";
   const suffix = qs ? `?${qs}` : "";
+  const { origin, host, prefix } = resolveBucketLocation(config);
+  const canonicalPath = `${prefix}/${encodedKey}`;
 
-  if (config.endpoint) {
-    const base = config.endpoint.replace(/\/+$/, "");
-    const host = new URL(base).host;
-    return {
-      url: `${base}/${config.bucket}/${encodedKey}${suffix}`,
-      canonicalPath: `/${config.bucket}/${encodedKey}`,
-      host,
-    };
-  }
-
-  const host = `${config.bucket}.s3.${config.region ?? "us-east-1"}.amazonaws.com`;
-  return {
-    url: `https://${host}/${encodedKey}${suffix}`,
-    canonicalPath: `/${encodedKey}`,
-    host,
-  };
+  return { url: `${origin}${canonicalPath}${suffix}`, canonicalPath, host };
 }
 
 function concatBytes(chunks: Uint8Array[], total: number): Uint8Array {
@@ -573,9 +606,6 @@ function buildCompleteXml(parts: { partNumber: number; etag: string }[]): string
 }
 
 function resolveBaseUrl(config: S3DriverConfig): string {
-  if (config.endpoint) {
-    const base = config.endpoint.replace(/\/+$/, "");
-    return `${base}/${config.bucket}`;
-  }
-  return `https://${config.bucket}.s3.${config.region ?? "us-east-1"}.amazonaws.com`;
+  const { origin, prefix } = resolveBucketLocation(config);
+  return `${origin}${prefix}`;
 }

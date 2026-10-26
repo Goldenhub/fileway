@@ -141,15 +141,16 @@ function tokenize(code: string) {
   return tokens;
 }
 
+// Theme-aware colors (github-light / github-dark), defined in app/global.css.
 const colors: Record<string, string> = {
-  keyword: "#F97583",
-  string: "#9ECBFF",
-  number: "#79B8FF",
-  class: "#B392F0",
-  operator: "#F97583",
-  punctuation: "#E1E4E8",
-  param: "#FFAB70",
-  comment: "#6A737D",
+  keyword: "text-code-keyword",
+  string: "text-code-string",
+  number: "text-code-number",
+  class: "text-code-class",
+  operator: "text-code-keyword",
+  punctuation: "text-code-base",
+  param: "text-code-param",
+  comment: "text-code-dim",
 };
 
 export function CodeBlock({
@@ -160,11 +161,11 @@ export function CodeBlock({
   dimmed?: boolean;
 }) {
   const tokens = tokenize(code);
-  const baseColor = dimmed ? "#6A737D" : "#E1E4E8";
+  const baseColor = dimmed ? "text-code-dim" : "text-code-base";
   return (
-    <code>
+    <code className={dimmed ? "opacity-70" : undefined}>
       {tokens.map((t, i) => (
-        <span key={i} style={{ color: t.type ? colors[t.type] : baseColor }}>
+        <span key={i} className={(t.type && colors[t.type]) || baseColor}>
           {t.text}
         </span>
       ))}

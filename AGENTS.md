@@ -1,4 +1,4 @@
-# AGENTS.md — AI Agent Task & Engineering Guidelines
+# AGENTS.md: AI Agent Task & Engineering Guidelines
 
 > **System Context:** You are an elite Systems Architect and Senior TypeScript Engineer assigned to build **Fileway**, an open-source, runtime-agnostic file storage engine for the JavaScript/TypeScript ecosystem.
 
@@ -122,41 +122,41 @@ export class FilewayClient<const TConfig extends FilewayConfig> {
 
 ## Implementation Roadmap & Milestones
 
-- [x] **Phase 1: Core Contract & Type Mechanics** — Implement zero-dependency core types and FilewayClient. Validate clean ESM/CJS build output via tsup.
-- [x] **Phase 2: Local & S3 Driver Implementations** — Build @fileway/local using node:fs streams. Build @fileway/s3 using @aws-sdk/lib-storage for multipart Web Stream uploads.
-- [ ] **Phase 3: Middleware Execution Pipeline** — Implement stream transformation in beforeUpload. Implement post-processing triggers in afterUpload.
-- [x] **Phase 4: Multi-Runtime Test Coverage** — Configure vitest unit tests across all sub-packages. Test compatibility on Node.js, Bun, and Edge worker environments.
-- [x] **Phase 5: Documentation & Open-Source Distribution** — Scaffold apps/docs with code-first usage examples via Fumadocs + Next.js 16. Publish @fileway workspace packages to npm (not yet done).
+- [x] **Phase 1: Core Contract & Type Mechanics**: Implement zero-dependency core types and FilewayClient. Validate clean ESM/CJS build output via tsup.
+- [x] **Phase 2: Local & S3 Driver Implementations**: Build @fileway/local using node:fs streams. Build @fileway/s3 with pure `fetch` + hand-rolled SigV4 (aws-chunked streaming for known sizes, multipart otherwise).
+- [x] **Phase 3: Middleware Execution Pipeline**: Implement stream transformation in beforeUpload. Implement post-processing triggers in afterUpload.
+- [x] **Phase 4: Multi-Runtime Test Coverage**: Configure vitest unit tests across all sub-packages. Test compatibility on Node.js, Bun, and Edge worker environments.
+- [x] **Phase 5: Documentation & Open-Source Distribution**: Scaffold apps/docs with code-first usage examples via Fumadocs + Next.js 16. Publish @fileway workspace packages to npm (not yet done).
 
 ## Cross-Runtime Refactor (Complete)
 
-- [x] **Audit Node imports** — All `node:*` imports eliminated from universal packages (`core`, `cloudinary`, `s3`). Only `local` retains `node:fs`/`node:path`/`node:stream`.
-- [x] **Refactor `cloudinary`** — Replaced `cloudinary` SDK + `Readable.fromWeb()` with pure `fetch` + `FormData` + `crypto.subtle.digest("SHA-1")`. Zero deps beyond `@fileway/core`.
-- [x] **Refactor `s3`** — Replaced `@aws-sdk/lib-storage` + `Readable.fromWeb()` with pure `fetch` + Web Crypto. SigV4 is hand-rolled; streams are sent directly as WHATWG `ReadableStream` bodies.
-- [x] **Remove edge duplicates** — `driver-cloudinary-edge` and `driver-s3-edge` deleted; their functionality is now in the universal `cloudinary` and `s3`.
-- [x] **Conditional exports** — All packages declare `worker`, `deno`, `bun`, `import`, `require` in `exports` map.
-- [x] **Edge-runtime tests** — `@fileway/core` and `@fileway/cloudinary` run vitest with `environment: "edge-runtime"` via `@edge-runtime/vm`.
-- [x] **All builds & tests pass** — 136 unit tests across 4 packages, plus 8 S3 integration tests against MinIO.
+- [x] **Audit Node imports**: All `node:*` imports eliminated from universal packages (`core`, `cloudinary`, `s3`). Only `local` retains `node:fs`/`node:path`/`node:stream`.
+- [x] **Refactor `cloudinary`**: Replaced `cloudinary` SDK + `Readable.fromWeb()` with pure `fetch` + `FormData` + `crypto.subtle.digest("SHA-1")`. Zero deps beyond `@fileway/core`.
+- [x] **Refactor `s3`**: Replaced `@aws-sdk/lib-storage` + `Readable.fromWeb()` with pure `fetch` + Web Crypto. SigV4 is hand-rolled; streams are sent directly as WHATWG `ReadableStream` bodies.
+- [x] **Remove edge duplicates**: `driver-cloudinary-edge` and `driver-s3-edge` deleted; their functionality is now in the universal `cloudinary` and `s3`.
+- [x] **Conditional exports**: All packages declare `worker`, `deno`, `bun`, `import`, `require` in `exports` map.
+- [x] **Edge-runtime tests**: `@fileway/core` and `@fileway/cloudinary` run vitest with `environment: "edge-runtime"` via `@edge-runtime/vm`.
+- [x] **All builds & tests pass**: 169 unit tests across 4 packages, plus 8 S3 integration tests against MinIO.
 
 ## Typed Error Taxonomy (Complete)
 
-- [x] **Single `StorageError`** — `packages/core/src/errors.ts` defines `StorageError` + the `StorageErrorCode` union (`validation`, `config`, `not-found`, `bucket-not-found`, `auth-failed`, `size-exceeded`, `network`, `provider-error`) with optional `statusCode`/`provider`/`cause`, `toJSON()`, and `isAbortError()`. `ValidationError` is a subclass (`code === "validation"`); aborts stay standard `DOMException`/`AbortError`.
-- [x] **All drivers throw typed errors** — S3 parses AWS/MinIO XML `<Code>` with HTTP fallback and wraps fetch failures as `network`; Cloudinary maps HTTP status by context (upload vs get); Local classifies missing files as `not-found`; missing S3 credentials and unsupported presigned-URL drivers throw `config`. Message strings unchanged (non-breaking).
-- [x] **Retry implementation** — `packages/core/src/retry.ts` exports `isRetryable(err, config)`, `sleep()`, `delayWithJitter()`; `FilewayClient` retries transient failures (`network`/`provider-error`/HTTP 429/5xx) on `delete`/`get`/`getUrl`/`getPresignedUrl` by default via `retry` config (exponential backoff + full jitter, abort-interruptible), and on `upload` only when `UploadOptions.streamFactory` re-produces the stream. Non-retryable: `validation`/`config`/`auth-failed`/`not-found`/`bucket-not-found`/`size-exceeded`/`AbortError`. Each retry logs a `warn` (`operation: "retry"`); `onError` fires only on the final failure.
+- [x] **Single `StorageError`**: `packages/core/src/errors.ts` defines `StorageError` + the `StorageErrorCode` union (`validation`, `config`, `not-found`, `bucket-not-found`, `auth-failed`, `size-exceeded`, `network`, `provider-error`) with optional `statusCode`/`provider`/`cause`, `toJSON()`, and `isAbortError()`. `ValidationError` is a subclass (`code === "validation"`); aborts stay standard `DOMException`/`AbortError`.
+- [x] **All drivers throw typed errors**: S3 parses AWS/MinIO XML `<Code>` with HTTP fallback and wraps fetch failures as `network`; Cloudinary maps HTTP status by context (upload vs get); Local classifies missing files as `not-found`; missing S3 credentials and unsupported presigned-URL drivers throw `config`. Message strings unchanged (non-breaking).
+- [x] **Retry implementation**: `packages/core/src/retry.ts` exports `isRetryable(err, config)`, `sleep()`, `delayWithJitter()`; `FilewayClient` retries transient failures (`network`/`provider-error`/HTTP 429/5xx) on `delete`/`get`/`getUrl`/`getPresignedUrl` by default via `retry` config (exponential backoff + full jitter, abort-interruptible), and on `upload` only when `UploadOptions.streamFactory` re-produces the stream. Non-retryable: `validation`/`config`/`auth-failed`/`not-found`/`bucket-not-found`/`size-exceeded`/`AbortError`. Each retry logs a `warn` (`operation: "retry"`); `onError` fires only on the final failure.
 
 ## Dependency-Free Logging & Error Hooks (Complete)
 
-- [x] **`logger`** — optional `{ debug?, info?, warn?, error? }` on `FilewayClient` config (`packages/core/src/logging.ts`). Fires `info` on every operation start/success with structured meta and `error` on failures; silent when omitted; a throwing logger never breaks the operation.
-- [x] **`onError(error, context)`** — awaited before rethrow; skipped for aborts, fires for `ValidationError`/`config`; a throwing hook never masks the original error. No logger SDK is imported anywhere (zero core deps preserved).
+- [x] **`logger`**: optional `{ debug?, info?, warn?, error? }` on `FilewayClient` config (`packages/core/src/logging.ts`). Fires `info` on every operation start/success with structured meta and `error` on failures; silent when omitted; a throwing logger never breaks the operation.
+- [x] **`onError(error, context)`**: awaited before rethrow; skipped for aborts, fires for `ValidationError`/`config`; a throwing hook never masks the original error. No logger SDK is imported anywhere (zero core deps preserved).
 
 ## Current Packages
 
 | Package | Node deps | Runtime | Tests |
 |---|---|---|---|
-| `@fileway/core` | None | Universal | 42 |
-| `@fileway/local` | `node:fs`, `node:path`, `node:stream` | Node.js, Bun | 19 |
-| `@fileway/s3` | None (pure fetch + Web Crypto SigV4) | Universal | 42 unit + 8 MinIO |
-| `@fileway/cloudinary` | None | Universal | 33 |
+| `@fileway/core` | None | Universal | 50 |
+| `@fileway/local` | `node:fs`, `node:path`, `node:stream` | Node.js, Bun | 22 |
+| `@fileway/s3` | None (pure fetch + Web Crypto SigV4) | Universal | 48 unit + 8 MinIO |
+| `@fileway/cloudinary` | None | Universal | 49 |
 
 ## Relevant Files
 

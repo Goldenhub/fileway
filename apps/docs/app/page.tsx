@@ -9,20 +9,20 @@ import { Footer } from "../components/landing/footer";
 import { SITE_NAME, SITE_DESCRIPTION, SITE_URL, GITHUB_URL, NPM_URL } from "@/lib/site";
 
 export const metadata: Metadata = {
-  title: `${SITE_NAME} — Runtime-agnostic file storage for JavaScript & TypeScript`,
+  title: `${SITE_NAME}: Runtime-agnostic file storage for JavaScript & TypeScript`,
   description: SITE_DESCRIPTION,
   alternates: { canonical: "/" },
   openGraph: {
     type: "website",
     url: SITE_URL,
-    title: `${SITE_NAME} — Runtime-agnostic file storage for JavaScript & TypeScript`,
+    title: `${SITE_NAME}: Runtime-agnostic file storage for JavaScript & TypeScript`,
     description: SITE_DESCRIPTION,
     siteName: SITE_NAME,
     locale: "en_US",
   },
   twitter: {
     card: "summary",
-    title: `${SITE_NAME} — Runtime-agnostic file storage for JavaScript & TypeScript`,
+    title: `${SITE_NAME}: Runtime-agnostic file storage for JavaScript & TypeScript`,
     description: SITE_DESCRIPTION,
   },
 };
@@ -48,7 +48,7 @@ const jsonLd = {
 
 export default function HomePage() {
   return (
-    <div className="landing-page min-h-screen font-sans">
+    <div className="min-h-screen bg-surface font-sans text-ink">
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}

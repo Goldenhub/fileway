@@ -8,14 +8,17 @@ Middleware lets you intercept and transform file uploads before they reach the d
 ## Interface
 
 ```ts
+interface BeforeUploadResult {
+  stream?: ReadableStream<Uint8Array>; // replacement stream
+  options?: UploadOptions;             // replacement options
+  size?: number;                       // byte length of the replacement stream
+}
+
 interface MiddlewareHook {
   beforeUpload?: (
     stream: ReadableStream<Uint8Array>,
     options: UploadOptions,
-  ) => Promise<
-    | { stream?: ReadableStream<Uint8Array>; options?: UploadOptions }
-    | void
-  >;
+  ) => Promise<BeforeUploadResult | void>;
   afterUpload?: (
     result: UploadResult<Record<string, unknown>>,
   ) => Promise<void>;
@@ -31,34 +34,37 @@ Return `{ stream }`, `{ options }`, both, or `undefined` to pass through unchang
 ```ts
 import { FilewayClient, MiddlewareHook } from "@fileway/core";
 
+// Fails the upload once more than 10 MB has flowed through, without
+// holding the file in memory.
 const sizeLimit: MiddlewareHook = {
   async beforeUpload(stream, options) {
-    const reader = stream.getReader();
-    const chunks: Uint8Array[] = [];
     let total = 0;
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      chunks.push(value);
-      total += value.length;
-    }
-
-    if (total > 10 * 1024 * 1024) {
-      throw new Error("File exceeds 10MB limit");
-    }
-
-    return {
-      stream: new ReadableStream({
-        start(controller) {
-          for (const chunk of chunks) controller.enqueue(chunk);
-          controller.close();
+    const limited = stream.pipeThrough(
+      new TransformStream<Uint8Array, Uint8Array>({
+        transform(chunk, controller) {
+          total += chunk.byteLength;
+          if (total > 10 * 1024 * 1024) {
+            controller.error(new Error("File exceeds 10MB limit"));
+            return;
+          }
+          controller.enqueue(chunk);
         },
       }),
-    };
+    );
+    // Bytes pass through unchanged, so the known size still holds.
+    return { stream: limited, size: options.size };
   },
 };
 ```
+
+### Keeping `options.size` correct
+
+`options.size` lets drivers stream without buffering (S3 uses it to sign the body chunk by chunk) and gives progress events a total. A replacement stream may not be the same length (compression, encryption, added headers), so **when `beforeUpload` returns a `stream`, Fileway drops the known size** unless the middleware vouches for it:
+
+- Return `size` with the new stream's byte length (or `size: options.size` when the length does not change), or
+- return `options` with a different `size`.
+
+Spreading the incoming options (`{ ...options }`) does not count, because it copies the old size whether or not it still applies. Without a size the upload still works: S3 falls back to a multipart upload and progress events report bytes without a total.
 
 ## afterUpload
 
@@ -94,7 +100,7 @@ Middleware runs in the order they are defined. All `beforeUpload` hooks execute 
 
 ```ts
 const injectMeta: MiddlewareHook = {
-  beforeUpload(_stream, options) {
+  async beforeUpload(_stream, options) {
     const timestamp = Date.now().toString();
     return {
       options: {
@@ -115,9 +121,14 @@ const injectMeta: MiddlewareHook = {
 import { FilewayClient, MiddlewareHook } from "@fileway/core";
 
 const compressor: MiddlewareHook = {
-  async beforeUpload(stream) {
+  async beforeUpload(stream, options) {
     const compressed = stream.pipeThrough(new CompressionStream("gzip"));
-    return { stream: compressed };
+    // The compressed length is unknown, so no `size` is returned and the
+    // original one is dropped.
+    return {
+      stream: compressed,
+      options: { ...options, filename: `${options.filename}.gz`, mimeType: "application/gzip" },
+    };
   },
 };
 ```

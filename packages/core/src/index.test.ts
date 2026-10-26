@@ -4,7 +4,9 @@ import type { BaseDriver, UploadOptions, UploadResult } from "./types.js";
 
 describe("version", () => {
   it("should export the current version", () => {
-    expect(version).toBe("0.0.1");
+    // Injected from package.json by tsup/vitest `define`.
+    expect(version).toMatch(/^\d+\.\d+\.\d+/);
+    expect(version).not.toBe("0.0.0-dev");
   });
 });
 
@@ -338,6 +340,111 @@ describe("FilewayClient upload progress", () => {
     expect(last.progress).toBe(1);
   });
 
+  describe("size after a middleware replaces the stream", () => {
+    const sizeRecordingDriver = () => {
+      const seen: Array<{ size: number | undefined; bytes: number }> = [];
+      const driver: BaseDriver = {
+        name: "mock",
+        upload: vi.fn(async (stream: ReadableStream<Uint8Array>, options: UploadOptions) => {
+          const bytes = (await new Response(stream).arrayBuffer()).byteLength;
+          seen.push({ size: options.size, bytes });
+          return { id: "f", url: "u", path: "p", size: bytes, meta: {} };
+        }),
+        delete: vi.fn(async () => true),
+        getUrl: vi.fn(async (p: string) => p),
+        get: vi.fn(async () => new ReadableStream<Uint8Array>()),
+      };
+      return { driver, seen };
+    };
+    const doubler = (stream: ReadableStream<Uint8Array>) =>
+      stream.pipeThrough(
+        new TransformStream<Uint8Array, Uint8Array>({
+          transform(chunk, controller) {
+            controller.enqueue(chunk);
+            controller.enqueue(chunk);
+          },
+        }),
+      );
+
+    it("drops a size the middleware did not vouch for", async () => {
+      const { driver, seen } = sizeRecordingDriver();
+      const client = new FilewayClient({
+        driver,
+        middlewares: [{ beforeUpload: async (stream) => ({ stream: doubler(stream) }) }],
+      });
+
+      await client.upload(streamOf(4), { filename: "a.txt", size: 4 });
+
+      expect(seen).toEqual([{ size: undefined, bytes: 8 }]);
+    });
+
+    it("drops the size even when the middleware spreads the old options", async () => {
+      const { driver, seen } = sizeRecordingDriver();
+      const client = new FilewayClient({
+        driver,
+        middlewares: [
+          {
+            beforeUpload: async (stream, options) => ({
+              stream: doubler(stream),
+              options: { ...options, filename: `${options.filename}.gz` },
+            }),
+          },
+        ],
+      });
+
+      await client.upload(streamOf(4), { filename: "a.txt", size: 4 });
+
+      expect(seen).toEqual([{ size: undefined, bytes: 8 }]);
+    });
+
+    it("uses the size the middleware returns for the new stream", async () => {
+      const { driver, seen } = sizeRecordingDriver();
+      const events: Array<{ total?: number }> = [];
+      const client = new FilewayClient({
+        driver,
+        middlewares: [
+          { beforeUpload: async (stream, options) => ({ stream: doubler(stream), size: (options.size ?? 0) * 2 }) },
+        ],
+      });
+
+      await client.upload(streamOf(4), { filename: "a.txt", size: 4, onProgress: (p) => events.push(p) });
+
+      expect(seen).toEqual([{ size: 8, bytes: 8 }]);
+      expect(events[events.length - 1]!.total).toBe(8);
+    });
+
+    it("keeps a new size set in the returned options", async () => {
+      const { driver, seen } = sizeRecordingDriver();
+      const client = new FilewayClient({
+        driver,
+        middlewares: [
+          {
+            beforeUpload: async (stream, options) => ({
+              stream: doubler(stream),
+              options: { ...options, size: 8 },
+            }),
+          },
+        ],
+      });
+
+      await client.upload(streamOf(4), { filename: "a.txt", size: 4 });
+
+      expect(seen).toEqual([{ size: 8, bytes: 8 }]);
+    });
+
+    it("keeps the size when only options change", async () => {
+      const { driver, seen } = sizeRecordingDriver();
+      const client = new FilewayClient({
+        driver,
+        middlewares: [{ beforeUpload: async (_stream, options) => ({ options: { ...options, path: "x" } }) }],
+      });
+
+      await client.upload(streamOf(4), { filename: "a.txt", size: 4 });
+
+      expect(seen).toEqual([{ size: 4, bytes: 4 }]);
+    });
+  });
+
   it("counts bytes after beforeUpload middleware transformation", async () => {
     const driver = consumingDriver();
     const client = new FilewayClient({
@@ -589,9 +696,10 @@ describe("isRetryable", () => {
     expect(isRetryable(abortError("aborted"))).toBe(false);
   });
 
-  it("treats generic (non-StorageError) errors as retryable by default", () => {
+  it("retries only TypeError among generic (non-StorageError) errors by default", () => {
     expect(isRetryable(new TypeError("fetch failed"))).toBe(true);
-    expect(isRetryable(new Error("boom"))).toBe(true);
+    expect(isRetryable(new Error("boom"))).toBe(false);
+    expect(isRetryable(new Error("boom"), { retryGenericErrors: true })).toBe(true);
   });
 
   it("honors retryHttpStatuses and retryGenericErrors config", () => {
@@ -696,6 +804,42 @@ describe("FilewayClient retry", () => {
     expect(factory).toHaveBeenCalledTimes(2);
   });
 
+  it("runs middleware on the original options for every retry attempt", async () => {
+    const seenPaths: Array<string | undefined> = [];
+    let attempt = 0;
+    const driver: BaseDriver = {
+      name: "mock",
+      upload: vi.fn(async (_stream, options): Promise<UploadResult<Record<string, unknown>>> => {
+        seenPaths.push(options.path);
+        if (++attempt < 3) throw new StorageError("network", "flaky", { provider: "s3" });
+        return { id: "f", url: "u", path: options.path ?? "", size: 0, meta: {} };
+      }),
+      delete: vi.fn(async () => true),
+      getUrl: vi.fn(async (p) => `u${p}`),
+      get: vi.fn(async () => new ReadableStream()),
+    };
+    const client = new FilewayClient({
+      driver,
+      middlewares: [
+        {
+          beforeUpload: async (_stream, options) => ({
+            options: { ...options, path: `tenant/${options.path ?? ""}` },
+          }),
+        },
+      ],
+      retry: { maxRetries: 5, baseDelayMs: 1, maxDelayMs: 5, jitter: false },
+    });
+
+    const result = await client.upload(streamOfBytes(1), {
+      filename: "a.txt",
+      path: "docs",
+      streamFactory: () => streamOfBytes(1),
+    });
+
+    expect(seenPaths).toEqual(["tenant/docs", "tenant/docs", "tenant/docs"]);
+    expect(result.path).toBe("tenant/docs");
+  });
+
   it("does not retry upload without streamFactory", async () => {
     const driver: BaseDriver = {
       name: "mock",
@@ -710,6 +854,44 @@ describe("FilewayClient retry", () => {
 
     await expect(client.upload(streamOfBytes(1), { filename: "a.txt" })).rejects.toMatchObject({ code: "network" });
     expect(driver.upload).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops retrying when the signal aborts during the retry delay", async () => {
+    const onError = vi.fn();
+    const driver: BaseDriver = {
+      name: "mock",
+      upload: vi.fn(async () => ({ id: "f", url: "u", path: "p", size: 0, meta: {} })),
+      delete: vi.fn(async () => {
+        throw new StorageError("network", "down", { provider: "s3" });
+      }),
+      getUrl: vi.fn(async (p) => `u${p}`),
+      get: vi.fn(async () => new ReadableStream()),
+    };
+    const client = new FilewayClient({ driver, onError, retry: { maxRetries: 5, baseDelayMs: 10_000, jitter: false } });
+    const controller = new AbortController();
+
+    const pending = client.delete("x", { signal: controller.signal });
+    setTimeout(() => controller.abort(), 10);
+
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+    expect(driver.delete).toHaveBeenCalledTimes(1);
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it("does not call the driver when the signal is already aborted", async () => {
+    const driver: BaseDriver = {
+      name: "mock",
+      upload: vi.fn(async () => ({ id: "f", url: "u", path: "p", size: 0, meta: {} })),
+      delete: vi.fn(async () => true),
+      getUrl: vi.fn(async (p) => `u${p}`),
+      get: vi.fn(async () => new ReadableStream()),
+    };
+    const client = new FilewayClient({ driver });
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(client.get("x", { signal: controller.signal })).rejects.toMatchObject({ name: "AbortError" });
+    expect(driver.get).not.toHaveBeenCalled();
   });
 
   it("emits a warn log on each retry", async () => {

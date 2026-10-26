@@ -5,7 +5,7 @@ description: Typed errors, structured logging, and error reporting hooks
 
 ## Errors
 
-Every failure from Fileway is a `StorageError` (exported from `@fileway/core`) carrying a stable, machine-readable `code` you can branch on — check `err.code`, not `err.message` or `instanceof` (which doesn't survive across realms like workers/iframes):
+Every failure from Fileway is a `StorageError` (exported from `@fileway/core`) carrying a stable, machine-readable `code` you can branch on: check `err.code`, not `err.message` or `instanceof` (which doesn't survive across realms like workers/iframes):
 
 ```ts
 import { StorageError } from "@fileway/core";
@@ -29,22 +29,22 @@ try {
 
 | Code | Meaning | Retry? |
 |------|---------|--------|
-| `validation` | Malformed input (`ValidationError` — invalid filename, size, `expiresIn`, escaping path, etc.) | Never — fix the call |
-| `config` | Driver misconfiguration (e.g. missing S3 credentials, driver lacks presigned-URL support) | Never — fix the config |
+| `validation` | Malformed input (`ValidationError`: invalid filename, size, `expiresIn`, escaping path, etc.) | Never; fix the call |
+| `config` | Driver misconfiguration (e.g. missing S3 credentials, driver lacks presigned-URL support) | Never; fix the config |
 | `not-found` | The object/asset does not exist | No |
 | `bucket-not-found` | The S3 bucket / Cloudinary cloud does not exist or is not reachable | No |
 | `auth-failed` | Invalid or expired credentials, access denied | Re-auth, then retry |
 | `size-exceeded` | Payload over the provider limit (`EntityTooLarge`, `413`) | No |
-| `network` | `fetch` failed before an HTTP response (DNS, socket, TLS, timeout) | Yes — with backoff |
-| `provider-error` | The provider returned an HTTP error without a more specific classification (e.g. 5xx) | Yes — with backoff |
+| `network` | `fetch` failed before an HTTP response (DNS, socket, TLS, timeout) | Yes, with backoff |
+| `provider-error` | The provider returned an HTTP error without a more specific classification (e.g. 5xx) | Yes, with backoff |
 
 `StorageError` also exposes:
 
-- `statusCode` — the HTTP status when the failure came from an HTTP response (404, 403, 500, …).
-- `provider` — which driver produced it: `"s3"`, `"cloudinary"`, or `"local"`.
-- `cause` — the wrapped underlying error when one exists (e.g. the original `TypeError("fetch failed")` for `network` errors).
-- `toJSON()` — serializes to `{ name, code, message, statusCode?, provider? }` for logs.
-- `isAbortError(err)` — `true` when `err` is the standard `DOMException`/`AbortError` produced by upload cancellation (a cancellation is **not** a `StorageError`).
+- `statusCode`: the HTTP status when the failure came from an HTTP response (404, 403, 500, …).
+- `provider`: which driver produced it: `"s3"`, `"cloudinary"`, or `"local"`.
+- `cause`: the wrapped underlying error when one exists (e.g. the original `TypeError("fetch failed")` for `network` errors).
+- `toJSON()`: serializes to `{ name, code, message, statusCode?, provider? }` for logs.
+- `isAbortError(err)`: `true` when `err` is the standard `DOMException`/`AbortError` produced by upload cancellation (a cancellation is **not** a `StorageError`).
 
 ### How codes are derived per driver
 
@@ -58,7 +58,7 @@ Abort signals are never wrapped: cancelling an upload rejects with a plain `DOME
 
 ## Retries
 
-Fileway retries **transient failures** automatically at the client layer — no driver changes, no manual loops. `isRetryable(err)` (exported from `@fileway/core`) decides what's worth retrying using the same rules as the client:
+Fileway retries **transient failures** automatically at the client layer: no driver changes, no manual loops. `isRetryable(err)` (exported from `@fileway/core`) decides what's worth retrying using the same rules as the client:
 
 - **Retryable:** `network`, `provider-error`, or any error carrying HTTP `429` / `5xx`.
 - **Never retried:** `validation`, `config`, `auth-failed`, `not-found`, `bucket-not-found`, `size-exceeded`, and `AbortError`.
@@ -73,7 +73,7 @@ const client = new FilewayClient({
     multiplier: 2,        // exponential backoff (default 2)
     jitter: true,         // full jitter to avoid thundering herd (default true)
     // retryHttpStatuses: [408],   // opt-in extra statuses
-    // retryGenericErrors: true,   // whether bare errors (e.g. TypeError: fetch failed) retry
+    // retryGenericErrors: true,   // retry all non-StorageError failures (default: only TypeError)
   },
 });
 ```
@@ -81,7 +81,7 @@ const client = new FilewayClient({
 ### Which operations retry
 
 - **`delete`, `get`, `getUrl`, `getPresignedUrl`** retry automatically (they're idempotent).
-- **`upload`** retries only when you pass `streamFactory`. A `ReadableStream` is consumed after one read, so without a way to re-produce the payload a failed upload can't be retried. Provide `streamFactory` to create a fresh stream per attempt — the source must be re-readable (a file path, in-memory bytes, a re-fetchable URL):
+- **`upload`** retries only when you pass `streamFactory`. A `ReadableStream` is consumed after one read, so without a way to re-produce the payload a failed upload can't be retried. Provide `streamFactory` to create a fresh stream per attempt; the source must be re-readable (a file path, in-memory bytes, a re-fetchable URL):
 
 ```ts
 const result = await client.upload(createReadStream(file), {
@@ -95,15 +95,15 @@ If `streamFactory` is absent, a failed upload throws immediately (no retry). Bec
 
 ### Backoff & logging
 
-Retries use exponential backoff with full jitter, capped at `maxDelayMs`; the wait is interruptible by an abort signal. Each retry emits a `warn`-level log (`"<operation> failed, retrying"` with `{ attempt, maxRetries, delayMs, error }`), and `onError` fires only on the **final** failure — not per attempt.
+Retries use exponential backoff with full jitter, capped at `maxDelayMs`; the wait is interruptible by an abort signal (`options.signal` on `upload`, `{ signal }` on `delete`/`get`/`getUrl`/`getPresignedUrl`). Each retry emits a `warn`-level log (`"<operation> failed, retrying"` with `{ attempt, maxRetries, delayMs, error }`), and `onError` fires only on the **final** failure, not per attempt.
 
 ### Note on breaking changes
 
-`ValidationError` is now a `StorageError` subclass, and driver messages are unchanged — existing `try/catch`, `err.message`, and `instanceof ValidationError` checks keep working. Adding the `code` field is additive.
+`ValidationError` is now a `StorageError` subclass, and driver messages are unchanged, so existing `try/catch`, `err.message`, and `instanceof ValidationError` checks keep working. Adding the `code` field is additive.
 
 ## Logging & Error Reporting
 
-Attach your own loggers and error reporters as `FilewayClient` config — no SDK, no dependencies, no adapter package. Fileway only defines a minimal contract; you adapt your tooling with a few lines.
+Attach your own loggers and error reporters as `FilewayClient` config: no SDK, no dependencies, no adapter package. Fileway only defines a minimal contract; you adapt your tooling with a few lines.
 
 ### `logger`
 
@@ -121,7 +121,7 @@ const client = new FilewayClient({
 
 Fileway calls `info` with `"upload started"` / `"upload succeeded"` (and the equivalents for `delete`, `get`, `getUrl`, `getPresignedUrl`) plus structured `meta` (`{ operation, path, filename, size, id, url, durationMs }`), and `error` on every failure. Nothing is logged when `logger` is omitted. A throwing logger is caught and never breaks the operation it is reporting on.
 
-**Pino** — its `(obj, msg)` signature is nearly compatible; adapt with a tiny wrapper:
+**Pino**: its `(obj, msg)` signature is nearly compatible; adapt with a tiny wrapper:
 
 ```ts
 import pino from "pino";
@@ -136,7 +136,7 @@ const client = new FilewayClient({
 });
 ```
 
-**Datadog / any async logger** — the contract methods are `void`, so adapt async senders by queueing or fire-and-forget (Fileway does not await `logger` methods):
+**Datadog / any async logger**: the contract methods are `void`, so adapt async senders by queueing or fire-and-forget (Fileway does not await `logger` methods):
 
 ```ts
 logger: {
@@ -147,7 +147,7 @@ logger: {
 
 ### `onError`
 
-Called (and awaited) when an operation throws — before the error is re-thrown to your caller — with the raw error and a `{ operation, durationMs, filename?, path?, mimeType?, size? }` context. Use it to report typed failures to Sentry or your own tracker:
+Called (and awaited) when an operation throws (before the error is re-thrown to your caller) with the raw error and a `{ operation, durationMs, filename?, path?, mimeType?, size? }` context. Use it to report typed failures to Sentry or your own tracker:
 
 ```ts
 import * as Sentry from "@sentry/nextjs";
@@ -173,7 +173,7 @@ const client = new FilewayClient({
 Rules:
 
 - **Aborts are not errors.** Cancelling an upload (`AbortError`) never fires `onError`.
-- **`ValidationError` and `config` errors do fire** — they're client bugs worth seeing.
+- **`ValidationError` and `config` errors do fire**: they're client bugs worth seeing.
 - A throwing `onError` is swallowed: it never masks the original error.
 - The error is **re-thrown** to your code after `onError` completes, so your existing error handling is unchanged.
 

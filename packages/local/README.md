@@ -39,7 +39,7 @@ console.log(result.path, result.size);
 
 ## Security
 
-Paths are validated against the configured `directory` — uploads that would escape it (e.g. via `path: "../..")` throw a `ValidationError`.
+Paths are validated against the configured `directory`; uploads that would escape it (e.g. via `path: "../..")` throw a `ValidationError`.
 
 ## Runtime
 

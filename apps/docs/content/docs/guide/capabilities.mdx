@@ -1,6 +1,6 @@
 ---
 title: Capabilities
-description: What Fileway supports today — a coverage matrix across drivers, plus the roadmap
+description: What Fileway supports today: a coverage matrix across drivers, plus the roadmap
 ---
 
 Fileway is intentionally minimal. This page is the overview: exactly what each driver supports today, what is currently in the works, and what you need to build yourself. Deep-dives live in the [uploads](/docs/guide/uploads), [downloads](/docs/guide/downloads), [metadata](/docs/guide/metadata), and [observability](/docs/guide/observability) guides.
@@ -13,7 +13,7 @@ Fileway is intentionally minimal. This page is the overview: exactly what each d
 | Upload cancellation (`AbortSignal`) | ✅ | ✅ | ✅ |
 | Upload progress (`onProgress`) | ✅ | ✅ | ✅ |
 | True streaming (no full buffering) | ✅ | ✅¹ | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> |
-| Multipart upload (large files) | <span style={{ color: "var(--color-fd-primary)" }}>—</span> | ✅ | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> |
+| Multipart upload (large files) | <span style={{ color: "var(--color-fd-primary)" }}>n/a</span> | ✅ | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> |
 | Public URL retrieval (`getUrl`) | ✅ | ✅ | ✅ |
 | Pre-signed URLs | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> | ✅ | ✅ |
 | Download / read-back | ✅ | ✅ | ✅ |
@@ -25,7 +25,7 @@ Fileway is intentionally minimal. This page is the overview: exactly what each d
 | TTL / expiration | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> |
 | Lifecycle rules | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> |
 
-Legend: **✅** supported today · **¹** S3 always streams with bounded memory: `aws-chunked` when the size is known, multipart when it is not (see [uploads](/docs/guide/uploads)) · **—** not applicable (streams directly to disk, no parts) · <span style={{ color: "var(--color-fd-primary)" }}>✕</span> not yet supported (in the works).
+Legend: **✅** supported today · **¹** S3 always streams with bounded memory: `aws-chunked` when the size is known, multipart when it is not (see [uploads](/docs/guide/uploads)) · **n/a** not applicable (streams directly to disk, no parts) · <span style={{ color: "var(--color-fd-primary)" }}>✕</span> not yet supported (in the works).
 
 ## Roadmap
 
@@ -39,10 +39,10 @@ Tracked alongside in the [changelog](/docs/reference/changelog).
 
 ## Where to go next
 
-- [Uploads & Streaming](/docs/guide/uploads) — streaming behavior, multipart, cancellation, progress
-- [Downloads & Retrieval](/docs/guide/downloads) — public URLs, pre-signed URLs, read-back
-- [Metadata & Lifecycle](/docs/guide/metadata) — user metadata, result metadata, tagging, expiration
-- [Observability](/docs/guide/observability) — typed errors, logging, and `onError`
-- [Middleware](/docs/guide/middleware) — transform and intercept uploads
-- [Runtimes](/docs/guide/runtimes) — where each driver runs (Node, Bun, Deno, Workers)
-- [Drivers](/docs/drivers/local) — per-driver configuration reference
+- [Uploads & Streaming](/docs/guide/uploads): streaming behavior, multipart, cancellation, progress
+- [Downloads & Retrieval](/docs/guide/downloads): public URLs, pre-signed URLs, read-back
+- [Metadata & Lifecycle](/docs/guide/metadata): user metadata, result metadata, tagging, expiration
+- [Observability](/docs/guide/observability): typed errors, logging, and `onError`
+- [Middleware](/docs/guide/middleware): transform and intercept uploads
+- [Runtimes](/docs/guide/runtimes): where each driver runs (Node, Bun, Deno, Workers)
+- [Drivers](/docs/drivers/local): per-driver configuration reference

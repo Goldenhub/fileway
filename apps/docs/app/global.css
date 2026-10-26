@@ -7,92 +7,102 @@
   --font-mono: var(--font-mono), ui-monospace, "JetBrains Mono", "Fira Code", monospace;
 }
 
-/* Override fumadocs primary to amber (always dark) */
+/*
+ * Design tokens. One set shared by the landing page and the Fumadocs docs.
+ * `brand` is Fileway amber for fills (always with dark text); `brand-ink` is
+ * the readable text/link variant (raw amber fails contrast on white);
+ * `brand-soft` is the tinted surface for active states, badges and callouts.
+ */
+@theme inline {
+  --color-brand: #ffb224;
+  --color-brand-ink: var(--brand-ink);
+  --color-brand-soft: var(--brand-soft);
+  --color-surface: var(--surface);
+  --color-surface-muted: var(--surface-muted);
+  --color-line: var(--line);
+  --color-ink: var(--ink);
+  --color-ink-muted: var(--ink-muted);
+  /* Syntax colors for the landing page's hand-rolled highlighter. */
+  --color-code-base: var(--code-base);
+  --color-code-dim: var(--code-dim);
+  --color-code-keyword: var(--code-keyword);
+  --color-code-string: var(--code-string);
+  --color-code-number: var(--code-number);
+  --color-code-class: var(--code-class);
+  --color-code-param: var(--code-param);
+}
+
 :root {
-  --color-fd-primary: rgb(255, 178, 36);
-  color-scheme: dark;
+  --brand-ink: #b45309;
+  --brand-soft: #fff7e6;
+  --surface: #ffffff;
+  --surface-muted: #fafafa;
+  --line: #e5e7eb;
+  --ink: #0a0a0a;
+  --ink-muted: #6b7280;
+
+  /* github-light */
+  --code-base: #24292e;
+  --code-dim: #6a737d;
+  --code-keyword: #d73a49;
+  --code-string: #032f62;
+  --code-number: #005cc5;
+  --code-class: #6f42c1;
+  --code-param: #e36209;
+
+  --color-fd-background: var(--surface);
+  --color-fd-foreground: var(--ink);
+  --color-fd-muted: var(--surface-muted);
+  --color-fd-muted-foreground: var(--ink-muted);
+  --color-fd-card: var(--surface);
+  --color-fd-card-foreground: var(--ink);
+  --color-fd-popover: var(--surface);
+  --color-fd-border: var(--line);
+  --color-fd-primary: var(--brand-ink);
+  --color-fd-primary-foreground: #ffffff;
+  --color-fd-secondary: var(--surface-muted);
+  --color-fd-accent: var(--brand-soft);
+  --color-fd-accent-foreground: var(--brand-ink);
+  --color-fd-ring: var(--brand-ink);
 }
 
-/* Landing page theme variables */
-.landing-page {
-  --lp-bg: #18181b;
-  --lp-surface: #0d0e12;
-  --lp-card-bg: #121318;
-  --lp-border: #27272a;
-  --lp-muted: #a1a1aa;
-  --lp-accent: #ffb224;
-  --lp-accent-dim: rgba(255, 178, 36, 0.1);
-  --lp-text: #ffffff;
-  --lp-grid: rgba(255, 255, 255, 0.03);
-  --lp-glass: rgba(9, 9, 11, 0.3);
+.dark {
+  --brand-ink: #ffb224;
+  --brand-soft: rgba(255, 178, 36, 0.12);
+  --surface: #0b0b0c;
+  --surface-muted: #141416;
+  --line: rgba(255, 255, 255, 0.09);
+  --ink: #f5f5f5;
+  --ink-muted: #a1a1aa;
+
+  /* github-dark */
+  --code-base: #e1e4e8;
+  --code-dim: #6a737d;
+  --code-keyword: #f97583;
+  --code-string: #9ecbff;
+  --code-number: #79b8ff;
+  --code-class: #b392f0;
+  --code-param: #ffab70;
+
+  --color-fd-card: var(--surface-muted);
+  --color-fd-popover: var(--surface-muted);
+  --color-fd-primary-foreground: #0a0a0a;
 }
 
-/* Subtle background grid */
-.landing-page .grid-bg {
-  background-image:
-    linear-gradient(var(--lp-grid) 1px, transparent 1px),
-    linear-gradient(90deg, var(--lp-grid) 1px, transparent 1px);
-  background-size: 60px 60px;
+/* Docs: Mintlify-style content blocks. */
+#nd-page figure.shiki,
+#nd-page [data-card] {
+  border-radius: 0.75rem;
 }
 
-/* Glow effects */
-.glow-accent {
-  box-shadow: 0 0 20px rgba(255, 178, 36, 0.15), 0 0 60px rgba(255, 178, 36, 0.05);
+#nd-sidebar a[data-active="true"] {
+  background-color: var(--brand-soft);
+  color: var(--brand-ink);
+  font-weight: 500;
 }
 
-.glow-border-accent {
-  border-color: rgba(255, 178, 36, 0.3);
-}
-
-.gradient-border {
-  position: relative;
-}
-
-.gradient-border::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  padding: 1px;
-  background: linear-gradient(135deg, var(--lp-accent), transparent);
-  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-  -webkit-mask-composite: xor;
-  mask-composite: exclude;
-  pointer-events: none;
-}
-
-/* Snake glow border animation */
-@keyframes snake {
-  from {
-    stroke-dashoffset: 0;
-  }
-
-  to {
-    stroke-dashoffset: -1000;
-  }
-}
-
-.nav-snake-glow {
-  position: relative;
-}
-
-.nav-snake-glow .snake-rect-track {
-  fill: none;
-  stroke: rgba(255, 178, 36, 0.08);
-  stroke-width: 1;
-}
-
-.nav-snake-glow .snake-rect {
-  fill: none;
-  stroke: var(--lp-accent);
-  stroke-width: 1.5;
-  stroke-dasharray: 80 920;
-  pathLength: 1000;
-  animation: snake 3s linear infinite;
-}
-
-/* Hide fumadocs sidebar on landing page */
-body:has(.landing-page) [class*="sidebar"] {
+/* A plain pill, without Fumadocs' left indicator line. */
+#nd-sidebar a[data-active="true"]::before {
   display: none;
 }
 

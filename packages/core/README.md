@@ -3,7 +3,7 @@
 [![npm version](https://img.shields.io/npm/v/@fileway/core?style=flat-square)](https://www.npmjs.com/package/@fileway/core)
 [![bundle size](https://img.shields.io/bundlephobia/minzip/@fileway/core?style=flat-square)](https://bundlephobia.com/package/@fileway/core)
 
-**Zero-dependency core of [Fileway](https://github.com/Goldenhub/fileway) — a runtime-agnostic file storage engine for JavaScript/TypeScript.**
+**Zero-dependency core of [Fileway](https://github.com/Goldenhub/fileway), a runtime-agnostic file storage engine for JavaScript/TypeScript.**
 
 `@fileway/core` provides the `FilewayClient`, the `BaseDriver` contract, and shared validation. It has no runtime dependencies and only uses platform standards: `ReadableStream<Uint8Array>`, `fetch`, `TextEncoder`. It runs on Node.js, Bun, Deno, and edge runtimes.
 
@@ -52,15 +52,15 @@ const deleted = await client.delete(result.path);
 | `options.mimeType` | `string`                     | Optional MIME type              |
 | `options.metadata` | `Record<string, string>`     | Optional metadata (driver-dependent) |
 
-Returns `UploadResult<TMeta>` — `id`, `url`, `path`, `size`, and `meta`. The `meta` shape is inferred from the driver you pass, so results stay fully typed.
+Returns `UploadResult<TMeta>`: `id`, `url`, `path`, `size`, and `meta`. The `meta` shape is inferred from the driver you pass, so results stay fully typed.
 
 ### `delete(path)`
 
-Returns `Promise<boolean>` — `true` if the file existed and was deleted.
+Returns `Promise<boolean>`: `true` when the file is gone, `false` when it did not exist. Other failures throw a `StorageError`.
 
 ### `getUrl(path)`
 
-Returns `Promise<string>` — the public URL for the file.
+Returns `Promise<string>`: the public URL for the file.
 
 ## Middleware
 

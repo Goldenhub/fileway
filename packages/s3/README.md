@@ -3,9 +3,9 @@
 [![npm version](https://img.shields.io/npm/v/@fileway/s3?style=flat-square)](https://www.npmjs.com/package/@fileway/s3)
 [![bundle size](https://img.shields.io/bundlephobia/minzip/@fileway/s3?style=flat-square)](https://bundlephobia.com/package/@fileway/s3)
 
-**S3 driver for [Fileway](https://github.com/Goldenhub/fileway) — AWS S3 and S3-compatible storage (MinIO, Cloudflare R2).**
+**S3 driver for [Fileway](https://github.com/Goldenhub/fileway): AWS S3 and S3-compatible storage (MinIO, Cloudflare R2).**
 
-Implemented with `fetch` and hand-rolled SigV4 — no AWS SDK required, so it runs on Node.js, Bun, Deno, and edge runtimes.
+Implemented with `fetch` and hand-rolled SigV4: no AWS SDK required, so it runs on Node.js, Bun, Deno, and edge runtimes.
 
 ```bash
 npm install @fileway/s3
@@ -38,9 +38,9 @@ const result = await client.upload(stream, {
 | ------------------- | ------------------------------------ | ---------------------------------------------- |
 | `bucket`            | `string`                             | Bucket name (required)                         |
 | `region`            | `string`                             | AWS region (default `us-east-1`)               |
-| `credentials`       | `{ accessKeyId, secretAccessKey }`   | AWS credentials (required)                     |
+| `credentials`       | `{ accessKeyId, secretAccessKey, sessionToken? }` | AWS credentials (required); `sessionToken` for STS/role credentials |
 | `endpoint`          | `string`                             | Custom endpoint for MinIO / R2                 |
-| `forcePathStyle`    | `boolean`                            | Use path-style URLs (`endpoint/bucket/...`) — required for MinIO |
+| `forcePathStyle`    | `boolean`                            | Use path-style URLs (`host/bucket/...`). Defaults to `true` with a custom `endpoint` |
 | `baseUrl`           | `string`                             | Public base URL (e.g. R2 custom domain)        |
 | `partSize`          | `number`                             | Multipart part size in bytes (default `8 MiB`, minimum `5 MiB`) |
 | `forceMultipart`    | `boolean`                            | Always use multipart uploads, regardless of size |
@@ -49,11 +49,11 @@ const result = await client.upload(stream, {
 
 The driver picks the S3 upload strategy automatically from `options.size`:
 
-- **Known size ≤ 5 GiB** — single `PUT` with a SigV4 `aws-chunked` body; chunks are signed lazily as the stream is read, so memory stays constant.
-- **Unknown size** — multipart upload (`CreateMultipartUpload` → `UploadPart` → `CompleteMultipartUpload`) that reads the stream into part-sized buffers (default `8 MiB`), so peak memory stays bounded.
-- **Size > 5 GiB** — multipart upload, since a single `PUT` cannot exceed 5 GiB.
+- **Known size ≤ 5 GiB**: single `PUT` with a SigV4 `aws-chunked` body; chunks are signed lazily as the stream is read, so memory stays constant.
+- **Unknown size**: multipart upload (`CreateMultipartUpload` → `UploadPart` → `CompleteMultipartUpload`) that reads the stream into part-sized buffers (default `8 MiB`), so peak memory stays bounded.
+- **Size > 5 GiB**: multipart upload, since a single `PUT` cannot exceed 5 GiB.
 
-If the stream ends before or after a declared `size`, the upload is aborted and throws a validation error — nothing is stored.
+If the stream ends before or after a declared `size`, the upload is aborted and throws a validation error, so nothing is stored.
 
 ## MinIO
 

@@ -1,122 +1,109 @@
 import { Tab, Tabs } from "fumadocs-ui/components/tabs";
-import { TrackedLink } from "./tracked-link";
+import { ArrowRight } from "lucide-react";
+import { GITHUB_URL, SITE_VERSION } from "@/lib/site";
+import { GitHubIcon } from "../brand";
+import { CodeBlock } from "../code-block";
+import { Button, WindowFrame } from "./ui";
+
+const managers = [
+  { id: "npm", cmd: "npm install @fileway/core @fileway/s3" },
+  { id: "pnpm", cmd: "pnpm add @fileway/core @fileway/s3" },
+  { id: "yarn", cmd: "yarn add @fileway/core @fileway/s3" },
+  { id: "bun", cmd: "bun add @fileway/core @fileway/s3" },
+];
+
+const snippet = `const client = new FilewayClient({
+  driver: new S3Driver({ bucket: "uploads" }),
+})
+
+const result = await client.upload(stream, {
+  filename: "report.pdf",
+})`;
+
+/** Decorative amber line-art behind the hero. */
+function HeroLines() {
+  return (
+    <svg
+      aria-hidden="true"
+      className="pointer-events-none absolute inset-x-0 top-0 -z-10 h-full w-full text-brand opacity-40 dark:opacity-25"
+      viewBox="0 0 1200 600"
+      preserveAspectRatio="xMidYMid slice"
+      fill="none"
+    >
+      {Array.from({ length: 18 }, (_, i) => (
+        <path
+          key={i}
+          d={`M ${-100 + i * 8} ${560 - i * 6} C 300 ${520 - i * 14}, 600 ${120 + i * 10}, 1300 ${40 + i * 12}`}
+          stroke="currentColor"
+          strokeWidth="1"
+          strokeOpacity={0.15 + (i % 6) * 0.06}
+        />
+      ))}
+    </svg>
+  );
+}
 
 export function Hero() {
   return (
-    <section className="relative grid-bg pt-32 pb-20 md:pt-40 md:pb-28" style={{ backgroundColor: "var(--lp-bg)" }}>
-      {/* Soft gradient glows on left and right */}
-      <div className="pointer-events-none absolute inset-0 overflow-hidden">
-        <div className="absolute left-0 top-1/2 -translate-y-1/2 h-[400px] w-[300px] opacity-20 blur-[120px] rounded-full" style={{ background: "var(--lp-accent)" }} />
-        <div className="absolute right-0 top-1/2 -translate-y-1/2 h-[400px] w-[300px] opacity-20 blur-[120px] rounded-full" style={{ background: "var(--lp-accent)" }} />
-      </div>
-      <div className="mx-auto max-w-[1200px] px-6 text-center">
-        <div
-          className="mb-8 inline-flex items-center gap-2 rounded-full border px-4 py-1.5 font-mono text-[12px] font-[500] glow-accent"
-          style={{ borderColor: "var(--lp-accent)", backgroundColor: "var(--lp-accent-dim)", color: "var(--lp-accent)" }}
-        >
-          <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: "var(--lp-accent)" }} />
-          v0.2.1 Released — Runtime Agnostic File Storage Engine
-        </div>
-
-        <h1 className="mx-auto max-w-[800px] font-sans text-[44px] font-[700] leading-[1.1] tracking-[-1.2px] md:text-[64px] md:tracking-[-1.8px]" style={{ color: "var(--lp-text)" }}>
-          One standard API for all your file storage.{" "}
-          <span className="text-[#ffb224]">
-            Zero dependencies.
-          </span>
-        </h1>
-
-        <p className="mx-auto mt-6 max-w-[600px] font-sans text-[15px] leading-[1.6] tracking-[-0.2px]" style={{ color: "var(--lp-muted)" }}>
-          Stream files effortlessly across Node.js, Cloudflare Workers, Bun, and Deno.
-          Swap between Local, S3, and Cloudinary drivers with a single line of code.
-        </p>
-
-        <div className="mt-10 flex items-center justify-center gap-4">
-          <TrackedLink
-            href="/docs"
-            event="cta_click"
-            data={{ target: "get-started" }}
-            className="inline-flex items-center rounded-md px-6 py-3 font-sans text-[14px] font-[600] text-black transition-opacity hover:opacity-90 glow-accent" style={{ backgroundColor: "var(--lp-accent)" }}
+    <section className="relative isolate overflow-hidden">
+      <HeroLines />
+      <div className="mx-auto grid max-w-6xl items-center gap-12 px-4 pt-16 pb-20 sm:px-6 md:pt-24 md:pb-28 lg:grid-cols-[1.05fr_1fr]">
+        <div>
+          <a
+            href="/docs/reference/changelog"
+            className="inline-flex items-center gap-2 rounded-full border border-line bg-surface px-3 py-1 text-xs font-medium text-ink-muted transition-colors hover:text-ink"
           >
-            Get Started
-          </TrackedLink>
-          <TrackedLink
-            href="https://github.com/Goldenhub/fileway"
-            target="_blank"
-            rel="noopener noreferrer"
-            event="cta_click"
-            data={{ target: "github" }}
-            className="inline-flex items-center gap-2 rounded-md border px-6 py-3 font-sans text-[14px] font-[500] transition-colors hover:text-white" style={{ borderColor: "var(--lp-border)", color: "var(--lp-muted)" }}
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z" />
-            </svg>
-            GitHub
-          </TrackedLink>
-        </div>
+            <span className="rounded-full bg-brand-soft px-1.5 py-0.5 font-mono text-[11px] text-brand-ink">
+              v{SITE_VERSION}
+            </span>
+            Runtime-agnostic file storage
+            <ArrowRight className="size-3" />
+          </a>
 
-        {/*<div className="mt-8 flex items-center justify-center">
-          <TrackedLink
-            href="https://www.producthunt.com/products/fileway?embed=true&utm_source=badge-featured&utm_medium=badge&utm_campaign=badge-fileway"
-            target="_blank"
-            rel="noopener noreferrer"
-            event="cta_click"
-            data={{ target: "product-hunt" }}
-          >
-            <img
-              alt="Fileway - One file storage SDK for every storage provider | Product Hunt"
-              width="250"
-              height="54"
-              src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1239466&theme=light&t=1788454137857"
-            />
-          </TrackedLink>
-        </div>*/}
+          <h1 className="mt-6 text-4xl font-semibold tracking-tight text-ink sm:text-5xl lg:text-[3.5rem] lg:leading-[1.08]">
+            One standard API for all your file storage.{" "}
+            <span className="text-brand-ink">Zero dependencies.</span>
+          </h1>
 
-        <div className="mx-auto mt-16 max-w-[560px]">
-          <div className="overflow-hidden rounded-lg border" style={{ borderColor: "var(--lp-border)", backgroundColor: "var(--lp-surface)" }}>
-            <div className="flex items-center gap-[6px] px-4 py-2.5" style={{ borderBottom: "1px solid var(--lp-border)" }}>
-              <div className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: "var(--lp-muted)" }} />
-              <div className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: "var(--lp-muted)" }} />
-              <div className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: "var(--lp-muted)" }} />
-              <span className="ml-3 font-mono text-[11px] opacity-60" style={{ color: "var(--lp-muted)" }}>install.sh</span>
-            </div>
-            <div className="p-4 text-left [&_[role=tablist]]:mb-3 [&_[role=tablist]>button]:text-[12px] [&_[role=tablist]>button]:font-mono">
-              <Tabs id="hero-install" items={["npm", "pnpm", "yarn", "bun"]}>
-                <Tab value="npm">
-                  <div className="flex items-center gap-2">
-                    <span className="font-mono text-[13px] opacity-50" style={{ color: "var(--lp-muted)" }}>$</span>
-                    <code className="font-mono text-[14px]" style={{ color: "var(--lp-text)" }}>
-                      npm install @fileway/core @fileway/s3
-                    </code>
-                  </div>
-                </Tab>
-                <Tab value="pnpm">
-                  <div className="flex items-center gap-2">
-                    <span className="font-mono text-[13px] opacity-50" style={{ color: "var(--lp-muted)" }}>$</span>
-                    <code className="font-mono text-[14px]" style={{ color: "var(--lp-text)" }}>
-                      pnpm add @fileway/core @fileway/s3
-                    </code>
-                  </div>
-                </Tab>
-                <Tab value="yarn">
-                  <div className="flex items-center gap-2">
-                    <span className="font-mono text-[13px] opacity-50" style={{ color: "var(--lp-muted)" }}>$</span>
-                    <code className="font-mono text-[14px]" style={{ color: "var(--lp-text)" }}>
-                      yarn add @fileway/core @fileway/s3
-                    </code>
-                  </div>
-                </Tab>
-                <Tab value="bun">
-                  <div className="flex items-center gap-2">
-                    <span className="font-mono text-[13px] opacity-50" style={{ color: "var(--lp-muted)" }}>$</span>
-                    <code className="font-mono text-[14px]" style={{ color: "var(--lp-text)" }}>
-                      bun add @fileway/core @fileway/s3
-                    </code>
-                  </div>
-                </Tab>
-              </Tabs>
-            </div>
+          <p className="mt-6 max-w-xl text-lg leading-relaxed text-ink-muted">
+            Stream files effortlessly across Node.js, Cloudflare Workers, Bun, and Deno. Swap between Local, S3, and
+            Cloudinary drivers with a single line of code.
+          </p>
+
+          <div className="mt-8 flex flex-wrap items-center gap-3">
+            <Button href="/docs" event="cta_click" data={{ target: "get-started" }}>
+              Get started <ArrowRight className="size-4" />
+            </Button>
+            <Button
+              href={GITHUB_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              event="cta_click"
+              data={{ target: "github" }}
+              variant="secondary"
+            >
+              <GitHubIcon /> GitHub
+            </Button>
           </div>
         </div>
+
+        <WindowFrame title="upload.ts" className="min-w-0 shadow-xl shadow-black/5">
+          <div className="border-b border-line px-4 pt-3 [&_[role=tablist]]:gap-1 [&_[role=tablist]]:border-0 [&_[role=tablist]]:bg-transparent [&_[role=tablist]]:p-0 [&_[role=tabpanel]]:bg-transparent [&_[role=tabpanel]]:p-0 [&>div]:my-0 [&>div]:rounded-none [&>div]:border-0 [&>div]:bg-transparent">
+            <Tabs id="hero-install" items={managers.map((m) => m.id)}>
+              {managers.map((m) => (
+                <Tab key={m.id} value={m.id}>
+                  <div className="flex items-center gap-2 overflow-x-auto py-3 font-mono text-sm">
+                    <span className="select-none text-ink-muted">$</span>
+                    <code className="whitespace-nowrap text-ink">{m.cmd}</code>
+                  </div>
+                </Tab>
+              ))}
+            </Tabs>
+          </div>
+          <pre className="overflow-x-auto p-4 font-mono text-[13px] leading-relaxed">
+            <CodeBlock code={snippet} />
+          </pre>
+        </WindowFrame>
       </div>
     </section>
   );

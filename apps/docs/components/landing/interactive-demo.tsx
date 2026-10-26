@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { CodeBlock } from "../code-block";
+import { Section, SectionHeading, WindowFrame } from "./ui";
 
 const drivers = [
   {
@@ -60,7 +61,7 @@ const client = new FilewayClient({
   }),
 })
 
-// Identical interface — only driver config changes
+// Identical interface; only the driver config changes
 const result = await client.upload(stream, {
   filename: "profile.jpg",
 })`,
@@ -90,69 +91,45 @@ const result = await client.upload(stream, {
 
 export function InteractiveDemo() {
   const [active, setActive] = useState(0);
+  const driver = drivers[active] ?? drivers[0]!;
 
   return (
-    <section className="border-y py-20" style={{ borderColor: "var(--lp-border)", backgroundColor: "var(--lp-surface)" }}>
-      <div className="mx-auto max-w-[1200px] px-6">
-        <div className="text-center">
-          <p className="font-mono text-[12px] font-[500] uppercase tracking-[1px]" style={{ color: "var(--lp-accent)" }}>
-            One Client. Any Driver.
-          </p>
-          <h2 className="mt-3 font-sans text-[32px] font-[700] tracking-[-0.8px] md:text-[40px] md:tracking-[-1px]" style={{ color: "var(--lp-text)" }}>
-            Switch backends — not your code
-          </h2>
-          <p className="mx-auto mt-4 max-w-[520px] font-sans text-[14px] leading-[1.6]" style={{ color: "var(--lp-muted)" }}>
-            The <code className="font-mono text-[13px]" style={{ color: "var(--lp-text)" }}>FilewayClient</code> API never changes.
-            Only the driver config. Full TypeScript inference adapts to each driver&apos;s metadata.
-          </p>
-        </div>
+    <Section id="drivers-demo" className="border-y border-line bg-surface-muted">
+      <SectionHeading eyebrow="One client. Any driver." title="Switch backends, not your code">
+        The <code className="font-mono text-sm text-ink">FilewayClient</code>{" "}API never changes. Only the driver
+        config. Full TypeScript inference adapts to each driver&apos;s metadata.
+      </SectionHeading>
 
-        <div className="mx-auto mt-14 max-w-[800px] overflow-hidden rounded-lg border" style={{ borderColor: "var(--lp-border)", backgroundColor: "var(--lp-bg)" }}>
-          <div className="flex" style={{ borderBottom: "1px solid var(--lp-border)" }}>
-            {drivers.map((d, i) => (
-              <button
-                key={d.id}
-                onClick={() => setActive(i)}
-                className="flex-1 px-4 py-3 font-mono text-[12px] font-[500] transition-colors"
-                style={{
-                  borderBottom: i === active ? "2px solid var(--lp-accent)" : "2px solid transparent",
-                  backgroundColor: i === active ? "var(--lp-card-bg)" : "transparent",
-                  color: i === active ? "var(--lp-text)" : "var(--lp-muted)",
-                }}
-                onMouseEnter={(e) => { if (i !== active) e.currentTarget.style.backgroundColor = "var(--lp-card-bg)"; }}
-                onMouseLeave={(e) => { if (i !== active) e.currentTarget.style.backgroundColor = "transparent"; }}
-              >
+      <div className="mt-12 grid gap-6 lg:grid-cols-[260px_1fr]">
+        <div role="tablist" aria-label="Drivers" className="flex gap-2 overflow-x-auto lg:flex-col">
+          {drivers.map((d, i) => (
+            <button
+              key={d.id}
+              type="button"
+              role="tab"
+              aria-selected={i === active}
+              onClick={() => setActive(i)}
+              className="shrink-0 rounded-xl border border-transparent px-4 py-3 text-left transition-colors hover:bg-surface aria-selected:border-line aria-selected:bg-surface lg:shrink"
+            >
+              <span className={`block text-sm font-medium ${i === active ? "text-brand-ink" : "text-ink"}`}>
                 {d.label}
-              </button>
-            ))}
-          </div>
-          <div className="flex flex-col md:flex-row">
-            <div className="p-5 md:w-[240px]" style={{ borderRight: "1px solid var(--lp-border)", borderBottom: "1px solid var(--lp-border)" }}>
-              <p className="font-mono text-[11px] font-[500] uppercase tracking-[0.5px]" style={{ color: "var(--lp-muted)" }}>
-                Driver Info
-              </p>
-              <p className="mt-3 font-sans text-[14px] font-[500]" style={{ color: "var(--lp-text)" }}>
-                {drivers[active]?.label}
-              </p>
-              <p className="mt-1 font-sans text-[13px] leading-[1.5]" style={{ color: "var(--lp-muted)" }}>
-                {drivers[active]?.description}
-              </p>
-            </div>
-            <div className="flex-1 p-5">
-              <pre className="overflow-x-auto font-mono text-[13px] leading-[1.7]">
-                <CodeBlock code={drivers[active]?.code ?? ""} />
-              </pre>
-            </div>
-          </div>
+              </span>
+              <span className="mt-0.5 hidden text-xs leading-relaxed text-ink-muted lg:block">{d.description}</span>
+            </button>
+          ))}
         </div>
 
-        <div className="mt-6 text-center">
-          <p className="font-mono text-[12px]" style={{ color: "var(--lp-muted)" }}>
-            <span className="inline-block h-2 w-2 rounded-full mr-1.5" style={{ backgroundColor: "var(--lp-accent)" }} />
-            Full TypeScript inference — your IDE knows exactly what each driver returns
-          </p>
-        </div>
+        <WindowFrame title={`${driver.id}.ts`} className="min-w-0">
+          <pre role="tabpanel" className="overflow-x-auto p-5 font-mono text-[13px] leading-relaxed">
+            <CodeBlock code={driver.code} />
+          </pre>
+        </WindowFrame>
       </div>
-    </section>
+
+      <p className="mt-6 flex items-center gap-2 text-sm text-ink-muted">
+        <span className="size-1.5 rounded-full bg-brand" />
+        Full TypeScript inference: your IDE knows exactly what each driver returns
+      </p>
+    </Section>
   );
 }

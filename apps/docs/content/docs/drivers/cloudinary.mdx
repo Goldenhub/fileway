@@ -3,7 +3,7 @@ title: Cloudinary Driver
 description: Upload files to Cloudinary media CDN
 ---
 
-Uploads files to Cloudinary using pure `fetch`, `FormData`, and Web Crypto signatures. Zero Node dependencies — works on any runtime.
+Uploads files to Cloudinary using pure `fetch`, `FormData`, and Web Crypto signatures. Zero Node dependencies, so it works on any runtime.
 
 ```ts
 import { FilewayClient } from "@fileway/core";
@@ -31,11 +31,14 @@ console.log(result.meta.width, result.meta.height);
 
 | Option | Type | Default | Description |
 |---|---|---|---|
-| `cloudName` | `string` | — | Cloudinary cloud name |
-| `apiKey` | `string` | — | Cloudinary API key |
-| `apiSecret` | `string` | — | Cloudinary API secret |
-| `defaultFolder` | `string` | — | Default upload folder |
-| `maxSizeBytes` | `number` | — | Maximum allowed upload size in bytes (rejected before API call) |
+| `cloudName` | `string` | Required | Cloudinary cloud name |
+| `apiKey` | `string` | Required | Cloudinary API key |
+| `apiSecret` | `string` | Required | Cloudinary API secret |
+| `defaultFolder` | `string` | None | Default upload folder |
+| `maxSizeBytes` | `number` | None | Maximum allowed upload size in bytes (enforced while streaming; throws `size-exceeded`) |
+| `chunkSize` | `number` | `20 MiB` | Chunk size for chunked uploads (clamped to a 5 MiB minimum). Files up to this size go up in one request. |
+| `cacheSize` | `number` | `1000` | Max public IDs whose resource type/version/format are cached in memory (least recently used evicted first) |
+| `deliveryType` | `"upload" \| "authenticated" \| "private"` | `"upload"` | Delivery type for new uploads, and the type assumed when a lookup finds none (see [Delivery types](#delivery-types)) |
 
 ## Metadata
 
@@ -47,10 +50,41 @@ console.log(result.meta.width, result.meta.height);
 | `meta.version` | `number` | Asset version |
 | `meta.format` | `string` | File format |
 | `meta.resourceType` | `"image" \| "video" \| "raw"` | Resource type |
+| `meta.deliveryType` | `"upload" \| "authenticated" \| "private"` | Delivery type the asset was stored with |
 | `meta.bytes` | `number` | File size |
 | `meta.secureUrl` | `string` | HTTPS URL |
 | `meta.width` | `number \| undefined` | Image width |
 | `meta.height` | `number \| undefined` | Image height |
+
+## Delivery types
+
+Cloudinary assets are stored with one of three delivery types:
+
+| Type | Who can fetch the original |
+|---|---|
+| `upload` (default) | Anyone with the URL. |
+| `authenticated` | Only via a signed URL. Transformed versions need one too. |
+| `private` | Only via a signed URL. Transformed versions are public. |
+
+Set the type for every upload in the driver config, or per upload:
+
+```ts
+const driver = new CloudinaryDriver({ cloudName, apiKey, apiSecret, deliveryType: "authenticated" });
+
+// or per upload, overriding the driver default
+await client.upload(stream, { filename: "contract.pdf", deliveryType: "private" });
+```
+
+The other methods follow the asset's delivery type automatically, using the same resolution chain as resource types (`deliveryType` hint → upload cache → Admin API lookup → driver default):
+
+- `getUrl` returns a plain CDN URL for `upload` assets and a **signed** URL for `authenticated`/`private` ones, since Cloudinary refuses unsigned requests for those. Signed URLs do not expire; use `getPresignedUrl` for links that should.
+- `get` streams through that same URL.
+- `delete` calls `/resources/{resourceType}/{deliveryType}`.
+- `getPresignedUrl` passes the type to the download API.
+
+The same public ID can exist under several delivery types. Pass `{ deliveryType }` to `getUrl`, `get`, `delete`, `getPresignedUrl` or `getSignedUrl` to choose one; the Admin API lookup is then filtered by that type.
+
+`meta.secureUrl` is the URL Cloudinary returned, which is unsigned for `authenticated`/`private` assets; use `getUrl` instead.
 
 ## URL Format
 
@@ -62,16 +96,16 @@ https://res.cloudinary.com/{cloudName}/{resourceType}/upload/v{version}/{publicI
 
 The resource type (`image`, `video`, or `raw`) and version are resolved in this order:
 
-1. **Explicit hint** — `getUrl(publicId, { resourceType, version })` skips all lookups.
-2. **Upload cache** — assets uploaded through this driver instance are tracked from the upload response.
-3. **Admin API lookup** — one `resources/search` request (Basic auth) for public IDs the instance hasn't seen, e.g. assets uploaded by another service or before a restart. The result is cached for subsequent calls, and the returned `secure_url` is used verbatim when available.
-4. **`image` default** — when nothing else matches, the URL is built assuming an image resource type.
+1. **Explicit hint**: `getUrl(publicId, { resourceType, version })` skips all lookups.
+2. **Upload cache**: assets uploaded through this driver instance are tracked from the upload response.
+3. **Admin API lookup**: one `resources/search` request (Basic auth) for public IDs the instance hasn't seen, e.g. assets uploaded by another service or before a restart. The result is cached for subsequent calls, and the returned `secure_url` is used verbatim when available.
+4. **`image` default**: when nothing else matches, the URL is built assuming an image resource type.
 
 Because a Cloudinary public ID does not encode its resource type, `getUrl`/`delete` of a video or raw asset uploaded outside this instance would otherwise silently build an incorrect `/image/` URL or fail to delete. The Admin lookup resolves those cases without any caller cooperation.
 
 ## Download
 
-Stream an asset back from the CDN with `get(publicId, options?)` — it fetches the asset's public URL and returns the response body as a WHATWG `ReadableStream<Uint8Array>`:
+Stream an asset back from the CDN with `get(publicId, options?)`: it fetches the asset's public URL and returns the response body as a WHATWG `ReadableStream<Uint8Array>`:
 
 ```ts
 const stream = await client.get(result.meta.publicId);
@@ -80,26 +114,31 @@ const bytes = new Uint8Array(await new Response(stream).arrayBuffer());
 
 The optional `options` argument is the same `{ resourceType, version }` hint used by `getUrl`.
 
-`stream` is a WHATWG `ReadableStream<Uint8Array>`, so you can also pipe it straight to its destination (`stream.pipeTo(writable)`) with no buffering. Use `.arrayBuffer()`/`.blob()` for binary files — `.text()` would decode binary data as UTF-8 and corrupt it.
+`stream` is a WHATWG `ReadableStream<Uint8Array>`, so you can also pipe it straight to its destination (`stream.pipeTo(writable)`) with no buffering. Use `.arrayBuffer()`/`.blob()` for binary files, because `.text()` would decode binary data as UTF-8 and corrupt it.
 
 Throws with the HTTP status on a non-2xx response (e.g. 404 for a missing asset).
 
 ## Presigned URLs
 
-`getPresignedUrl(publicId, { expiresIn, deliveryType })` returns a Cloudinary signed delivery URL valid until `expiresIn` seconds from now:
+`getPresignedUrl(publicId, { expiresIn, deliveryType })` returns a signed private download URL that stops working `expiresIn` seconds from now:
 
 ```ts
 const url = await client.getPresignedUrl(result.meta.publicId, { expiresIn: 300 });
-// https://res.cloudinary.com/demo/image/upload/s--BUKMRPuV--/v123/sample?expires_at=...
+// https://api.cloudinary.com/v1_1/demo/image/download?public_id=sample&format=png&type=upload&expires_at=...&signature=...
 ```
 
-- The signature is the first 8 characters of a URL-safe base64 `SHA-1` digest of the resource path (everything after the `s--` component, e.g. `v123/sample`) concatenated with the API secret. It is generated purely with Web Crypto — no SDK and no network call. `expiresIn` defaults to `3600` and must be a positive integer.
-- The URL uses the same resolution chain as `getUrl` (`{ resourceType, version }` hints, upload cache, Admin API lookup) to pick the correct `resource_type` and `version` for the signed path.
-- **Security caveat:** the signature only restricts access for assets with `authenticated` or `private` delivery — pass `deliveryType: "authenticated"` (or `"private"`) for those. `CloudinaryDriver.upload` creates public `upload` assets, so the default signed URL resolves but does not restrict anything (the asset is already public). The `deliveryType` must match the asset's actual delivery type or Cloudinary returns 404.
+- It uses Cloudinary's private download API, which enforces `expires_at` for every delivery type. Delivery URLs on `res.cloudinary.com` cannot expire unless token-based authentication (a premium Cloudinary feature) is enabled.
+- The signature is a hex `SHA-1` of the sorted parameters plus the API secret, generated with Web Crypto: no SDK and no network call. `expiresIn` defaults to `3600` and must be a positive integer.
+- The URL uses the same resolution chain as `getUrl` (`{ resourceType, version, format }` hints, upload cache, Admin API lookup) to pick the correct `resource_type` and `format`.
+- The delivery type is resolved like the resource type (see [Delivery types](#delivery-types)); pass `deliveryType` to override it. It must match the asset's delivery type or Cloudinary returns 404.
+
+### Signed delivery URLs
+
+`CloudinaryDriver.getSignedUrl(publicId, { deliveryType })` returns a signed `res.cloudinary.com` URL (`/s--SIG--/` component: the first 8 characters of a URL-safe base64 `SHA-1` of the version, public ID and extension, plus the API secret). It is required for `authenticated`/`private` assets (`getUrl` returns it automatically for those) and **does not expire**; use `getPresignedUrl` for time-limited links.
 
 ## Delete
 
-`delete(publicId, options?)` removes an asset via the Cloudinary Admin API, using the same resolution chain as `getUrl` to pick the correct `resource_type` path (`/resources/{type}/upload`). Returns `true` only when Cloudinary confirms the deletion, and `false` when the asset is unknown or the request fails.
+`delete(publicId, options?)` removes an asset via the Cloudinary Admin API, using the same resolution chain as `getUrl` to pick the correct `resource_type` path (`/resources/{type}/upload`). Returns `true` when Cloudinary confirms the deletion and `false` when the asset does not exist. Any other failure (auth, network, rate limit, outage, including a failed Admin API lookup) throws a `StorageError`.
 
 ## Cancellation
 
@@ -130,16 +169,16 @@ try {
 }
 ```
 
-Note: the source stream is buffered into a `Blob` before the API call (required
-to compute the SHA-1 signature), so cancellation takes effect during the network
-request rather than while reading the stream.
+Cancellation takes effect both while reading the source stream and during each
+chunk's network request. A partially uploaded chunked upload is discarded by
+Cloudinary.
 
 ## Progress
 
 Pass `onProgress` to receive `{ bytes, total?, progress? }` as the stream is
-buffered for signing. Cloudinary's upload `fetch` itself exposes no progress, so
-events track this local buffering phase (with `options.size`, `progress` reaches
-exactly `1` once the `Blob` is ready):
+read. Events track bytes leaving the source stream; for chunked uploads each
+chunk is sent as soon as it is read, so progress follows the upload closely
+(with `options.size`, `progress` reaches exactly `1` at the end):
 
 ```ts
 const result = await client.upload(stream, {
@@ -153,14 +192,14 @@ const result = await client.upload(stream, {
 
 ## Errors
 
-All failures are `StorageError`s from `@fileway/core` (see the [error reference](/docs/guide/observability#errors) for the full contract — codes, `statusCode`, `provider`, `cause`, and `isAbortError`). For this driver:
+All failures are `StorageError`s from `@fileway/core` (see the [error reference](/docs/guide/observability#errors) for the full contract: codes, `statusCode`, `provider`, `cause`, and `isAbortError`). For this driver:
 
 | Code | When |
 |------|------|
-| `validation` | Malformed input: missing/oversized `filename`, path separators, absolute `path`, null bytes, malformed `mimeType`, upload size exceeding `maxSizeBytes`, non-positive `expiresIn`. |
-| `auth-failed` | HTTP 401/403 — invalid or expired `apiKey`/`apiSecret`, or restricted permissions. |
-| `bucket-not-found` | Upload-time HTTP 404 — the cloud does not exist. |
-| `not-found` | Download-time HTTP 404 — the asset does not exist at the CDN URL. |
-| `size-exceeded` | HTTP 413. |
+| `validation` | Malformed input: missing/oversized `filename`, path separators, absolute `path`, null bytes, malformed `mimeType`, non-positive `expiresIn`. |
+| `auth-failed` | HTTP 401/403: invalid or expired `apiKey`/`apiSecret`, or restricted permissions. |
+| `bucket-not-found` | Upload-time HTTP 404: the cloud does not exist. |
+| `not-found` | Download-time HTTP 404: the asset does not exist at the CDN URL. |
+| `size-exceeded` | Upload size exceeding `maxSizeBytes`, or HTTP 413. |
 | `network` | `fetch` failed before an HTTP response; the original error is preserved as `cause`. Safe to retry. |
 | `provider-error` | Any other non-2xx response (e.g. HTTP 500). Safe to retry. |

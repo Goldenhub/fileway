@@ -41,6 +41,8 @@ async function deriveKey(secret: string, date: string, region: string, service: 
 export interface SigV4Credentials {
   accessKeyId: string;
   secretAccessKey: string;
+  /** Session token for temporary (STS) credentials; signed as `x-amz-security-token`. */
+  sessionToken?: string;
   region: string;
   service: string;
 }
@@ -81,6 +83,7 @@ async function computeSignature(
     host: headers["host"] ?? "",
     "x-amz-content-sha256": bodyHash,
     "x-amz-date": amzDate,
+    ...(cred.sessionToken !== undefined ? { "x-amz-security-token": cred.sessionToken } : {}),
     ...headers,
   };
 
@@ -102,12 +105,17 @@ async function computeSignature(
   return { amzDate, scope, signedHeaders, signingKey, signature };
 }
 
+function securityTokenHeader(cred: SigV4Credentials): Record<string, string> {
+  return cred.sessionToken !== undefined ? { "x-amz-security-token": cred.sessionToken } : {};
+}
+
 export async function sign(method: string, path: string, headers: Record<string, string>, bodyHash: string, cred: SigV4Credentials, date: Date, query?: Record<string, string>): Promise<Record<string, string>> {
   const { amzDate, scope, signedHeaders, signature } = await computeSignature(method, path, headers, bodyHash, cred, date, query);
 
   return {
     "x-amz-date": amzDate,
     "x-amz-content-sha256": bodyHash,
+    ...securityTokenHeader(cred),
     authorization: `AWS4-HMAC-SHA256 Credential=${cred.accessKeyId}/${scope}, SignedHeaders=${signedHeaders}, Signature=${signature}`,
   };
 }
@@ -140,6 +148,7 @@ export async function presignUrl(
     "X-Amz-Credential": `${cred.accessKeyId}/${scope}`,
     "X-Amz-Date": amzDate,
     "X-Amz-Expires": String(expiresIn),
+    ...(cred.sessionToken !== undefined ? { "X-Amz-Security-Token": cred.sessionToken } : {}),
     "X-Amz-SignedHeaders": "host",
   };
 
@@ -195,6 +204,7 @@ export async function signStreamingRequest(
       "x-amz-decoded-content-length": String(decodedContentLength),
       "x-amz-content-sha256": STREAMING_AWS4_HMAC_SHA256_PAYLOAD,
       "x-amz-date": amzDate,
+      ...securityTokenHeader(cred),
       authorization: `AWS4-HMAC-SHA256 Credential=${cred.accessKeyId}/${scope}, SignedHeaders=${signedHeaders}, Signature=${signature}`,
     },
     seedSignature: signature,

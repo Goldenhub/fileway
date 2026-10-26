@@ -5,14 +5,14 @@
 [![bundle size](https://img.shields.io/bundlephobia/minzip/@fileway/core?style=flat-square)](https://bundlephobia.com/package/@fileway/core)
 [![license](https://img.shields.io/npm/l/@fileway/core?style=flat-square)](https://github.com/Goldenhub/fileway/blob/main/LICENSE)
 
-**Fileway is a runtime-agnostic file storage engine for JavaScript/TypeScript.** One standard API for every storage provider and every runtime — with zero core dependencies.
+**Fileway is a runtime-agnostic file storage engine for JavaScript/TypeScript.** One standard API for every storage provider and every runtime, with zero core dependencies.
 
-Instead of learning a different SDK for S3, Cloudinary, and local disk — and fighting Node-specific shims on every edge runtime — Fileway gives you one typed API. Upload a WHATWG `ReadableStream<Uint8Array>`, get back a typed result. Swap drivers by changing **one line of code**. No rewrites. No provider lock-in.
+Instead of learning a different SDK for S3, Cloudinary, and local disk (and fighting Node-specific shims on every edge runtime), Fileway gives you one typed API. Upload a WHATWG `ReadableStream<Uint8Array>`, get back a typed result. Swap drivers by changing **one line of code**. No rewrites. No provider lock-in.
 
-- **Node.js 20+**, **Cloudflare Workers**, **Bun**, and **Deno 2** — the same code, everywhere.
-- **Zero core dependencies.** `@fileway/core` ships with no runtime deps. The S3 driver is pure `fetch` + Web Crypto — no AWS SDK, no shims.
-- **Real streaming** via `ReadableStream<Uint8Array>` — no whole-file buffering. Local disk streams to disk with backpressure; S3 streams with per-chunk SigV4 signing when the size is known and bounded-memory multipart uploads when it is not.
-- **Type inference** — every driver returns its own metadata shape automatically.
+- **Node.js 20+**, **Cloudflare Workers**, **Bun**, and **Deno 2**: the same code, everywhere.
+- **Zero core dependencies.** `@fileway/core` ships with no runtime deps. The S3 driver is pure `fetch` + Web Crypto, with no AWS SDK and no shims.
+- **Real streaming** via `ReadableStream<Uint8Array>`: no whole-file buffering. Local disk streams to disk with backpressure; S3 streams with per-chunk SigV4 signing when the size is known and bounded-memory multipart uploads when it is not.
+- **Type inference**: every driver returns its own metadata shape automatically.
 
 ---
 
@@ -21,7 +21,7 @@ Instead of learning a different SDK for S3, Cloudinary, and local disk — and f
 | Package | Description | Runtime deps | Node | Workers | Bun | Deno |
 | --- | --- | --- | :-: | :-: | :-: | :-: |
 | `@fileway/core` | Client engine, types, middleware | **Zero** | ✅ | ✅ | ✅ | ✅ |
-| `@fileway/local` | Local filesystem | `node:fs` | ✅ | — | ✅ | ✅ |
+| `@fileway/local` | Local filesystem | `node:fs` | ✅ | n/a | ✅ | ✅ |
 | `@fileway/s3` | AWS S3, MinIO, Cloudflare R2 | **Zero** *(pure `fetch` + Web Crypto)* | ✅ | ✅ | ✅ | ✅ |
 | `@fileway/cloudinary` | Cloudinary | **Zero** *(pure `fetch` + Web Crypto)* | ✅ | ✅ | ✅ | ✅ |
 
@@ -53,7 +53,7 @@ console.log(result.path); // <uuid>.txt
 console.log(result.size); // 15
 ```
 
-**Move to S3 with one line.** Same client, same call — only the driver changes:
+**Move to S3 with one line.** Same client, same call; only the driver changes:
 
 ```ts
 import { S3Driver } from "@fileway/s3";
@@ -154,11 +154,11 @@ npx wrangler secret put AWS_SECRET_ACCESS_KEY
 npx wrangler dev
 ```
 
-Cloudflare **R2** is S3-compatible — keep this exact code, just point `S3Driver` at your R2 endpoint (`region: "auto"`, `endpoint: "https://<ACCOUNT_ID>.r2.cloudflarestorage.com"`).
+Cloudflare **R2** is S3-compatible: keep this exact code, just point `S3Driver` at your R2 endpoint (`region: "auto"`, `endpoint: "https://<ACCOUNT_ID>.r2.cloudflarestorage.com"`).
 
 ### Bun
 
-Identical to Node.js — Fileway runs on Bun's built-in `node:fs` and WHATWG streams:
+Identical to Node.js: Fileway runs on Bun's built-in `node:fs` and WHATWG streams:
 
 ```ts
 import { FilewayClient } from "@fileway/core";
@@ -224,9 +224,9 @@ Files flow as WHATWG `ReadableStream<Uint8Array>` through the `FilewayClient`:
 stream ──▶ middleware.beforeUpload ──▶ driver.upload ──▶ middleware.afterUpload ──▶ UploadResult
 ```
 
-- **Core is dependency-free** — `@fileway/core` has no runtime dependencies at all.
-- **Universal drivers** — `s3` and `cloudinary` contain zero `node:*` imports. SigV4 signing uses Web Crypto (`crypto.subtle`); uploads use platform `fetch`. That's why they run on Workers, Bun, Deno, and Node alike.
-- **Local is server-only** — `local` uses `node:fs` streams and guards against path traversal.
+- **Core is dependency-free**: `@fileway/core` has no runtime dependencies at all.
+- **Universal drivers**: `s3` and `cloudinary` contain zero `node:*` imports. SigV4 signing uses Web Crypto (`crypto.subtle`); uploads use platform `fetch`. That's why they run on Workers, Bun, Deno, and Node alike.
+- **Local is server-only**: `local` uses `node:fs` streams and guards against path traversal.
 
 ## AWS SDK comparison
 
@@ -234,8 +234,8 @@ stream ──▶ middleware.beforeUpload ──▶ driver.upload ──▶ middl
 | --- | --- | --- |
 | Runtime dependencies | 1 (`@fileway/core`, itself zero-dep) | ~30 transitive packages |
 | Bundle size | **~2 KB** min+gzip | ~85 KB min+gzip |
-| Cloudflare Workers | Native — pure `fetch` + Web Crypto | Requires Node built-in shims/polyfills |
-| Deno / Bun | Native | Partial — needs Node compatibility |
+| Cloudflare Workers | Native (pure `fetch` + Web Crypto) | Requires Node built-in shims/polyfills |
+| Deno / Bun | Native | Partial (needs Node compatibility) |
 | Upload body | WHATWG `ReadableStream<Uint8Array>` | Node stream / `Buffer` internals |
 | Setup | One driver, one `upload()` call | Service client, command classes, middleware config |
 | Result typing | Inferred per driver (`meta.bucket`, `meta.etag`) | Manual typing of `PutObjectOutput` |
@@ -276,7 +276,7 @@ const client = new FilewayClient({
 | `@fileway/cloudinary` | `npm i @fileway/cloudinary` | `cloudName`, `apiKey`, `apiSecret` |
 
 ```ts
-// S3 — AWS, MinIO, or Cloudflare R2
+// S3: AWS, MinIO, or Cloudflare R2
 const aws = new S3Driver({
   bucket: "my-bucket",
   region: "us-east-1",
@@ -319,9 +319,9 @@ const cloudinary = new CloudinaryDriver({
 | `options.metadata` | `Record<string, string>` | Optional metadata |
 | `options.size` | `number` | Optional known byte size. For `S3Driver`, a known size ≤ 5 GiB enables bounded-memory `aws-chunked` streaming (no full buffering); unknown sizes or files > 5 GiB stream with bounded memory via multipart upload. |
 | `options.signal` | `AbortSignal` | Optional `AbortSignal` to cancel an in-flight upload. Drivers reject with a `DOMException` named `AbortError` (via `abortError()` from `@fileway/core`); Local unlinks partial files and S3 aborts orphaned multipart sessions. |
-| `options.onProgress` | `(p: UploadProgress) => void` | Optional progress callback: `{ bytes, total?, progress? }`. Fires as chunks flow through the stream — significant chunks (≥ 256 KiB or ≥ 5% of `total`) report immediately, smaller chunks coalesce to ~1 event per 100 ms, and an exact final event always fires. `total`/`progress` are present only when `options.size` is known. |
+| `options.onProgress` | `(p: UploadProgress) => void` | Optional progress callback: `{ bytes, total?, progress? }`. Fires as chunks flow through the stream: significant chunks (≥ 256 KiB or ≥ 5% of `total`) report immediately, smaller chunks coalesce to ~1 event per 100 ms, and an exact final event always fires. `total`/`progress` are present only when `options.size` is known. |
 
-Returns `UploadResult<TMeta>` — `{ id, url, path, size, meta }` where `meta` is inferred from the driver.
+Returns `UploadResult<TMeta>`: `{ id, url, path, size, meta }` where `meta` is inferred from the driver.
 
 ### Errors
 
@@ -333,26 +333,26 @@ import { StorageError, isAbortError } from "@fileway/core";
 try {
   await client.get("uploads/report.pdf");
 } catch (err) {
-  if (isAbortError(err)) return; // cancelled — not an error
+  if (isAbortError(err)) return; // cancelled, not an error
   if (err instanceof StorageError) {
     switch (err.code) {
       case "not-found": // 404 / NoSuchKey / missing local file
       case "bucket-not-found": // NoSuchBucket
       case "auth-failed": // 401/403, bad credentials
       case "size-exceeded": // EntityTooLarge / 413
-      case "network": // fetch failed before a response — safe to retry
-      case "provider-error": // 5xx etc. — safe to retry
+      case "network": // fetch failed before a response; safe to retry
+      case "provider-error": // 5xx etc.; safe to retry
     }
     console.error(`${err.provider}:${err.code}`, err.message, err.statusCode);
   }
 }
 ```
 
-`code` is one of `validation` (`ValidationError` is a `StorageError` subclass), `config`, `not-found`, `bucket-not-found`, `auth-failed`, `size-exceeded`, `network`, `provider-error`. Cancellation is not a `StorageError` — it rejects with the standard `DOMException`/`AbortError` that `isAbortError()` recognizes. See the [Error handling guide](apps/docs/content/docs/guide/observability.mdx) for the per-driver code derivation.
+`code` is one of `validation` (`ValidationError` is a `StorageError` subclass), `config`, `not-found`, `bucket-not-found`, `auth-failed`, `size-exceeded`, `network`, `provider-error`. Cancellation is not a `StorageError`; it rejects with the standard `DOMException`/`AbortError` that `isAbortError()` recognizes. See the [Error handling guide](apps/docs/content/docs/guide/observability.mdx) for the per-driver code derivation.
 
 ### Logging & error reporting
 
-Attach your own loggers and error reporters with zero extra dependencies — Fileway only defines a minimal, dependency-free contract:
+Attach your own loggers and error reporters with zero extra dependencies: Fileway only defines a minimal, dependency-free contract:
 
 ```ts
 const client = new FilewayClient({
@@ -369,41 +369,42 @@ const client = new FilewayClient({
 });
 ```
 
-- `logger` — optional `{ debug?, info?, warn?, error? }`; receives `"<operation> started/succeeded"` `info` events (with `{ operation, path, filename, size, id, url, durationMs }`) and `error` on failures. Silent when omitted. Never breaks the operation (a throwing logger is caught). Adapt Pino/Datadog with a few lines — see the [Logging guide](apps/docs/content/docs/guide/observability.mdx).
-- `onError` — optional `(error, context) => void | Promise<void>`; awaited on every failure before the error is rethrown, with `{ operation, durationMs, filename?, path?, mimeType?, size? }`. Aborts are skipped; `ValidationError`/`config` errors fire. A throwing `onError` never masks the original error.
+- `logger`: optional `{ debug?, info?, warn?, error? }`; receives `"<operation> started/succeeded"` `info` events (with `{ operation, path, filename, size, id, url, durationMs }`) and `error` on failures. Silent when omitted. Never breaks the operation (a throwing logger is caught). Adapt Pino/Datadog with a few lines; see the [Logging guide](apps/docs/content/docs/guide/observability.mdx).
+- `onError`: optional `(error, context) => void | Promise<void>`; awaited on every failure before the error is rethrown, with `{ operation, durationMs, filename?, path?, mimeType?, size? }`. Aborts are skipped; `ValidationError`/`config` errors fire. A throwing `onError` never masks the original error.
 
 ### `client.get(path)` / `client.delete(path)` / `client.getUrl(path)` / `client.getPresignedUrl(path, options)`
 
-- `get(path)` returns a WHATWG `ReadableStream<Uint8Array>` for streaming the stored file back — pull-based with backpressure, never buffered whole. Throws when `path` does not exist.
-- `delete(path)` returns `Promise<boolean>`.
+- `get(path)` returns a WHATWG `ReadableStream<Uint8Array>` for streaming the stored file back: pull-based with backpressure, never buffered whole. Throws when `path` does not exist.
+- `delete(path)` returns `Promise<boolean>`: `false` only when the file does not exist; other failures throw a `StorageError`.
+- Each of these accepts an optional `{ signal }` that cancels the call and any pending retries.
 - `getUrl(path)` returns the public URL for a stored path.
-- `getPresignedUrl(path, { expiresIn })` returns a time-limited, signed download URL on `S3Driver` (SigV4 query-string) and `CloudinaryDriver` (signed delivery URL). S3's `expiresIn` defaults to `3600` seconds and must be an integer in `1..604800` (AWS's 7-day cap); Cloudinary's must be a positive integer and defaults to `3600` — invalid values throw a `ValidationError`. Cloudinary signatures only restrict access for `authenticated`/`private` assets (see its driver docs). Drivers that cannot presign throw a clear error.
+- `getPresignedUrl(path, { expiresIn })` returns a time-limited, signed download URL on `S3Driver` (SigV4 query-string) and `CloudinaryDriver` (signed private download URL). S3's `expiresIn` defaults to `3600` seconds and must be an integer in `1..604800` (AWS's 7-day cap); Cloudinary's must be a positive integer and defaults to `3600`; invalid values throw a `ValidationError`. Drivers that cannot presign throw a clear error.
 
 ---
 
 ## Roadmap
 
-**Toward v1.0.0** (see the [v1 release note](CHANGELOG.md#upcoming--v100)):
+**Toward v1.0.0** (see the [v1 release note](CHANGELOG.md#upcoming-v100)):
 
-- [x] Streaming S3 uploads with per-chunk SigV4 signing (`aws-chunked`) — pass `options.size` to enable
-- [x] Bounded-memory multipart uploads for S3 — automatic when the size is unknown or the object exceeds 5 GiB (`partSize`, `forceMultipart`)
-- [x] Streaming downloads — `get(path)` returns a `ReadableStream<Uint8Array>` on every driver
-- [x] Upload cancellation — `options.signal` on every driver; aborted uploads reject with `AbortError` (Local cleans up partial files, S3 aborts multipart sessions)
-- [x] Upload progress — `options.onProgress` reports bytes streamed on every driver, with exact final totals when `size` is known
-- [x] Presigned URLs — `getPresignedUrl(path, { expiresIn })` issues time-limited, signed download links for S3 (SigV4, works with MinIO/R2 endpoints) and Cloudinary (signed delivery URLs)
-- [x] Typed errors — every failure is a `StorageError` from `@fileway/core` with a stable `code` (`not-found`, `auth-failed`, `network`, `provider-error`, …) plus `statusCode`/`provider`/`cause`; `ValidationError` is a subclass and aborts stay `AbortError`
-- [x] Logging & error hooks — optional `logger` (Pino-style `{ debug, info, warn, error }`) and `onError` (Sentry/Datadog) config on `FilewayClient`, zero dependencies, aborts excluded
-- [ ] Stream transformation in `beforeUpload` middlewares
-- [ ] Retries with exponential backoff (on `network`/`provider-error` codes)
+- [x] Streaming S3 uploads with per-chunk SigV4 signing (`aws-chunked`): pass `options.size` to enable
+- [x] Bounded-memory multipart uploads for S3: automatic when the size is unknown or the object exceeds 5 GiB (`partSize`, `forceMultipart`)
+- [x] Streaming downloads: `get(path)` returns a `ReadableStream<Uint8Array>` on every driver
+- [x] Upload cancellation: `options.signal` on every driver; aborted uploads reject with `AbortError` (Local cleans up partial files, S3 aborts multipart sessions)
+- [x] Upload progress: `options.onProgress` reports bytes streamed on every driver, with exact final totals when `size` is known
+- [x] Presigned URLs: `getPresignedUrl(path, { expiresIn })` issues time-limited, signed download links for S3 (SigV4, works with MinIO/R2 endpoints) and Cloudinary (expiring private download URLs)
+- [x] Typed errors: every failure is a `StorageError` from `@fileway/core` with a stable `code` (`not-found`, `auth-failed`, `network`, `provider-error`, …) plus `statusCode`/`provider`/`cause`; `ValidationError` is a subclass and aborts stay `AbortError`
+- [x] Logging & error hooks: optional `logger` (Pino-style `{ debug, info, warn, error }`) and `onError` (Sentry/Datadog) config on `FilewayClient`, zero dependencies, aborts excluded
+- [x] Stream transformation in `beforeUpload` middlewares: return a replacement `stream` (plus its `size`, when known)
+- [x] Retries with exponential backoff (on `network`/`provider-error` codes and HTTP 429/5xx): `retry` config on `FilewayClient`
 
 **Planned drivers:** Cloudflare R2 (native), Google Cloud Storage, Backblaze B2, Azure Blob Storage, DigitalOcean Spaces (S3-compatible).
 
 ## Community
 
-- 💬 **Ask questions & share ideas** — [GitHub Discussions](https://github.com/Goldenhub/fileway/discussions)
-- 🐛 **Report a bug** — open an [issue](https://github.com/Goldenhub/fileway/issues)
-- ⭐ **Star the repo** to show support — it drives discovery
-- 📦 **npm org** — [`@fileway` on npm](https://www.npmjs.com/org/fileway)
+- 💬 **Ask questions & share ideas**: [GitHub Discussions](https://github.com/Goldenhub/fileway/discussions)
+- 🐛 **Report a bug**: open an [issue](https://github.com/Goldenhub/fileway/issues)
+- ⭐ **Star the repo** to show support; it drives discovery
+- 📦 **npm org**: [`@fileway` on npm](https://www.npmjs.com/org/fileway)
 
 Contributions welcome: fork, branch off `main`, and open a PR. CI runs typecheck, unit tests, and MinIO integration tests on every push.
 
@@ -417,7 +418,7 @@ Every push to `main` and every pull request runs [`.github/workflows/ci.yml`](.g
 
 ### Releasing
 
-Releases are fully automated. Bump, tag, push — GitHub publishes all four packages to npm:
+Releases are fully automated. Bump, tag, push, and GitHub publishes all four packages to npm:
 
 ```bash
 pnpm -r version patch   # bumps all packages (0.0.5 -> 0.0.6)

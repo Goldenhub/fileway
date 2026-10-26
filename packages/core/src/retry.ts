@@ -21,9 +21,10 @@ export function isRetryable(err: unknown, config?: RetryConfig): boolean {
     return false;
   }
 
-  // Plain `TypeError: fetch failed` (non-StorageError network failures) are
-  // treated as retryable unless the caller opts out explicitly.
-  return config?.retryGenericErrors ?? true;
+  // Non-StorageError failures: by default only a `TypeError` (what `fetch`
+  // throws on a network failure) is retried, so a bug in user code such as
+  // middleware surfaces immediately instead of after several backoffs.
+  return config?.retryGenericErrors ?? err instanceof TypeError;
 }
 
 /** Resolves after `ms` milliseconds, unless `signal` aborts first. */

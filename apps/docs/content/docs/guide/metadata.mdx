@@ -42,5 +42,5 @@ Each driver returns its own typed metadata:
 **In the works.** TTL/expiration on uploads and lifecycle rule management are being added to the core contract.
 
 - **S3 lifecycle rules** (e.g. "delete after 30 days") are bucket-level configuration and are not yet exposed by Fileway. Configure them in the AWS console, Terraform, or via the AWS SDK directly.
-- **Cloudinary** supports automatic deletion via signed URLs with `expires_at`; wiring this in is in the works.
+- **Cloudinary** has no automatic expiry for stored assets; `getPresignedUrl` limits how long a *link* works, not how long the asset is kept.
 - **Local** has no built-in cleanup yet; a scheduled sweep is in the works.

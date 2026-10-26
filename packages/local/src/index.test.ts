@@ -68,6 +68,22 @@ describe("LocalDriver", () => {
     expect(existsSync(result.meta.localPath)).toBe(false);
   });
 
+  it("should reject uploads over maxSizeBytes with size-exceeded and remove the partial file", async () => {
+    const limited = new LocalDriver({ directory: tmpDir, maxSizeBytes: 3 });
+    const stream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode("too big"));
+        controller.close();
+      },
+    });
+
+    await expect(limited.upload(stream, { filename: "big.txt" })).rejects.toMatchObject({
+      code: "size-exceeded",
+      provider: "local",
+    });
+    expect(readdirSync(tmpDir)).toEqual([]);
+  });
+
   it("should return false when deleting non-existent file", async () => {
     const result = await driver.delete("nonexistent.txt");
     expect(result).toBe(false);
@@ -212,15 +228,34 @@ describe("LocalDriver", () => {
     await expect(driver.get("../storage2/secret.txt")).rejects.toThrow(/escapes/);
   });
 
-  it("should return false on delete with escaping path and preserve sibling file", async () => {
+  it("should reject delete with an escaping path and preserve sibling file", async () => {
     const sibling = join(tmpDir, "../storage2");
     mkdirSync(sibling, { recursive: true });
     writeFileSync(join(sibling, "secret.txt"), "sensitive");
 
-    const deleted = await driver.delete("../storage2/secret.txt");
-
-    expect(deleted).toBe(false);
+    await expect(driver.delete("../storage2/secret.txt")).rejects.toMatchObject({ code: "validation" });
     expect(existsSync(join(sibling, "secret.txt"))).toBe(true);
+  });
+
+  it("should reject delete through a symlinked directory", async () => {
+    const outside = mkdtempSync(join(tmpdir(), "fileway-outside-"));
+    writeFileSync(join(outside, "keep.txt"), "keep");
+    symlinkSync(outside, join(tmpDir, "link"));
+    try {
+      await expect(driver.delete("link/keep.txt")).rejects.toThrow(/symbolic link/);
+      expect(existsSync(join(outside, "keep.txt"))).toBe(true);
+    } finally {
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("should throw a StorageError when delete fails for a reason other than a missing file", async () => {
+    mkdirSync(join(tmpDir, "a-directory"));
+
+    await expect(driver.delete("a-directory")).rejects.toMatchObject({
+      code: "provider-error",
+      provider: "local",
+    });
   });
 
   it("should reject upload through a symlinked directory", async () => {

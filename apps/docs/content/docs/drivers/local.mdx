@@ -26,14 +26,14 @@ const result = await client.upload(stream, {
 
 ## Download
 
-Stream a stored file back from disk with `get(path)` — it returns a WHATWG `ReadableStream<Uint8Array>`:
+Stream a stored file back from disk with `get(path)`: it returns a WHATWG `ReadableStream<Uint8Array>`:
 
 ```ts
 const stream = await client.get("users/123/avatars/photo.jpg");
 const bytes = new Uint8Array(await new Response(stream).arrayBuffer());
 ```
 
-`stream` is a WHATWG `ReadableStream<Uint8Array>`, so you can also pipe it straight to its destination (`stream.pipeTo(writable)`) with no buffering. Use `.arrayBuffer()`/`.blob()` for binary files — `.text()` would decode binary data as UTF-8 and corrupt it.
+`stream` is a WHATWG `ReadableStream<Uint8Array>`, so you can also pipe it straight to its destination (`stream.pipeTo(writable)`) with no buffering. Use `.arrayBuffer()`/`.blob()` for binary files, because `.text()` would decode binary data as UTF-8 and corrupt it.
 
 Throws if the file does not exist or if `path` escapes the configured `directory`.
 
@@ -62,14 +62,14 @@ try {
   await upload;
 } catch (err) {
   if (err instanceof DOMException && err.name === "AbortError") {
-    // cancelled — no partial file was left behind
+    // cancelled; no partial file was left behind
   }
 }
 ```
 
 ## Progress
 
-Pass `onProgress` to receive `{ bytes, total?, progress? }` as bytes are written to disk — with `options.size` set, `progress` reaches exactly `1` when the file is fully flushed:
+Pass `onProgress` to receive `{ bytes, total?, progress? }` as bytes are written to disk; with `options.size` set, `progress` reaches exactly `1` when the file is fully flushed:
 
 ```ts
 const result = await client.upload(stream, {
@@ -85,9 +85,9 @@ const result = await client.upload(stream, {
 
 | Option | Type | Default | Description |
 |---|---|---|---|
-| `directory` | `string` | — | Root directory for stored files |
+| `directory` | `string` | Required | Root directory for stored files |
 | `baseUrl` | `string` | `file://{directory}` | Base URL for generated URLs |
-| `maxSizeBytes` | `number` | — | Maximum allowed upload size in bytes (stream aborted if exceeded) |
+| `maxSizeBytes` | `number` | None | Maximum allowed upload size in bytes (stream aborted if exceeded) |
 
 ## Metadata
 
@@ -99,9 +99,11 @@ const result = await client.upload(stream, {
 
 ## Errors
 
-All failures are `StorageError`s from `@fileway/core` (see the [error reference](/docs/guide/observability#errors) for the full contract — codes, `statusCode`, `provider`, `cause`, and `isAbortError`). For this driver:
+All failures are `StorageError`s from `@fileway/core` (see the [error reference](/docs/guide/observability#errors) for the full contract: codes, `statusCode`, `provider`, `cause`, and `isAbortError`). For this driver:
 
 | Code | When |
 |------|------|
-| `validation` | Malformed input: missing/oversized `filename`, path separators, absolute `path`, null bytes, malformed `mimeType`, upload size exceeding `maxSizeBytes`, path traversal (a path escaping the configured `directory`). |
+| `validation` | Malformed input: missing/oversized `filename`, path separators, absolute `path`, null bytes, malformed `mimeType`, path traversal (a path escaping the configured `directory`) or a symlink in the path. |
+| `size-exceeded` | Upload size exceeding `maxSizeBytes` (the partial file is removed). |
 | `not-found` | `get()` for a file that does not exist. |
+| `provider-error` | `delete()` failed for a reason other than a missing file (e.g. permissions); the original error is preserved as `cause`. |
