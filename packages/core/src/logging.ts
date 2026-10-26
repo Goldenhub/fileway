@@ -8,6 +8,7 @@ export type Operation =
   | "get"
   | "getUrl"
   | "getPresignedUrl"
+  | "getUploadStatus"
   | "retry";
 
 /**

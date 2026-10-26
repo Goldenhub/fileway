@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { FilewayClient, version, abortError, isAbortError, StorageError, ValidationError, isRetryable } from "./index.js";
-import type { BaseDriver, UploadOptions, UploadResult } from "./types.js";
+import type { BaseDriver, StoredObject, UploadOptions, UploadResult } from "./types.js";
 
 describe("version", () => {
   it("should export the current version", () => {
@@ -115,7 +115,12 @@ describe("FilewayClient", () => {
 
     await client.upload(stream, options);
 
-    expect(driver.upload).toHaveBeenCalledWith(stream, options);
+    // The client adds a stable id and a per-call token to the caller's options.
+    expect(driver.upload).toHaveBeenCalledWith(stream, {
+      ...options,
+      id: expect.stringMatching(/^[0-9a-f-]{36}$/),
+      uploadToken: expect.stringMatching(/^[0-9a-f-]{36}$/),
+    });
   });
 
   it("should run middlewares in order", async () => {
@@ -915,5 +920,294 @@ describe("FilewayClient retry", () => {
       "delete failed, retrying",
       expect.objectContaining({ operation: "retry", attempt: 1, maxRetries: 3, delayMs: expect.any(Number) }),
     );
+  });
+});
+
+describe("lost-response recovery and upload status", () => {
+  const bytes = (n: number) =>
+    new ReadableStream<Uint8Array>({
+      start(c) {
+        c.enqueue(new Uint8Array(n));
+        c.close();
+      },
+    });
+
+  /**
+   * A driver backed by an in-memory store. With `loseResponses`, the first
+   * uploads are stored but then fail as if the response never arrived.
+   */
+  function storeDriver({ loseResponses = 0, keepsTokens = true } = {}) {
+    const store = new Map<string, StoredObject>();
+    const pending = new Set<string>();
+    let lost = 0;
+    const pathFor = (o: UploadOptions & { id: string }) => `${o.path ? `${o.path}/` : ""}${o.id}-${o.filename}`;
+    const driver = {
+      name: "store",
+      store,
+      pending,
+      upload: vi.fn(async (stream: ReadableStream<Uint8Array>, o: UploadOptions) => {
+        const size = (await new Response(stream).arrayBuffer()).byteLength;
+        const path = pathFor({ ...o, id: o.id! });
+        const object: StoredObject = {
+          id: o.id!,
+          url: `mem://${path}`,
+          path,
+          size,
+          meta: {},
+          ...(keepsTokens && o.uploadToken ? { uploadToken: o.uploadToken } : {}),
+        };
+        store.set(path, object);
+        if (lost < loseResponses) {
+          lost++;
+          throw new TypeError("fetch failed");
+        }
+        return { id: object.id, url: object.url, path, size, meta: {} };
+      }),
+      delete: vi.fn(async () => true),
+      getUrl: vi.fn(async (p: string) => p),
+      get: vi.fn(async () => new ReadableStream<Uint8Array>()),
+      pathFor,
+      head: vi.fn(async (p: string) => store.get(p) ?? null),
+      isPending: vi.fn(async (p: string) => pending.has(p)),
+    } satisfies BaseDriver & Record<string, unknown>;
+    return driver;
+  }
+  const fastRetry = { maxRetries: 3, baseDelayMs: 1, maxDelayMs: 2, jitter: false };
+
+  it("returns the stored object instead of re-uploading when the response is lost", async () => {
+    const driver = storeDriver({ loseResponses: 1 });
+    const after = vi.fn(async () => {});
+    const info = vi.fn();
+    const client = new FilewayClient({
+      driver,
+      middlewares: [{ afterUpload: after }],
+      logger: { info },
+      retry: fastRetry,
+    });
+
+    // No streamFactory: before, this failed even though the file was stored.
+    const result = await client.upload(bytes(5), { filename: "a.txt", size: 5 });
+
+    expect(driver.upload).toHaveBeenCalledTimes(1);
+    expect(driver.store.size).toBe(1);
+    expect(result.size).toBe(5);
+    expect(result).not.toHaveProperty("uploadToken");
+    expect(after).toHaveBeenCalledTimes(1);
+    expect(info).toHaveBeenCalledWith("upload recovered after lost response", expect.objectContaining({ id: result.id }));
+  });
+
+  it("uses the same id and token on every attempt", async () => {
+    const driver = storeDriver();
+    driver.head.mockResolvedValue(null); // nothing stored: force real retries
+    let calls = 0;
+    driver.upload.mockImplementation(async (_s, o) => {
+      if (++calls < 3) throw new StorageError("network", "flaky", { provider: "store" });
+      return { id: o.id!, url: "u", path: "p", size: 0, meta: {} };
+    });
+    const client = new FilewayClient({ driver, retry: fastRetry });
+
+    await client.upload(bytes(1), { filename: "a.txt", streamFactory: () => bytes(1) });
+
+    const seen = driver.upload.mock.calls.map(([, o]) => [o.id, o.uploadToken]);
+    expect(seen).toHaveLength(3);
+    expect(new Set(seen.map(([id]) => id)).size).toBe(1);
+    expect(new Set(seen.map(([, t]) => t)).size).toBe(1);
+  });
+
+  it("keeps a caller-supplied id", async () => {
+    const driver = storeDriver();
+    const client = new FilewayClient({ driver });
+
+    const result = await client.upload(bytes(1), { filename: "a.txt", id: "invoice_42" });
+
+    expect(result.id).toBe("invoice_42");
+    expect(driver.upload.mock.calls[0]![1].id).toBe("invoice_42");
+  });
+
+  it("does not accept an object left by an older upload with the same id", async () => {
+    const driver = storeDriver();
+    driver.store.set("invoice_42-a.txt", {
+      id: "invoice_42", url: "old", path: "invoice_42-a.txt", size: 5, meta: {}, uploadToken: "someone-else",
+    });
+    driver.upload.mockRejectedValue(new TypeError("fetch failed"));
+    const client = new FilewayClient({ driver, retry: fastRetry });
+
+    await expect(client.upload(bytes(5), { filename: "a.txt", id: "invoice_42", size: 5 })).rejects.toThrow("fetch failed");
+  });
+
+  it("does not accept an object of the wrong size", async () => {
+    const driver = storeDriver({ loseResponses: 1 });
+    driver.head.mockImplementation(async (p: string) => ({ ...driver.store.get(p)!, size: 3 }));
+    const client = new FilewayClient({ driver, retry: fastRetry });
+
+    await expect(client.upload(bytes(5), { filename: "a.txt", size: 5 })).rejects.toThrow("fetch failed");
+  });
+
+  it("accepts a token-less object (drivers that cannot store tokens) when the size matches", async () => {
+    const driver = storeDriver({ loseResponses: 1, keepsTokens: false });
+    const client = new FilewayClient({ driver, retry: fastRetry });
+
+    await expect(client.upload(bytes(4), { filename: "a.txt", size: 4 })).resolves.toMatchObject({ size: 4 });
+    expect(driver.upload).toHaveBeenCalledTimes(1);
+  });
+
+  it("rethrows the original error when the status check itself fails", async () => {
+    const driver = storeDriver({ loseResponses: 1 });
+    driver.head.mockRejectedValue(new StorageError("auth-failed", "denied"));
+    const client = new FilewayClient({ driver, retry: fastRetry });
+
+    await expect(client.upload(bytes(1), { filename: "a.txt" })).rejects.toThrow("fetch failed");
+  });
+
+  it("rejects an invalid id", async () => {
+    const client = new FilewayClient({ driver: storeDriver() });
+    await expect(client.upload(bytes(1), { filename: "a.txt", id: "../escape" })).rejects.toThrow(ValidationError);
+  });
+
+  it("reports complete, pending and missing uploads", async () => {
+    const driver = storeDriver();
+    const client = new FilewayClient({ driver });
+    await client.upload(bytes(2), { filename: "a.txt", path: "docs", id: "done" });
+    driver.pending.add("docs/busy-a.txt");
+
+    await expect(client.getUploadStatus("done", { filename: "a.txt", path: "docs" })).resolves.toMatchObject({
+      state: "complete",
+      object: { path: "docs/done-a.txt", size: 2 },
+    });
+    await expect(client.getUploadStatus("busy", { filename: "a.txt", path: "docs" })).resolves.toEqual({ state: "pending" });
+    await expect(client.getUploadStatus("nope", { filename: "a.txt" })).resolves.toEqual({ state: "missing" });
+  });
+
+  it("reports unsupported for drivers without status methods", async () => {
+    const driver: BaseDriver = {
+      name: "plain",
+      upload: vi.fn(async () => ({ id: "f", url: "u", path: "p", size: 0, meta: {} })),
+      delete: vi.fn(async () => true),
+      getUrl: vi.fn(async (p: string) => p),
+      get: vi.fn(async () => new ReadableStream<Uint8Array>()),
+    };
+    const client = new FilewayClient({ driver });
+    await expect(client.getUploadStatus("x", { filename: "a.txt" })).resolves.toEqual({ state: "unsupported" });
+  });
+});
+
+describe("retry.idleTimeoutMs", () => {
+  const chunk = () => new Uint8Array(4);
+  const quickRetry = { maxRetries: 2, baseDelayMs: 1, maxDelayMs: 2, jitter: false };
+  /** A stream that sends `count` chunks, `gapMs` apart. */
+  const trickle = (count: number, gapMs: number) => {
+    let sent = 0;
+    return new ReadableStream<Uint8Array>({
+      async pull(c) {
+        if (sent === count) return c.close();
+        await new Promise((r) => setTimeout(r, gapMs));
+        sent++;
+        c.enqueue(chunk());
+      },
+    });
+  };
+  const okResult = (o: UploadOptions): UploadResult<Record<string, unknown>> => ({
+    id: o.id!, url: "u", path: "p", size: 0, meta: {},
+  });
+  const baseDriver = (upload: BaseDriver["upload"]): BaseDriver => ({
+    name: "mock",
+    upload: vi.fn(upload),
+    delete: vi.fn(async () => true),
+    getUrl: vi.fn(async (p: string) => p),
+    get: vi.fn(async () => new ReadableStream<Uint8Array>()),
+  });
+  /** Never finishes on its own; rejects with AbortError when its signal aborts. */
+  const hang = (o: UploadOptions) =>
+    new Promise<never>((_, reject) => {
+      o.signal?.addEventListener("abort", () => reject(abortError("aborted")), { once: true });
+    });
+
+  it("cancels a hung attempt and retries it", async () => {
+    let calls = 0;
+    const driver = baseDriver(async (stream, o) => {
+      calls++;
+      if (calls === 1) return hang(o);
+      await new Response(stream).arrayBuffer();
+      return okResult(o);
+    });
+    const warn = vi.fn();
+    const client = new FilewayClient({ driver, logger: { warn }, retry: { ...quickRetry, idleTimeoutMs: 40 } });
+
+    const result = await client.upload(trickle(1, 0), { filename: "a.bin", streamFactory: () => trickle(1, 0) });
+
+    expect(calls).toBe(2);
+    expect(result.id).toBeDefined();
+    expect(warn).toHaveBeenCalledWith(
+      "upload failed, retrying",
+      expect.objectContaining({ error: expect.objectContaining({ message: expect.stringMatching(/timed out after 40 ms/) }) }),
+    );
+  });
+
+  it("does not cut off an upload that is slow but still moving", async () => {
+    const driver = baseDriver(async (stream, o) => {
+      await new Response(stream).arrayBuffer(); // 8 chunks, 25 ms apart: ~200 ms total
+      return okResult(o);
+    });
+    const client = new FilewayClient({ driver, retry: { ...quickRetry, idleTimeoutMs: 80 } });
+
+    await expect(client.upload(trickle(8, 25), { filename: "a.bin" })).resolves.toBeDefined();
+    expect(driver.upload).toHaveBeenCalledTimes(1);
+  });
+
+  it("times out waiting for the reply after the body is sent, as a retryable network error", async () => {
+    const driver = baseDriver(async (stream, o) => {
+      await new Response(stream).arrayBuffer();
+      return hang(o);
+    });
+    const onError = vi.fn();
+    const client = new FilewayClient({ driver, onError, retry: { ...quickRetry, idleTimeoutMs: 40 } });
+
+    // No streamFactory: the timeout surfaces as the final error.
+    await expect(client.upload(trickle(1, 0), { filename: "a.bin" })).rejects.toMatchObject({
+      name: "StorageError",
+      code: "network",
+      message: "upload attempt timed out after 40 ms without progress",
+    });
+    expect(isRetryable(onError.mock.calls[0]![0])).toBe(true);
+  });
+
+  it("keeps the caller's own abort final", async () => {
+    const driver = baseDriver(async (_s, o) => hang(o));
+    const client = new FilewayClient({ driver, retry: { ...quickRetry, idleTimeoutMs: 1000 } });
+    const controller = new AbortController();
+
+    const pending = client.upload(trickle(1, 0), {
+      filename: "a.bin",
+      signal: controller.signal,
+      streamFactory: () => trickle(1, 0),
+    });
+    setTimeout(() => controller.abort(), 20);
+
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+    expect(driver.upload).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops waiting on a driver that ignores its signal", async () => {
+    const driver = baseDriver(() => new Promise<never>(() => {})); // never settles, ignores abort
+    const client = new FilewayClient({ driver, retry: { maxRetries: 0, idleTimeoutMs: 30 } });
+
+    await expect(client.upload(trickle(1, 0), { filename: "a.bin" })).rejects.toMatchObject({ code: "network" });
+  });
+
+  it("limits each attempt of other operations and retries them", async () => {
+    const driver = baseDriver(async (_s, o) => okResult(o));
+    let calls = 0;
+    driver.delete = vi.fn(() => (++calls === 1 ? new Promise<boolean>(() => {}) : Promise.resolve(true)));
+    const client = new FilewayClient({ driver, retry: { ...quickRetry, idleTimeoutMs: 30 } });
+
+    await expect(client.delete("x")).resolves.toBe(true);
+    expect(calls).toBe(2);
+  });
+
+  it("is off by default and validates its value", () => {
+    const driver = baseDriver(async (_s, o) => okResult(o));
+    expect(() => new FilewayClient({ driver, retry: { idleTimeoutMs: 0 } })).toThrow(/idleTimeoutMs/);
+    expect(() => new FilewayClient({ driver, retry: { idleTimeoutMs: Number.NaN } })).toThrow(/idleTimeoutMs/);
+    expect(() => new FilewayClient({ driver })).not.toThrow();
   });
 });

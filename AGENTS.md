@@ -136,7 +136,7 @@ export class FilewayClient<const TConfig extends FilewayConfig> {
 - [x] **Remove edge duplicates**: `driver-cloudinary-edge` and `driver-s3-edge` deleted; their functionality is now in the universal `cloudinary` and `s3`.
 - [x] **Conditional exports**: All packages declare `worker`, `deno`, `bun`, `import`, `require` in `exports` map.
 - [x] **Edge-runtime tests**: `@fileway/core` and `@fileway/cloudinary` run vitest with `environment: "edge-runtime"` via `@edge-runtime/vm`.
-- [x] **All builds & tests pass**: 169 unit tests across 4 packages, plus 8 S3 integration tests against MinIO.
+- [x] **All builds & tests pass**: 205 unit tests across 4 packages, plus 9 S3 integration tests against MinIO.
 
 ## Typed Error Taxonomy (Complete)
 
@@ -153,10 +153,10 @@ export class FilewayClient<const TConfig extends FilewayConfig> {
 
 | Package | Node deps | Runtime | Tests |
 |---|---|---|---|
-| `@fileway/core` | None | Universal | 50 |
-| `@fileway/local` | `node:fs`, `node:path`, `node:stream` | Node.js, Bun | 22 |
-| `@fileway/s3` | None (pure fetch + Web Crypto SigV4) | Universal | 48 unit + 8 MinIO |
-| `@fileway/cloudinary` | None | Universal | 49 |
+| `@fileway/core` | None | Universal | 67 |
+| `@fileway/local` | `node:fs`, `node:path`, `node:stream` | Node.js, Bun | 27 |
+| `@fileway/s3` | None (pure fetch + Web Crypto SigV4) | Universal | 56 unit + 9 MinIO |
+| `@fileway/cloudinary` | None | Universal | 55 |
 
 ## Relevant Files
 

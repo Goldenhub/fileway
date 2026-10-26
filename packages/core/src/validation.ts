@@ -14,12 +14,23 @@ export function abortError(message = "operation aborted"): DOMException {
   return new DOMException(message, "AbortError");
 }
 
+const UPLOAD_ID = /^[A-Za-z0-9_-]{1,128}$/;
+
+/** Throws a `ValidationError` unless `id` is 1 to 128 characters of `A-Za-z0-9_-`. */
+export function validateUploadId(id: string): void {
+  if (!UPLOAD_ID.test(id)) {
+    throw new ValidationError("id must be 1 to 128 characters of A-Z, a-z, 0-9, _ or -");
+  }
+}
+
 export function validateUploadOptions(options: {
   filename: string;
   path?: string;
   mimeType?: string;
   size?: number;
+  id?: string;
 }): void {
+  if (options.id !== undefined) validateUploadId(options.id);
   if (!options.filename || typeof options.filename !== "string") {
     throw new ValidationError("filename is required and must be a string");
   }

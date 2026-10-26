@@ -30,7 +30,7 @@ Uploads a WHATWG `ReadableStream<Uint8Array>`.
 
 Returns `Promise<UploadResult<TMeta>>` where `TMeta` is the driver's metadata type.
 
-An `upload` retries on transient failures only when `options.streamFactory` is provided (see [Retries](/docs/guide/observability#retries)). `delete`, `get`, `getUrl`, and `getPresignedUrl` retry automatically.
+An `upload` retries on transient failures only when `options.streamFactory` is provided (see [Retries](/docs/guide/observability#retries)). Before retrying (or failing), it checks whether the object was stored despite the error and, if so, returns it without re-sending (see [Safe retries](/docs/guide/uploads#safe-retries-and-upload-status)). `delete`, `get`, `getUrl`, and `getPresignedUrl` retry automatically.
 
 `UploadOptions`:
 
@@ -43,6 +43,7 @@ An `upload` retries on transient failures only when `options.streamFactory` is p
 | `size` | `number` | | Known byte length: unlocks zero-buffer streaming (see [Uploads](/docs/guide/uploads)). |
 | `signal` | `AbortSignal` | | Cancels the upload in flight (see [Uploads](/docs/guide/uploads#cancelling-uploads)). |
 | `onProgress` | `(progress) => void` | | Progress callback (see [Uploads](/docs/guide/uploads#tracking-upload-progress)). |
+| `id` | `string` | | Stable upload ID; the stored name is built from it and reused on every retry. Generated per call when omitted. Reusing an ID overwrites that object. |
 | `streamFactory` | `() => ReadableStream<Uint8Array>` | | Re-produces the stream for retry attempts. Required to retry an upload (see [Retries](/docs/guide/observability#retries)). Sync-only today; an async (Promise-returning) variant is planned; see [Retrying uploads](/docs/guide/uploads#retrying-uploads). |
 
 ## `get(path)`
@@ -75,6 +76,19 @@ Returns the public URL for a stored file (see [Downloads](/docs/guide/downloads#
 | Param | Type | Description |
 |-------|------|-------------|
 | `path` | `string` | Path of the stored file. |
+
+## `getUploadStatus(id, options)`
+
+Reports whether the upload with `id` is stored, in progress, or missing, by asking the storage provider. Pass the same `filename` and `path` the upload used.
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `id` | `string` | The upload's `id`. |
+| `options.filename` | `string` | The filename the upload used (its extension is part of the stored name). |
+| `options.path` | `string` | The path the upload used. |
+| `options.signal` | `AbortSignal` | Cancels the call and any pending retries. |
+
+Returns `{ state: "complete", object }`, `{ state: "pending" }`, `{ state: "missing" }`, or `{ state: "unsupported" }` when the driver cannot report status. See [Safe retries and upload status](/docs/guide/uploads#safe-retries-and-upload-status).
 
 ## `getPresignedUrl(path, options?)`
 

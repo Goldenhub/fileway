@@ -1,11 +1,13 @@
-import type { BaseDriver, UploadOptions, UploadResult } from "@fileway/core";
+import type { BaseDriver, StoredObject, UploadOptions, UploadResult } from "@fileway/core";
 import { validateUploadOptions, ValidationError, urlEncodePath, abortError, StorageError } from "@fileway/core";
 import { createWriteStream, createReadStream } from "node:fs";
-import { mkdir, unlink, access, lstat } from "node:fs/promises";
-import { join, dirname, resolve, relative, isAbsolute } from "node:path";
+import { mkdir, unlink, access, lstat, rename, stat, readdir } from "node:fs/promises";
+import { join, dirname, basename, resolve, relative, isAbsolute } from "node:path";
 import { Readable } from "node:stream";
 
 const randomUUID = () => globalThis.crypto.randomUUID();
+// Suffix of in-progress upload files; see `upload` and `isPending`.
+const PARTIAL_SUFFIX = ".partial";
 
 export interface LocalDriverConfig {
   directory: string;
@@ -56,17 +58,19 @@ export class LocalDriver implements BaseDriver<{ localPath: string }> {
   ): Promise<UploadResult<{ localPath: string }>> {
     validateUploadOptions(options);
 
-    const id = randomUUID();
-    const ext = options.filename.includes(".") ? options.filename.split(".").pop()! : "";
-    const filename = ext ? `${id}.${ext}` : id;
-    const relativePath = options.path ? join(options.path, filename) : filename;
+    const id = options.id ?? randomUUID();
+    const relativePath = this.pathFor({ ...options, id });
     const fullPath = this.resolveInside(relativePath);
 
     await mkdir(dirname(fullPath), { recursive: true });
     await this.assertSafePath(fullPath);
 
+    // Write to a temporary sibling and rename it into place when complete. A
+    // retry that fails partway then never truncates or deletes a copy an
+    // earlier attempt already finished, and readers never see a partial file.
+    const tempPath = `${fullPath}.${randomUUID()}${PARTIAL_SUFFIX}`;
     const nodeStream = Readable.fromWeb(stream as any);
-    const writeStream = createWriteStream(fullPath);
+    const writeStream = createWriteStream(tempPath);
 
     const size = await new Promise<number>((resolve, reject) => {
       let bytes = 0;
@@ -80,7 +84,7 @@ export class LocalDriver implements BaseDriver<{ localPath: string }> {
         } else {
           // Wait for the partial file to be removed so callers observing the
           // rejection can rely on the directory being clean.
-          unlink(fullPath)
+          unlink(tempPath)
             .catch(() => {})
             .finally(() => reject(err));
         }
@@ -103,9 +107,11 @@ export class LocalDriver implements BaseDriver<{ localPath: string }> {
       });
       nodeStream.pipe(writeStream);
       writeStream.on("finish", () => {
-        finished = true;
-        options.signal?.removeEventListener("abort", onAbort);
-        resolve(bytes);
+        rename(tempPath, fullPath).then(() => {
+          finished = true;
+          options.signal?.removeEventListener("abort", onAbort);
+          resolve(bytes);
+        }, cleanup);
       });
       writeStream.on("error", cleanup);
       nodeStream.on("error", cleanup);
@@ -120,6 +126,44 @@ export class LocalDriver implements BaseDriver<{ localPath: string }> {
       size,
       meta: { localPath: fullPath },
     };
+  }
+
+  /** The relative path an upload with `options.id` is stored at: `<path>/<id>.<ext>`. */
+  pathFor(options: UploadOptions & { id: string }): string {
+    const ext = options.filename.includes(".") ? options.filename.split(".").pop()! : "";
+    const filename = ext ? `${options.id}.${ext}` : options.id;
+    return options.path ? join(options.path, filename) : filename;
+  }
+
+  /**
+   * The stored file at `path`, or `null` if there is none. Local disk keeps no
+   * upload token, so `FilewayClient` verifies a recovered upload by size.
+   */
+  async head(path: string): Promise<StoredObject<{ localPath: string }> | null> {
+    const fullPath = this.resolveInside(path);
+    await this.assertSafePath(fullPath);
+    const info = await stat(fullPath).catch((err: NodeJS.ErrnoException) => {
+      if (err.code === "ENOENT") return null;
+      throw new StorageError("provider-error", `failed to stat ${path}: ${err.message}`, { provider: "local", cause: err });
+    });
+    if (!info?.isFile()) return null;
+    const name = basename(path);
+    return {
+      id: name.includes(".") ? name.slice(0, name.lastIndexOf(".")) : name,
+      url: `${this.baseUrl}/${urlEncodePath(path)}`,
+      path,
+      size: info.size,
+      meta: { localPath: fullPath },
+      lastModified: info.mtime,
+    };
+  }
+
+  /** Whether an upload to `path` is still being written (a `.partial` file exists). */
+  async isPending(path: string): Promise<boolean> {
+    const fullPath = this.resolveInside(path);
+    const prefix = `${basename(fullPath)}.`;
+    const entries = await readdir(dirname(fullPath)).catch(() => [] as string[]);
+    return entries.some((entry) => entry.startsWith(prefix) && entry.endsWith(PARTIAL_SUFFIX));
   }
 
   /**

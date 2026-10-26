@@ -1,4 +1,4 @@
-import type { BaseDriver, PresignedUrlOptions, StorageErrorCode, UploadOptions, UploadResult } from "@fileway/core";
+import type { BaseDriver, PresignedUrlOptions, StorageErrorCode, StoredObject, UploadOptions, UploadResult } from "@fileway/core";
 import { validateUploadOptions, ValidationError, urlEncodePath, abortError, isAbortError, StorageError } from "@fileway/core";
 import { buildCanonicalQueryString, createStreamingBody, presignUrl, sign, signStreamingRequest, sha256 } from "./sigv4.js";
 import type { SigV4Credentials } from "./sigv4.js";
@@ -15,6 +15,8 @@ const PRESIGN_DEFAULT_EXPIRY = 3600;
 // AWS caps presigned URLs at 7 days.
 const PRESIGN_MIN_EXPIRY = 1;
 const PRESIGN_MAX_EXPIRY = 604800;
+// Object metadata header carrying FilewayClient's per-upload token.
+const TOKEN_HEADER = "x-amz-meta-fileway-upload-token";
 
 export interface S3Credentials {
   accessKeyId: string;
@@ -57,23 +59,22 @@ export class S3Driver implements BaseDriver<{ bucket: string; etag?: string }> {
   ): Promise<UploadResult<{ bucket: string; etag?: string }>> {
     validateUploadOptions(options);
 
-    const id = randomUUID();
-    const ext = options.filename.includes(".")
-      ? options.filename.split(".").pop()!
-      : "";
-    const filename = ext ? `${id}.${ext}` : id;
-    const key = options.path ? `${options.path}/${filename}` : filename;
+    const id = options.id ?? randomUUID();
+    const key = this.pathFor({ ...options, id });
 
     const cred = getCredentials(this.config);
 
-    const metaHeaders = options.metadata
-      ? Object.fromEntries(
-          Object.entries(options.metadata).map(([k, v]) => [
-            `x-amz-meta-${k.toLowerCase()}`,
-            v,
-          ]),
-        )
-      : {};
+    const metaHeaders: Record<string, string> = {
+      ...(options.metadata
+        ? Object.fromEntries(
+            Object.entries(options.metadata).map(([k, v]) => [
+              `x-amz-meta-${k.toLowerCase()}`,
+              v,
+            ]),
+          )
+        : {}),
+      ...(options.uploadToken ? { [TOKEN_HEADER]: options.uploadToken } : {}),
+    };
 
     const typeHeader = options.mimeType ?? "application/octet-stream";
 
@@ -436,6 +437,72 @@ export class S3Driver implements BaseDriver<{ bucket: string; etag?: string }> {
     // S3 answers 204 whether or not the key existed, so `true` means
     // "the object is gone now", not "an object was removed".
     return true;
+  }
+
+  /** The object key an upload with `options.id` is stored under: `<path>/<id>.<ext>`. */
+  pathFor(options: UploadOptions & { id: string }): string {
+    const ext = options.filename.includes(".") ? options.filename.split(".").pop()! : "";
+    const filename = ext ? `${options.id}.${ext}` : options.id;
+    return options.path ? `${options.path}/${filename}` : filename;
+  }
+
+  /** The object at `path` (a signed `HEAD`), or `null` if it does not exist. */
+  async head(path: string): Promise<StoredObject<{ bucket: string; etag?: string }> | null> {
+    const cred = getCredentials(this.config);
+    const { url, canonicalPath, host } = buildEndpoint(this.config, path);
+    const headers = await sign(
+      "HEAD",
+      canonicalPath,
+      { host },
+      SHA256_EMPTY,
+      { ...cred, region: this.config.region!, service: SERVICE },
+      new Date(),
+    );
+    const response = await fetchWithAbort(url, { method: "HEAD", headers }, "s3");
+    if (response.status === 404) return null;
+    if (!response.ok) {
+      throw s3Error(`S3 head failed: ${response.status} ${response.statusText}`, response.status);
+    }
+
+    const etag = response.headers.get("etag") ?? undefined;
+    const token = response.headers.get(TOKEN_HEADER) ?? undefined;
+    const modified = response.headers.get("last-modified");
+    const contentType = response.headers.get("content-type") ?? undefined;
+    const name = path.split("/").pop() ?? path;
+    return {
+      id: name.includes(".") ? name.slice(0, name.lastIndexOf(".")) : name,
+      url: `${this.baseUrl}/${urlEncodePath(path)}`,
+      path,
+      size: Number(response.headers.get("content-length") ?? 0),
+      meta: { bucket: this.config.bucket, ...(etag ? { etag } : {}) },
+      ...(token ? { uploadToken: token } : {}),
+      ...(modified ? { lastModified: new Date(modified) } : {}),
+      ...(contentType ? { contentType } : {}),
+    };
+  }
+
+  /** Whether a multipart upload to exactly `path` has been started and not completed or aborted. */
+  async isPending(path: string): Promise<boolean> {
+    const cred = getCredentials(this.config);
+    const query = { prefix: path, uploads: "" };
+    const { url, canonicalPath, host } = buildEndpoint(this.config, "", query);
+    const headers = await sign(
+      "GET",
+      canonicalPath,
+      { host },
+      SHA256_EMPTY,
+      { ...cred, region: this.config.region!, service: SERVICE },
+      new Date(),
+      query,
+    );
+    const response = await fetchWithAbort(url, { method: "GET", headers }, "s3");
+    const body = await response.text().catch(() => "");
+    if (!response.ok) {
+      throw s3Error(`S3 list multipart uploads failed: ${response.status} ${response.statusText}`, response.status, body);
+    }
+    // The prefix also matches longer keys, so require an exact <Key> match.
+    const wanted = escapeXml(path);
+    return [...body.matchAll(/<Key>(.*?)<\/Key>/gs)].some((m) => m[1] === wanted);
   }
 
   async getUrl(path: string): Promise<string> {

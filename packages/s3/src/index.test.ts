@@ -834,3 +834,181 @@ describe("S3Driver error taxonomy", () => {
     });
   });
 });
+
+describe("S3Driver stable ids and upload status", () => {
+  const credentials = { accessKeyId: "AKID", secretAccessKey: "secret" };
+  const body = (n: number) =>
+    new ReadableStream<Uint8Array>({
+      start(c) {
+        c.enqueue(new Uint8Array(n));
+        c.close();
+      },
+    });
+  let driver: S3Driver;
+  beforeEach(() => {
+    driver = new S3Driver({ bucket: "b", region: "us-east-1", credentials });
+  });
+
+  it("builds the key from the id and sends the upload token as signed metadata", async () => {
+    mockFetch.mockResolvedValue(new Response(null, { status: 200, headers: { etag: '"e"' } }));
+
+    const result = await driver.upload(body(3), {
+      filename: "report.pdf",
+      path: "docs",
+      size: 3,
+      id: "inv_42",
+      uploadToken: "tok-1",
+    });
+
+    expect(result.path).toBe("docs/inv_42.pdf");
+    const [url, init] = mockFetch.mock.calls[0]!;
+    expect(String(url)).toBe("https://b.s3.us-east-1.amazonaws.com/docs/inv_42.pdf");
+    const headers = (init as RequestInit).headers as Record<string, string>;
+    expect(headers["x-amz-meta-fileway-upload-token"]).toBe("tok-1");
+    expect(headers.authorization).toMatch(/SignedHeaders=[^,]*x-amz-meta-fileway-upload-token/);
+  });
+
+  it("sends the token on the multipart create request", async () => {
+    mockMultipart();
+    await driver.upload(body(3), { filename: "a.bin", id: "big", uploadToken: "tok-2" });
+    const [createUrl, createInit] = mockFetch.mock.calls[0]!;
+    expect(String(createUrl)).toContain("/big.bin?uploads=");
+    expect(((createInit as RequestInit).headers as Record<string, string>)["x-amz-meta-fileway-upload-token"]).toBe("tok-2");
+  });
+
+  it("pathFor matches the key upload uses", () => {
+    expect(driver.pathFor({ filename: "x.tar.gz", path: "a/b", id: "id1" })).toBe("a/b/id1.gz");
+    expect(driver.pathFor({ filename: "noext", id: "id2" })).toBe("id2");
+  });
+
+  it("head maps a stored object and returns null when missing", async () => {
+    mockFetch.mockResolvedValueOnce(
+      new Response(null, {
+        status: 200,
+        headers: {
+          "content-length": "1234",
+          etag: '"abc"',
+          "content-type": "application/pdf",
+          "last-modified": "Mon, 26 Oct 2026 10:00:00 GMT",
+          "x-amz-meta-fileway-upload-token": "tok-1",
+        },
+      }),
+    );
+    const object = await driver.head("docs/inv_42.pdf");
+    expect(object).toEqual({
+      id: "inv_42",
+      url: "https://b.s3.us-east-1.amazonaws.com/docs/inv_42.pdf",
+      path: "docs/inv_42.pdf",
+      size: 1234,
+      meta: { bucket: "b", etag: '"abc"' },
+      uploadToken: "tok-1",
+      lastModified: new Date("Mon, 26 Oct 2026 10:00:00 GMT"),
+      contentType: "application/pdf",
+    });
+    expect((mockFetch.mock.calls[0]![1] as RequestInit).method).toBe("HEAD");
+
+    mockFetch.mockResolvedValueOnce(new Response(null, { status: 404 }));
+    await expect(driver.head("docs/missing.pdf")).resolves.toBeNull();
+  });
+
+  it("head throws a typed error for other failures", async () => {
+    mockFetch.mockResolvedValueOnce(new Response(null, { status: 403, statusText: "Forbidden" }));
+    await expect(driver.head("x")).rejects.toMatchObject({ code: "auth-failed", statusCode: 403 });
+  });
+
+  it("isPending matches an open multipart upload by exact key", async () => {
+    const listing = (...keys: string[]) =>
+      new Response(
+        `<ListMultipartUploadsResult>${keys.map((k) => `<Upload><Key>${k}</Key><UploadId>u</UploadId></Upload>`).join("")}</ListMultipartUploadsResult>`,
+        { status: 200 },
+      );
+    mockFetch.mockResolvedValueOnce(listing("docs/inv_42.pdf"));
+    await expect(driver.isPending("docs/inv_42.pdf")).resolves.toBe(true);
+    expect(String(mockFetch.mock.calls[0]![0])).toBe(
+      "https://b.s3.us-east-1.amazonaws.com/?prefix=docs%2Finv_42.pdf&uploads=",
+    );
+
+    mockFetch.mockResolvedValueOnce(listing("docs/inv_42.pdf.bak"));
+    await expect(driver.isPending("docs/inv_42.pdf")).resolves.toBe(false);
+  });
+
+  it("recovers a lost PUT response without re-uploading (end to end)", async () => {
+    // Simulated bucket: the PUT stores the object, then the response is lost.
+    const stored = new Map<string, { size: number; token: string | undefined }>();
+    let puts = 0;
+    mockFetch.mockImplementation(async (input: string | URL, init?: RequestInit) => {
+      const url = new URL(String(input));
+      const key = decodeURIComponent(url.pathname.slice(1));
+      const headers = (init?.headers ?? {}) as Record<string, string>;
+      if (init?.method === "PUT") {
+        puts++;
+        // Drain the aws-chunked body like a real server would.
+        await new Response(init.body as ReadableStream).arrayBuffer();
+        stored.set(key, {
+          size: Number(headers["x-amz-decoded-content-length"]),
+          token: headers["x-amz-meta-fileway-upload-token"],
+        });
+        throw new TypeError("fetch failed");
+      }
+      if (init?.method === "HEAD") {
+        const object = stored.get(key);
+        if (!object) return new Response(null, { status: 404 });
+        return new Response(null, {
+          status: 200,
+          headers: {
+            "content-length": String(object.size),
+            ...(object.token ? { "x-amz-meta-fileway-upload-token": object.token } : {}),
+          },
+        });
+      }
+      return new Response(null, { status: 500 });
+    });
+
+    const client = new FilewayClient({ driver, retry: { maxRetries: 3, baseDelayMs: 1, jitter: false } });
+    const result = await client.upload(body(7), { filename: "a.bin", size: 7 }); // no streamFactory
+
+    expect(puts).toBe(1);
+    expect(stored.size).toBe(1);
+    expect(result.size).toBe(7);
+    expect(result.path).toBe([...stored.keys()][0]);
+  });
+});
+
+describe("S3Driver with retry.idleTimeoutMs", () => {
+  it("cancels a hung part upload, aborts the multipart session, and retries", async () => {
+    const driver = new S3Driver({ bucket: "b", credentials: { accessKeyId: "AKID", secretAccessKey: "secret" } });
+    mockMultipart();
+    const base = mockFetch.getMockImplementation()!;
+    let partPuts = 0;
+    mockFetch.mockImplementation((input: string | URL, init?: RequestInit) => {
+      if (String(input).includes("partNumber=") && init?.method === "PUT" && ++partPuts === 1) {
+        // First part request hangs until the attempt's signal aborts it.
+        return new Promise((_, reject) => {
+          init.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")), { once: true });
+        });
+      }
+      return base(input, init);
+    });
+    const body = () =>
+      new ReadableStream<Uint8Array>({
+        start(c) {
+          c.enqueue(new Uint8Array([1, 2, 3]));
+          c.close();
+        },
+      });
+    const client = new FilewayClient({
+      driver,
+      retry: { maxRetries: 2, baseDelayMs: 1, jitter: false, idleTimeoutMs: 50 },
+    });
+
+    const result = await client.upload(body(), { filename: "a.bin", streamFactory: body });
+
+    expect(result.path).toMatch(/\.bin$/);
+    const methods = mockFetch.mock.calls.map((c) => (c[1] as RequestInit).method);
+    // attempt 1: create, hung part, abort; recovery HEAD (500 from the mock, ignored);
+    // attempt 2: create, part, complete
+    expect(methods.filter((m) => m === "DELETE")).toHaveLength(1);
+    expect(methods.filter((m) => m === "POST")).toHaveLength(3);
+    expect(partPuts).toBe(2);
+  });
+});

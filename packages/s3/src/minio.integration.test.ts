@@ -326,6 +326,33 @@ describeEnv("S3Driver integration against MinIO", () => {
     const gone = await s3Request("GET", "uploads/abort.bin");
     expect(gone.ok).toBe(false);
   });
+
+  it("reports upload status by stable id, with the upload token stored as metadata", async () => {
+    const data = new TextEncoder().encode("status check");
+    const id = `status-${Date.now()}`;
+    const result = await client.upload(
+      new ReadableStream<Uint8Array>({
+        start(c) {
+          c.enqueue(data);
+          c.close();
+        },
+      }),
+      { filename: "s.txt", path: "status", id, size: data.byteLength },
+    );
+    expect(result.path).toBe(`status/${id}.txt`);
+
+    const status = await client.getUploadStatus(id, { filename: "s.txt", path: "status" });
+    expect(status.state).toBe("complete");
+    if (status.state === "complete") {
+      expect(status.object.size).toBe(data.byteLength);
+      expect(status.object.uploadToken).toMatch(/^[0-9a-f-]{36}$/);
+    }
+    await expect(client.getUploadStatus(`${id}-missing`, { filename: "s.txt", path: "status" })).resolves.toEqual({
+      state: "missing",
+    });
+
+    await client.delete(result.path);
+  });
 });
 
 async function sha256Hex(data: Uint8Array): Promise<string> {

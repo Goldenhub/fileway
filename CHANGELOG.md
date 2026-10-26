@@ -15,6 +15,20 @@ The first stable release. Target scope, tracked on the [roadmap](README.md#roadm
 
 Expected: once the public API is frozen and has gone through real-world feedback via [GitHub Discussions](https://github.com/Goldenhub/fileway/discussions).
 
+## Unreleased
+
+**Features**
+- **Lost-response recovery.** When an upload fails with a retryable error, `FilewayClient` now checks whether the provider stored the object anyway (the response was lost, not the upload). If it did, the upload succeeds with that object instead of re-sending it or failing. This works even without `streamFactory`.
+- **Stable upload IDs.** Each `upload()` call gets one `id`, reused by every retry, so a retry can never store a second copy. Pass your own `UploadOptions.id` to make uploads idempotent across processes; reusing an ID overwrites that object.
+- **`client.getUploadStatus(id, { filename, path })`** reports `complete` (with the stored object), `pending`, `missing` or `unsupported`, straight from the storage provider.
+- **`retry.idleTimeoutMs`** (opt-in): cancels an attempt that makes no progress for that long and retries it as a `network` failure, so a hung connection no longer waits forever. For uploads it measures inactivity (it resets on every chunk read, then limits the wait for the reply), so slow but moving uploads are not cut off; other operations get a per-attempt time limit. The caller's own `signal` stays final.
+- **Driver contract:** new optional `BaseDriver.pathFor`, `head` and `isPending`, implemented by all three drivers. Custom drivers that add `pathFor` and `head` get recovery and status checks automatically.
+
+**Changes**
+- Uploads stamp a per-call `uploadToken` on the object (S3 metadata `x-amz-meta-fileway-upload-token`, Cloudinary context `fileway_upload_token`) so recovery never mistakes an older upload with the same ID for this one. Drivers and middleware now see `id` and `uploadToken` in the upload options.
+- **Cloudinary:** uploads send `public_id` (the upload ID) with `overwrite=true`, so new public IDs are UUIDs (or your `id`) instead of Cloudinary's short random IDs.
+- **Local:** files are written to a temporary `*.partial` file and renamed into place when complete, so a failed retry never truncates or deletes a finished file.
+
 ## v0.3.0 (2026-10-26)
 
 This release contains breaking changes (allowed before 1.0 as a minor bump). Read the breaking changes and migration notes before upgrading.

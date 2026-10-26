@@ -74,6 +74,7 @@ const client = new FilewayClient({
     jitter: true,         // full jitter to avoid thundering herd (default true)
     // retryHttpStatuses: [408],   // opt-in extra statuses
     // retryGenericErrors: true,   // retry all non-StorageError failures (default: only TypeError)
+    // idleTimeoutMs: 30_000,      // retry an attempt that makes no progress for 30 s (default: off)
   },
 });
 ```
@@ -96,6 +97,28 @@ If `streamFactory` is absent, a failed upload throws immediately (no retry). Bec
 ### Backoff & logging
 
 Retries use exponential backoff with full jitter, capped at `maxDelayMs`; the wait is interruptible by an abort signal (`options.signal` on `upload`, `{ signal }` on `delete`/`get`/`getUrl`/`getPresignedUrl`). Each retry emits a `warn`-level log (`"<operation> failed, retrying"` with `{ attempt, maxRetries, delayMs, error }`), and `onError` fires only on the **final** failure, not per attempt.
+
+### Timing out stuck attempts
+
+A retry only happens after an attempt *fails*. A connection that stays open while the provider never answers would otherwise wait forever, so set `idleTimeoutMs` to cancel an attempt that stops making progress and retry it like any network failure:
+
+```ts
+const client = new FilewayClient({
+  driver,
+  retry: { idleTimeoutMs: 30_000 },
+});
+```
+
+- **Uploads:** the timer measures inactivity, not total time, so large uploads on slow links are fine as long as data keeps moving. It resets every time the driver reads from your stream, and once the stream is fully read it limits the wait for the provider's reply.
+- **Other operations:** `delete`, `get`, `getUrl`, `getPresignedUrl` and `getUploadStatus` get a plain time limit per attempt. For `get` it ends when the response starts, not after you read the body.
+- **What a timeout looks like:** a `StorageError` with code `network` ("upload attempt timed out after 30000 ms without progress"), retried like any other network failure. If the provider stored the file anyway, the [lost-response check](/docs/guide/uploads#safe-retries-and-upload-status) returns it instead of re-sending.
+- **Your own `signal` stays final.** Cancelling with `options.signal` ends the upload; it is never retried.
+
+Choosing a value:
+
+- **Parts and chunks pause reading.** S3 multipart uploads (8 MiB parts by default) and Cloudinary chunked uploads (20 MiB chunks) stop reading your stream while a part is in flight. Set `idleTimeoutMs` above the time one part takes on your slowest link (8 MiB at 2 Mbit/s is about 34 s).
+- **A slow source looks the same as a slow network.** If you relay an upload from a user's browser, a pause on their side also counts as no progress, and a retry needs `streamFactory` to replay it. Use a generous value there, or leave the option off.
+- **Retries re-send the payload,** so each timeout that leads to a retry costs another upload's worth of egress.
 
 ### Note on breaking changes
 

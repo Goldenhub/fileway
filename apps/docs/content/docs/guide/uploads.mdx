@@ -110,6 +110,51 @@ const result = await client.upload(createReadStream(file), {
 });
 ```
 
-Configure backoff with the client's `retry` option (e.g. `maxRetries`, `baseDelayMs`). Without `streamFactory`, a failed upload throws immediately, with no retry. Retried uploads re-transmit the payload, so they cost `N+1` egresss on `N` failures. See [Retries](/docs/guide/observability#retries) for the full configuration and which failures are retried.
+Configure backoff with the client's `retry` option (e.g. `maxRetries`, `baseDelayMs`), and set `retry.idleTimeoutMs` so an attempt that hangs is cancelled and retried instead of waiting forever (see [Timing out stuck attempts](/docs/guide/observability#timing-out-stuck-attempts)). Without `streamFactory`, a failed upload throws immediately, with no retry. Retried uploads re-transmit the payload, so they cost `N+1` egresss on `N` failures. See [Retries](/docs/guide/observability#retries) for the full configuration and which failures are retried.
+
+## Safe retries and upload status
+
+A network failure is ambiguous: the provider may have stored the file even though its response never reached you (a reset connection, a timeout, a proxy that dropped the reply). Fileway handles this with a **stable upload ID**:
+
+- Every `upload()` call gets one `id` (generated, or yours via `options.id`), and every retry of that call reuses it, so the stored name never changes between attempts.
+- The client also stamps a per-call token on the object (S3 object metadata, Cloudinary context).
+- When an attempt fails with a retryable error, the client first asks the driver whether that object already landed. If it did, with this call's token and the expected size, the upload **succeeds without re-sending anything**. This works even without `streamFactory`.
+- Only if the object is not there does the client retry (with `streamFactory`) or throw.
+
+Pass your own `id` to make an upload idempotent across processes, for example a job that may run twice:
+
+```ts
+const result = await client.upload(stream, {
+  filename: "invoice.pdf",
+  path: "invoices",
+  id: `invoice_${invoice.id}`, // same id on every run: a re-run overwrites, never duplicates
+});
+```
+
+Reusing an `id` overwrites that object; that is what makes it safe to repeat. IDs are 1 to 128 characters of `A-Z a-z 0-9 _ -`.
+
+### Checking an upload's status
+
+`getUploadStatus(id, { filename, path })` asks the storage provider directly, so it works from any process, even after a crash:
+
+```ts
+const status = await client.getUploadStatus(`invoice_${invoice.id}`, {
+  filename: "invoice.pdf",
+  path: "invoices",
+});
+
+switch (status.state) {
+  case "complete": // status.object has path, url, size and driver metadata
+  case "pending": // started but not finished (S3 multipart, Local partial file)
+  case "missing": // never stored
+  case "unsupported": // the driver cannot report status
+}
+```
+
+| Driver | `complete` | `pending` | Notes |
+|---|---|---|---|
+| `S3Driver` | `HEAD` on the object | Open multipart upload for the key | Token stored as `x-amz-meta-fileway-upload-token` |
+| `LocalDriver` | `stat` on the file | A `.partial` file is still being written | Writes to a temp file and renames it into place, so a failed retry never damages a finished file. No token; recovery checks size |
+| `CloudinaryDriver` | Admin API resource lookup | Not available | Token stored in context. Public IDs are `<folder>/<id>` (or `<id>` on dynamic-folder accounts) |
 
 > **Future: async producers (planned).** `streamFactory` is currently **sync-only**: it must return the stream directly. An async (Promise-returning) variant is a planned enhancement, which would let you pass sources like `fetch(url).then((r) => r.body)` to re-fetch the payload per attempt without holding it in memory. Until then, on non-Node runtimes use a sync in-memory producer such as `new Blob([bytes]).stream()` in browsers/edge/Workers, or `Deno.open(path).readable` in Deno.

@@ -1,13 +1,13 @@
-// Start MinIO locally:
-//   docker run -p 9000:9000 -p 9001:9001 \
+// Start MinIO locally (MinIO no longer publishes community images, so this uses
+// Chainguard's build; it runs as a non-root user, hence the writable tmpfs):
+//   docker run -p 9000:9000 -p 9001:9001 --tmpfs /data:rw,mode=1777 \
 //     -e MINIO_ROOT_USER=minioadmin -e MINIO_ROOT_PASSWORD=minioadmin \
-//     quay.io/minio/minio server /data --console-address ":9001"
+//     cgr.dev/chainguard/minio:latest server /data --console-address ":9001"
 //
-// Create a bucket:
-//   docker run --rm --network host \
-//     quay.io/minio/mc alias set local http://localhost:9000 minioadmin minioadmin
-//   docker run --rm --network host \
-//     quay.io/minio/mc mb local/my-bucket
+// Create a bucket (a fresh container does not keep the alias, so set it and
+// create the bucket in one run):
+//   docker run --rm --network host --entrypoint sh cgr.dev/chainguard/minio-client:latest-dev -c \
+//     "mc alias set local http://localhost:9000 minioadmin minioadmin && mc mb local/my-bucket"
 //
 // Run:
 //   S3_BUCKET=my-bucket S3_ENDPOINT=http://localhost:9000 MINIO_ACCESS_KEY=minioadmin MINIO_SECRET_KEY=minioadmin npx tsx scripts/test-s3-minio.mjs

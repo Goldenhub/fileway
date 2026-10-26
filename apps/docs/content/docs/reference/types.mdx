@@ -17,8 +17,12 @@ interface UploadOptions {
   signal?: AbortSignal;
   onProgress?: (progress: UploadProgress) => void;
   streamFactory?: () => ReadableStream<Uint8Array>; // sync today; async return is a planned future feature
+  id?: string; // stable upload id; generated per upload() call when omitted
+  uploadToken?: string; // set by FilewayClient; drivers store it with the object
 }
 ```
+
+See [Safe retries and upload status](/docs/guide/uploads#safe-retries-and-upload-status) for `id` and `uploadToken`.
 
 ## `UploadProgress`
 
@@ -62,7 +66,8 @@ interface RetryConfig {
   multiplier?: number;           // exponential backoff factor; default 2
   jitter?: boolean;              // full jitter over [0, delay]; default true
   retryHttpStatuses?: number[];  // extra HTTP statuses to treat as retryable
-  retryGenericErrors?: boolean;  // retry non-StorageError failures; default true
+  retryGenericErrors?: boolean;  // retry non-StorageError failures; default: only TypeError
+  idleTimeoutMs?: number;        // cancel and retry an attempt with no progress for this long; default off
 }
 ```
 
@@ -79,8 +84,26 @@ interface BaseDriver<TMeta extends Record<string, unknown> = Record<string, unkn
   getUrl(path: string): Promise<string>;
   get(path: string): Promise<ReadableStream<Uint8Array>>;
   getPresignedUrl?(path: string, options?: PresignedUrlOptions): Promise<string>;
+  // Optional: enable lost-response recovery and getUploadStatus.
+  pathFor?(options: UploadOptions & { id: string }): string;
+  head?(path: string): Promise<StoredObject<TMeta> | null>;
+  isPending?(path: string): Promise<boolean>;
 }
+
+interface StoredObject<TMeta> extends UploadResult<TMeta> {
+  uploadToken?: string;
+  lastModified?: Date;
+  contentType?: string;
+}
+
+type UploadStatus<TMeta> =
+  | { state: "complete"; object: StoredObject<TMeta> }
+  | { state: "pending" }
+  | { state: "missing" }
+  | { state: "unsupported" };
 ```
+
+A custom driver that implements `pathFor` and `head` gets lost-response recovery and `getUploadStatus` for free. `pathFor` must return exactly where `upload` stores an object with that `id`, and `head` should return the `uploadToken` it was stored with when the provider can keep it.
 
 ## `MiddlewareHook`
 

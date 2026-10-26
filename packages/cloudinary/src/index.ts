@@ -1,4 +1,4 @@
-import type { BaseDriver, PresignedUrlOptions, StorageErrorCode, UploadOptions, UploadResult } from "@fileway/core";
+import type { BaseDriver, PresignedUrlOptions, StorageErrorCode, StoredObject, UploadOptions, UploadResult } from "@fileway/core";
 import { validateUploadOptions, ValidationError, isAbortError, abortError, StorageError } from "@fileway/core";
 
 const randomUUID = () => globalThis.crypto.randomUUID();
@@ -96,7 +96,13 @@ interface UploadResponse {
   secure_url: string;
   width?: number;
   height?: number;
+  /** Admin API resource details only: the asset's context metadata. */
+  context?: { custom?: Record<string, string> } & Record<string, unknown>;
 }
+
+// Context key carrying FilewayClient's per-upload token.
+const TOKEN_CONTEXT_KEY = "fileway_upload_token";
+const RESOURCE_TYPES = ["image", "video", "raw"] as const;
 
 export class CloudinaryDriver implements BaseDriver<CloudinaryMeta> {
   readonly name = "cloudinary";
@@ -133,9 +139,20 @@ export class CloudinaryDriver implements BaseDriver<CloudinaryMeta> {
     // `upload` is Cloudinary's default, so it is not sent (keeps signatures
     // identical to a plain upload).
     const type = deliveryType === "upload" ? undefined : deliveryType;
+    // A stable public ID makes retries overwrite the same asset instead of
+    // creating a second one; the token lets `head` recognize this upload.
+    const publicId = options.id ?? randomUUID();
+    const context = options.uploadToken ? `${TOKEN_CONTEXT_KEY}=${options.uploadToken}` : undefined;
     const uploadId = randomUUID();
     const timestamp = Math.floor(Date.now() / 1000).toString();
-    const signature = await this.generateSignature({ timestamp, folder: options.path, type });
+    const signature = await this.generateSignature({
+      timestamp,
+      folder: options.path,
+      type,
+      public_id: publicId,
+      overwrite: "true",
+      context,
+    });
 
     const sendChunk = async (bytes: Uint8Array, range?: string): Promise<Response> => {
       const formData = new FormData();
@@ -144,6 +161,9 @@ export class CloudinaryDriver implements BaseDriver<CloudinaryMeta> {
       formData.append("timestamp", timestamp);
       if (options.path) formData.append("folder", options.path);
       if (type) formData.append("type", type);
+      formData.append("public_id", publicId);
+      formData.append("overwrite", "true");
+      if (context) formData.append("context", context);
       formData.append("signature", signature);
 
       const res = await fetchWithAbort(
@@ -216,37 +236,86 @@ export class CloudinaryDriver implements BaseDriver<CloudinaryMeta> {
         : await sendChunk(last, `bytes ${sentBytes}-${sentBytes + last.byteLength - 1}/${totalBytes}`);
 
       const data = (await res.json()) as UploadResponse;
-      const storedType = data.type ?? deliveryType;
-      this.remember(data.public_id, {
-        resourceType: data.resource_type,
-        deliveryType: storedType,
-        version: data.version,
-        ...(data.format ? { format: data.format } : {}),
-      });
-
-      return {
-        id: data.public_id,
-        url: data.secure_url,
-        path: data.public_id,
-        size: data.bytes,
-        meta: {
-          publicId: data.public_id,
-          version: data.version,
-          format: data.format,
-          resourceType: data.resource_type,
-          deliveryType: storedType,
-          bytes: data.bytes,
-          secureUrl: data.secure_url,
-          ...(data.width !== undefined ? { width: data.width } : {}),
-          ...(data.height !== undefined ? { height: data.height } : {}),
-        },
-      };
+      return this.toResult(data, deliveryType);
     } catch (err) {
       reader.cancel().catch(() => {});
       throw err;
     } finally {
       signal?.removeEventListener("abort", onAbort);
     }
+  }
+
+  /**
+   * The public ID an upload with `options.id` gets: `<folder>/<id>`. Accounts
+   * using Cloudinary's dynamic folders keep it as just `<id>`; `head` checks both.
+   */
+  pathFor(options: UploadOptions & { id: string }): string {
+    return options.path ? `${options.path}/${options.id}` : options.id;
+  }
+
+  /**
+   * The stored asset with public ID `publicId`, or `null` if there is none.
+   * Uses the Admin API resource endpoint (not search, which lags behind new
+   * uploads), trying the cached resource type first, then image, video, raw.
+   */
+  async head(publicId: string, options?: CloudinaryLookupOptions): Promise<StoredObject<CloudinaryMeta> | null> {
+    const cached = this.cache.get(publicId);
+    const deliveryType = options?.deliveryType ?? cached?.deliveryType ?? this.deliveryType;
+    const resourceTypes = options?.resourceType
+      ? [options.resourceType]
+      : [...new Set([cached?.resourceType, ...RESOURCE_TYPES].filter((t) => t !== undefined))];
+    // `<folder>/<id>` first; on dynamic-folder accounts the public ID is just `<id>`.
+    const baseName = publicId.split("/").pop()!;
+    const candidates = baseName === publicId ? [publicId] : [publicId, baseName];
+
+    for (const candidate of candidates) {
+      for (const resourceType of resourceTypes) {
+        const res = await fetchWithAbort(
+          `https://api.cloudinary.com/v1_1/${this.cloudName}/resources/${resourceType}/${deliveryType}/${urlEncodePublicId(candidate)}`,
+          { headers: { authorization: this.adminAuth() } },
+          "cloudinary",
+        );
+        if (res.status === 404) continue;
+        if (!res.ok) {
+          throw new StorageError(classifyCloudinaryStatus(res.status, "get"), `Cloudinary head failed (${res.status})`, {
+            statusCode: res.status,
+            provider: "cloudinary",
+          });
+        }
+        const data = (await res.json()) as UploadResponse;
+        const token = data.context?.custom?.[TOKEN_CONTEXT_KEY];
+        return { ...this.toResult(data, deliveryType), ...(typeof token === "string" ? { uploadToken: token } : {}) };
+      }
+    }
+    return null;
+  }
+
+  /** Maps an upload or Admin API response to an `UploadResult`, caching the asset's type. */
+  private toResult(data: UploadResponse, fallbackType: CloudinaryDeliveryType): UploadResult<CloudinaryMeta> {
+    const storedType = data.type ?? fallbackType;
+    this.remember(data.public_id, {
+      resourceType: data.resource_type,
+      deliveryType: storedType,
+      version: data.version,
+      ...(data.format ? { format: data.format } : {}),
+    });
+    return {
+      id: data.public_id,
+      url: data.secure_url,
+      path: data.public_id,
+      size: data.bytes,
+      meta: {
+        publicId: data.public_id,
+        version: data.version,
+        format: data.format,
+        resourceType: data.resource_type,
+        deliveryType: storedType,
+        bytes: data.bytes,
+        secureUrl: data.secure_url,
+        ...(data.width !== undefined ? { width: data.width } : {}),
+        ...(data.height !== undefined ? { height: data.height } : {}),
+      },
+    };
   }
 
   /**
@@ -488,6 +557,11 @@ function concatBytes(chunks: Uint8Array[], total: number): Uint8Array {
     offset += chunk.byteLength;
   }
   return out;
+}
+
+/** Encodes a public ID for a URL path, keeping its folder slashes. */
+function urlEncodePublicId(publicId: string): string {
+  return publicId.split("/").map(encodeURIComponent).join("/");
 }
 
 /** Escapes a value for use inside double quotes in a Search API expression. */

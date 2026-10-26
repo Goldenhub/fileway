@@ -788,7 +788,10 @@ describe("CloudinaryDriver", () => {
 
       expect(body!.get("type")).toBe("authenticated");
       const ts = body!.get("timestamp") as string;
-      expect(body!.get("signature")).toBe(await sha1Hex(`timestamp=${ts}&type=authenticated` + "secret456"));
+      const publicId = body!.get("public_id") as string;
+      expect(body!.get("signature")).toBe(
+        await sha1Hex(`overwrite=true&public_id=${publicId}&timestamp=${ts}&type=authenticated` + "secret456"),
+      );
       expect(result.meta.deliveryType).toBe("authenticated");
     });
 
@@ -935,5 +938,100 @@ describe("CloudinaryDriver", () => {
       mockFetch.mockRejectedValue(controller.signal.reason);
       await expect(driver.get("abc123")).rejects.toMatchObject({ name: "AbortError" });
     });
+  });
+});
+
+describe("CloudinaryDriver stable ids and upload status", () => {
+  let driver: CloudinaryDriver;
+  const small = () =>
+    new ReadableStream<Uint8Array>({
+      start(c) {
+        c.enqueue(new TextEncoder().encode("data"));
+        c.close();
+      },
+    });
+  const sha1Hex = async (s: string) =>
+    Array.from(new Uint8Array(await crypto.subtle.digest("SHA-1", new TextEncoder().encode(s))), (b) =>
+      b.toString(16).padStart(2, "0"),
+    ).join("");
+  const resource = (over: Record<string, unknown> = {}) =>
+    mockResponse({
+      public_id: "docs/inv_42",
+      version: 3,
+      format: "pdf",
+      resource_type: "raw",
+      type: "upload",
+      bytes: 1234,
+      secure_url: "https://res.cloudinary.com/demo/raw/upload/v3/docs/inv_42",
+      ...over,
+    });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    driver = new CloudinaryDriver({ cloudName: "demo", apiKey: "key123", apiSecret: "secret456" });
+  });
+
+  it("sends the id as public_id with overwrite and the token as signed context", async () => {
+    let body: FormData | undefined;
+    mockFetch.mockImplementation(async (_url: string, init: RequestInit) => {
+      body = init.body as FormData;
+      return resource();
+    });
+
+    await driver.upload(small(), { filename: "r.pdf", path: "docs", id: "inv_42", uploadToken: "tok-1" });
+
+    expect(body!.get("public_id")).toBe("inv_42");
+    expect(body!.get("overwrite")).toBe("true");
+    expect(body!.get("context")).toBe("fileway_upload_token=tok-1");
+    const ts = body!.get("timestamp") as string;
+    expect(body!.get("signature")).toBe(
+      await sha1Hex(
+        `context=fileway_upload_token=tok-1&folder=docs&overwrite=true&public_id=inv_42&timestamp=${ts}` + "secret456",
+      ),
+    );
+  });
+
+  it("pathFor is <folder>/<id>", () => {
+    expect(driver.pathFor({ filename: "r.pdf", path: "docs", id: "inv_42" })).toBe("docs/inv_42");
+    expect(driver.pathFor({ filename: "r.pdf", id: "inv_42" })).toBe("inv_42");
+  });
+
+  it("head tries each resource type and maps the stored token", async () => {
+    mockFetch.mockImplementation(async (url: string) => {
+      if (String(url).includes("/resources/raw/upload/docs/inv_42")) {
+        return resource({ context: { custom: { fileway_upload_token: "tok-1" } } });
+      }
+      return mockResponse({ error: { message: "not found" } }, 404);
+    });
+
+    const object = await driver.head("docs/inv_42");
+
+    expect(object).toMatchObject({ path: "docs/inv_42", size: 1234, uploadToken: "tok-1" });
+    expect(mockFetch.mock.calls.map(([u]) => String(u).split("/resources/")[1])).toEqual([
+      "image/upload/docs/inv_42",
+      "video/upload/docs/inv_42",
+      "raw/upload/docs/inv_42",
+    ]);
+    const headers = (mockFetch.mock.calls[0]![1] as RequestInit).headers as Record<string, string>;
+    expect(headers.authorization).toBe(`Basic ${btoa("key123:secret456")}`);
+  });
+
+  it("head falls back to the bare id for dynamic-folder accounts", async () => {
+    mockFetch.mockImplementation(async (url: string) =>
+      String(url).endsWith("/resources/image/upload/inv_42")
+        ? resource({ public_id: "inv_42", resource_type: "image" })
+        : mockResponse({}, 404),
+    );
+    await expect(driver.head("docs/inv_42")).resolves.toMatchObject({ path: "inv_42" });
+  });
+
+  it("head returns null when no resource type has the asset", async () => {
+    mockFetch.mockImplementation(async () => mockResponse({}, 404));
+    await expect(driver.head("docs/missing")).resolves.toBeNull();
+  });
+
+  it("head throws a typed error on auth failures", async () => {
+    mockFetch.mockImplementation(async () => mockResponse({}, 401));
+    await expect(driver.head("docs/x")).rejects.toMatchObject({ code: "auth-failed", statusCode: 401 });
   });
 });

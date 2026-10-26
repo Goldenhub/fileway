@@ -38,13 +38,24 @@ jobs:
       - name: Unit tests
         run: pnpm test
 
+      # MinIO stopped publishing community images (quay.io now returns 401 and the
+      # Docker Hub images are gone), so use Chainguard's build of the same server.
+      # It runs as a non-root user (UID 65532), hence the writable tmpfs for /data.
       - name: Start MinIO
+        env:
+          MINIO_IMAGE: cgr.dev/chainguard/minio:latest
         run: |
+          for attempt in 1 2 3; do
+            docker pull "$MINIO_IMAGE" && break
+            if [ "$attempt" -eq 3 ]; then echo "Failed to pull $MINIO_IMAGE" >&2; exit 1; fi
+            sleep 5
+          done
           docker run -d --name minio \
             -p 9000:9000 \
+            --tmpfs /data:rw,mode=1777 \
             -e MINIO_ROOT_USER=minioadmin \
             -e MINIO_ROOT_PASSWORD=minioadmin \
-            quay.io/minio/minio:latest server /data
+            "$MINIO_IMAGE" server /data
           for i in $(seq 1 30); do
             if curl -sf http://localhost:9000/minio/health/live >/dev/null; then
               echo "MinIO ready"
@@ -52,7 +63,11 @@ jobs:
             fi
             sleep 2
           done
-          curl -sf http://localhost:9000/minio/health/live >/dev/null || { echo "MinIO failed to start" >&2; exit 1; }
+          if ! curl -sf http://localhost:9000/minio/health/live >/dev/null; then
+            echo "MinIO failed to start" >&2
+            docker logs minio >&2 || true
+            exit 1
+          fi
 
       - name: S3 integration tests (MinIO)
         run: pnpm --filter @fileway/s3 exec vitest run src/minio.integration.test.ts

@@ -313,3 +313,92 @@ describe("LocalDriver", () => {
     expect(text).toBe(content);
   });
 })
+
+describe("LocalDriver stable ids and upload status", () => {
+  let tmpDir: string;
+  let driver: LocalDriver;
+  const text = (s: string) =>
+    new ReadableStream<Uint8Array>({
+      start(c) {
+        c.enqueue(new TextEncoder().encode(s));
+        c.close();
+      },
+    });
+
+  beforeEach(() => {
+    tmpDir = mkdtempSync(join(tmpdir(), "fileway-local-status-"));
+    driver = new LocalDriver({ directory: tmpDir });
+  });
+  afterEach(() => {
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it("names the file from the id, and a second upload with the same id overwrites it", async () => {
+    const first = await driver.upload(text("first"), { filename: "a.txt", path: "docs", id: "inv_42" });
+    expect(first.path).toBe(join("docs", "inv_42.txt"));
+    expect(first.id).toBe("inv_42");
+
+    await driver.upload(text("second"), { filename: "a.txt", path: "docs", id: "inv_42" });
+
+    expect(readdirSync(join(tmpDir, "docs"))).toEqual(["inv_42.txt"]);
+    expect(readFileSync(join(tmpDir, "docs", "inv_42.txt"), "utf-8")).toBe("second");
+  });
+
+  it("keeps an earlier complete file when a later attempt with the same id fails", async () => {
+    await driver.upload(text("complete"), { filename: "a.txt", id: "keep" });
+
+    const controller = new AbortController();
+    const slow = new ReadableStream<Uint8Array>({
+      start(c) {
+        c.enqueue(new TextEncoder().encode("partial data"));
+        setTimeout(() => controller.abort(), 20);
+      },
+    });
+    await expect(
+      driver.upload(slow, { filename: "a.txt", id: "keep", signal: controller.signal }),
+    ).rejects.toMatchObject({ name: "AbortError" });
+
+    expect(readdirSync(tmpDir)).toEqual(["keep.txt"]); // no .partial left behind
+    expect(readFileSync(join(tmpDir, "keep.txt"), "utf-8")).toBe("complete");
+  });
+
+  it("head reports a stored file and null when missing", async () => {
+    await driver.upload(text("hello"), { filename: "a.txt", id: "h1" });
+
+    const object = await driver.head("h1.txt");
+    expect(object).toMatchObject({ id: "h1", path: "h1.txt", size: 5, url: `file://${tmpDir}/h1.txt` });
+    expect(object?.lastModified).toBeInstanceOf(Date);
+    expect(object).not.toHaveProperty("uploadToken");
+    await expect(driver.head("missing.txt")).resolves.toBeNull();
+  });
+
+  it("isPending sees an in-progress upload", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const stream = new ReadableStream<Uint8Array>({
+      async start(c) {
+        c.enqueue(new TextEncoder().encode("part"));
+        await gate;
+        c.close();
+      },
+    });
+    const pending = driver.upload(stream, { filename: "a.txt", id: "busy" });
+    await new Promise((r) => setTimeout(r, 30));
+
+    await expect(driver.isPending("busy.txt")).resolves.toBe(true);
+    release();
+    await pending;
+    await expect(driver.isPending("busy.txt")).resolves.toBe(false);
+  });
+
+  it("works with FilewayClient.getUploadStatus", async () => {
+    const client = new FilewayClient({ driver });
+    await client.upload(text("data"), { filename: "r.pdf", path: "x", id: "s1" });
+
+    await expect(client.getUploadStatus("s1", { filename: "r.pdf", path: "x" })).resolves.toMatchObject({
+      state: "complete",
+      object: { size: 4 },
+    });
+    await expect(client.getUploadStatus("s2", { filename: "r.pdf", path: "x" })).resolves.toEqual({ state: "missing" });
+  });
+});
