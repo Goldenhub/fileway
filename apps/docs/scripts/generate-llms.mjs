@@ -5,7 +5,8 @@ import { fileURLToPath } from "node:url";
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const contentDir = join(root, "content", "docs");
 const publicDir = join(root, "public");
-const SITE = process.env.NEXT_PUBLIC_SITE_URL ?? "https://fileway.dev";
+// Keep in sync with SITE_URL in lib/site.ts (this script runs outside the Next build).
+const SITE = process.env.NEXT_PUBLIC_SITE_URL ?? "https://www.usefileway.dev";
 const SITE_NAME = "Fileway";
 const SITE_DESCRIPTION =
   "Runtime-agnostic file storage for JavaScript & TypeScript. Zero-dependency drivers for local disk, AWS S3, Cloudflare R2, MinIO, and Cloudinary with full type inference.";

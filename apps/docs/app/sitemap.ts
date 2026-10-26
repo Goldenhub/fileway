@@ -11,6 +11,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
       seen.add(page.url);
       return {
         url: `${SITE_URL}${page.url}`,
+        ...(page.data.lastModified ? { lastModified: new Date(page.data.lastModified) } : {}),
         changeFrequency: "weekly",
         priority: 0.8,
       };

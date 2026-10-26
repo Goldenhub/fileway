@@ -1,4 +1,3 @@
-import type { Metadata } from "next";
 import { Header } from "../components/landing/header";
 import { Hero } from "../components/landing/hero";
 import { InteractiveDemo } from "../components/landing/interactive-demo";
@@ -7,25 +6,6 @@ import { DriversSection } from "../components/landing/drivers-section";
 import { CodeComparison } from "../components/landing/code-comparison";
 import { Footer } from "../components/landing/footer";
 import { SITE_NAME, SITE_DESCRIPTION, SITE_URL, GITHUB_URL, NPM_URL } from "@/lib/site";
-
-export const metadata: Metadata = {
-  title: `${SITE_NAME}: Runtime-agnostic file storage for JavaScript & TypeScript`,
-  description: SITE_DESCRIPTION,
-  alternates: { canonical: "/" },
-  openGraph: {
-    type: "website",
-    url: SITE_URL,
-    title: `${SITE_NAME}: Runtime-agnostic file storage for JavaScript & TypeScript`,
-    description: SITE_DESCRIPTION,
-    siteName: SITE_NAME,
-    locale: "en_US",
-  },
-  twitter: {
-    card: "summary",
-    title: `${SITE_NAME}: Runtime-agnostic file storage for JavaScript & TypeScript`,
-    description: SITE_DESCRIPTION,
-  },
-};
 
 const jsonLd = {
   "@context": "https://schema.org",
@@ -40,7 +20,7 @@ const jsonLd = {
     url: SITE_URL,
     logo: {
       "@type": "ImageObject",
-      url: `${SITE_URL}/icon.svg`,
+      url: `${SITE_URL}/icon.png`,
     },
     sameAs: [GITHUB_URL, NPM_URL],
   },

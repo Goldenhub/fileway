@@ -18,7 +18,6 @@ const AI_AGENTS = [
   "Applebot-Extended",
   "Meta-ExternalAgent",
   "cohere-ai",
-  "EmbeddigBot",
   "YouBot",
 ];
 

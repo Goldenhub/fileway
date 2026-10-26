@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { markdownUrl, source } from "@/lib/source";
+import { markdownUrl, ogImageUrl, source } from "@/lib/source";
 import {
   DocsPage,
   DocsBody,
@@ -14,7 +14,7 @@ import { Tab, Tabs } from "fumadocs-ui/components/tabs";
 import { Step, Steps } from "fumadocs-ui/components/steps";
 import { getBreadcrumbItems } from "fumadocs-core/breadcrumb";
 import { PageFeedback } from "@/components/page-feedback";
-import { SITE_NAME, GITHUB_URL, absoluteUrl } from "@/lib/site";
+import { SITE_NAME, GITHUB_URL, OG_IMAGE_SIZE, FEED_ALTERNATE, absoluteUrl } from "@/lib/site";
 
 export default async function Page(props: { params: Promise<{ slug?: string[] }> }) {
   const params = await props.params;
@@ -37,6 +37,8 @@ export default async function Page(props: { params: Promise<{ slug?: string[] }>
     headline: page.data.title,
     description: page.data.description,
     url: absoluteUrl(page.url),
+    image: absoluteUrl(ogImageUrl(page.slugs)),
+    ...(page.data.lastModified ? { dateModified: new Date(page.data.lastModified).toISOString() } : {}),
     inLanguage: "en-US",
     publisher: {
       "@type": "Organization",
@@ -113,25 +115,32 @@ export async function generateMetadata(props: { params: Promise<{ slug?: string[
 
   const title = page.data.title;
   const description = page.data.description;
+  // Share previews have no tab title around them, so name the site explicitly.
+  const socialTitle = `${title} · ${SITE_NAME}`;
+  const image = ogImageUrl(page.slugs);
 
   return {
     title,
     description,
     alternates: {
       canonical: page.url,
+      types: FEED_ALTERNATE,
     },
     openGraph: {
       type: "article",
-      title,
+      title: socialTitle,
       description,
       url: absoluteUrl(page.url),
       siteName: SITE_NAME,
       locale: "en_US",
+      images: [{ url: image, ...OG_IMAGE_SIZE, alt: socialTitle }],
+      ...(page.data.lastModified ? { modifiedTime: new Date(page.data.lastModified).toISOString() } : {}),
     },
     twitter: {
-      card: "summary",
-      title,
+      card: "summary_large_image",
+      title: socialTitle,
       description,
+      images: [image],
     },
     robots: {
       index: true,

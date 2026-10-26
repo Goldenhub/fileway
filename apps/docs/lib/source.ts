@@ -22,3 +22,8 @@ export function slugsFromMarkdownParams(params: string[]): string[] {
   if (parts.length === 0 && last === "index") return [];
   return [...parts, last];
 }
+
+/** URL of a docs page's Open Graph image (served by `app/og/[...slug]/route.tsx`). */
+export function ogImageUrl(slugs: string[]): string {
+  return `/og/docs/${slugs.length > 0 ? slugs.join("/") : "index"}.png`;
+}

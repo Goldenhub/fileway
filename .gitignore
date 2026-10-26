@@ -9,3 +9,4 @@ out/
 .env.development.local
 .env.production.local
 .DS_Store
+marketing/
