@@ -90,7 +90,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en" className={`${sans.variable} ${mono.variable}`} suppressHydrationWarning>
       <body>
-        <RootProvider theme={{ defaultTheme: "light" }}>{children}</RootProvider>
+        <RootProvider theme={{ defaultTheme: "light" }} search={{ options: { type: "static" } }}>{children}</RootProvider>
         <Analytics />
         <SpeedInsights />
       </body>
