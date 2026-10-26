@@ -15,7 +15,7 @@ The first stable release. Target scope, tracked on the [roadmap](README.md#roadm
 
 Expected: once the public API is frozen and has gone through real-world feedback via [GitHub Discussions](https://github.com/Goldenhub/fileway/discussions).
 
-## Unreleased
+## v0.4.0 (2026-10-26)
 
 **Features**
 - **Lost-response recovery.** When an upload fails with a retryable error, `FilewayClient` now checks whether the provider stored the object anyway (the response was lost, not the upload). If it did, the upload succeeds with that object instead of re-sending it or failing. This works even without `streamFactory`.
