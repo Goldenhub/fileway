@@ -3,7 +3,7 @@ title: S3 Driver
 description: Upload files to S3-compatible storage
 ---
 
-Uploads files to S3-compatible storage (AWS S3, Cloudflare R2, MinIO) with pure `fetch` and hand-rolled SigV4: no AWS SDK required, so it runs on Node.js, Bun, Deno, and edge runtimes.
+Uploads files to S3-compatible storage (AWS S3, Cloudflare R2, MinIO, DigitalOcean Spaces, Backblaze B2) with pure `fetch` and hand-rolled SigV4: no AWS SDK required, so it runs on Node.js, Bun, Deno, and edge runtimes.
 
 ```ts
 import { FilewayClient } from "@fileway/core";
@@ -162,6 +162,21 @@ const client = new FilewayClient({
 });
 ```
 
+## Other S3-compatible services
+
+Any service that speaks the S3 API works with `endpoint` and its own access keys:
+
+| Service | `endpoint` | `region` | Notes |
+|---|---|---|---|
+| DigitalOcean Spaces | `https://<region>.digitaloceanspaces.com` | the Spaces region, e.g. `nyc3` | |
+| Backblaze B2 | `https://s3.<region>.backblazeb2.com` | e.g. `us-west-004` | Use an application key |
+| Google Cloud Storage | `https://storage.googleapis.com` | `auto` | [HMAC keys](https://cloud.google.com/storage/docs/authentication/hmackeys); uploads use multipart by default (see below) |
+| Supabase Storage | `https://<ref>.storage.supabase.co/storage/v1/s3` | the project region | S3 access keys from the Storage settings; they bypass RLS |
+
+Google Cloud Storage stores the chunk signatures of an `aws-chunked` upload inside the object, so with a `storage.googleapis.com` endpoint `forceMultipart` defaults to `true` and every upload sends plain part bodies instead.
+
+The native [Google Cloud Storage](/docs/drivers/gcs) and [Supabase](/docs/drivers/supabase) drivers are usually a better fit: they use a service account or a Supabase key or user session directly, without creating S3 credentials.
+
 ## Config
 
 | Option | Type | Default | Description |
@@ -173,7 +188,7 @@ const client = new FilewayClient({
 | `forcePathStyle` | `boolean` | `true` with `endpoint`, else `false` | Use path-style URLs (`host/bucket`) instead of virtual-hosted (`bucket.host`). Set `false` to use virtual-hosted URLs on a custom endpoint. |
 | `baseUrl` | `string` | auto-derived | Base URL for generated URLs. For R2, set to the public dev URL or custom domain for browser-accessible links |
 | `partSize` | `number` | `8 MiB` | Multipart part size in bytes (clamped to a 5 MiB minimum) |
-| `forceMultipart` | `boolean` | `false` | Always use multipart uploads, regardless of size |
+| `forceMultipart` | `boolean` | `true` for a GCS endpoint, else `false` | Always use multipart uploads, regardless of size |
 
 ## Metadata
 

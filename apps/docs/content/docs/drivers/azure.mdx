@@ -1,0 +1,117 @@
+---
+title: Azure Blob Storage Driver
+description: Upload files to Azure Blob Storage with Shared Key or SAS auth, no Azure SDK
+---
+
+Uploads files to Azure Blob Storage with pure `fetch` and Web Crypto: Shared Key and SAS signatures are computed in-process, so there is no Azure SDK and it runs on Node.js, Bun, Deno, and edge runtimes.
+
+```bash
+npm install @fileway/core @fileway/azure
+```
+
+```ts
+import { FilewayClient } from "@fileway/core";
+import { AzureDriver } from "@fileway/azure";
+
+const client = new FilewayClient({
+  driver: new AzureDriver({
+    container: "uploads",
+    accountName: "mystorageaccount",
+    accountKey: process.env.AZURE_STORAGE_KEY!,
+  }),
+});
+
+const result = await client.upload(stream, {
+  filename: "report.pdf",
+  path: "invoices/2026",
+  mimeType: "application/pdf",
+});
+
+console.log(result.meta.container);
+console.log(result.meta.etag);
+```
+
+## Authentication
+
+Pick one:
+
+- **`accountName` + `accountKey`**: Shared Key auth. Also needed for presigned URLs.
+- **`sasToken`**: a SAS token with the permissions you need (read, create, write, delete). Requests carry the token instead of a signature.
+- **`connectionString`**: the connection string from the portal. Explicit options override its values.
+
+```ts
+new AzureDriver({ container: "uploads", connectionString: process.env.AZURE_STORAGE_CONNECTION_STRING! });
+```
+
+## Upload strategy
+
+The stream is read one block at a time, so memory stays bounded by `blockSize` (default 8 MiB) whatever the file size:
+
+- **Fits in one block**: a single `Put Blob`.
+- **Larger, or unknown size**: `Put Block` for each block, then `Put Block List` to commit them.
+
+Staged blocks are invisible until they are committed. If the upload fails, is cancelled, or the stream does not match a declared `size`, nothing is committed (an existing blob at that path is untouched), and Azure discards the staged blocks after 7 days.
+
+## Download and URLs
+
+- `get(path)` streams the blob.
+- `getUrl(path)` returns `https://<account>.blob.core.windows.net/<container>/<path>`, which works for containers with public read access. Set `baseUrl` for a CDN or custom domain.
+- `getPresignedUrl(path, { expiresIn })` returns a read-only service SAS URL, up to 7 days. It needs `accountKey`.
+
+## Upload status
+
+`pathFor`, `head` and `isPending` are implemented, so [`getUploadStatus`](/docs/guide/uploads#safe-retries-and-upload-status) reports `complete`, `pending` (blocks staged but not yet committed) or `missing`, and a lost upload response is recovered without uploading twice.
+
+## Azurite
+
+For local development, run [Azurite](https://learn.microsoft.com/azure/storage/common/storage-use-azurite) and use its connection string:
+
+```bash
+docker run -p 10000:10000 mcr.microsoft.com/azure-storage/azurite azurite-blob --blobHost 0.0.0.0
+```
+
+```ts
+new AzureDriver({ container: "uploads", connectionString: "UseDevelopmentStorage=true" });
+```
+
+The container must exist; create it once with the Azure CLI, Storage Explorer or the portal.
+
+## Config
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `container` | `string` | Required | Container name |
+| `accountName` | `string` | | Storage account name |
+| `accountKey` | `string` | | Account key (Shared Key auth and presigned URLs) |
+| `sasToken` | `string` | | SAS token, instead of an account key |
+| `connectionString` | `string` | | Connection string; `UseDevelopmentStorage=true` targets Azurite |
+| `endpoint` | `string` | `https://<account>.blob.core.windows.net` | Blob service endpoint |
+| `baseUrl` | `string` | `<endpoint>/<container>` | Base URL for `getUrl` |
+| `blockSize` | `number` | `8 MiB` | Block size, from 1 MiB to 4000 MiB |
+| `maxSizeBytes` | `number` | | Reject larger uploads with `size-exceeded` |
+
+## Metadata
+
+`AzureDriver implements BaseDriver<AzureMeta>`
+
+| Field | Type | Description |
+|---|---|---|
+| `meta.container` | `string` | Container name |
+| `meta.etag` | `string \| undefined` | Blob ETag |
+
+`options.metadata` is stored as `x-ms-meta-*` blob metadata. Azure only accepts names made of letters, digits and underscores that do not start with a digit, so a key like `user-id` throws a `validation` error. Use `userId` or `user_id`.
+
+## Errors
+
+All failures are `StorageError`s (see the [error reference](/docs/guide/observability#errors)). Codes come from Azure's `x-ms-error-code`, with an HTTP-status fallback:
+
+| Code | When |
+|------|------|
+| `validation` | Malformed upload options, an unsupported metadata key, a size mismatch, or an invalid `expiresIn`. |
+| `config` | Missing container, account name or credentials, or a presigned URL without `accountKey`. |
+| `not-found` | `BlobNotFound`, or HTTP 404. |
+| `bucket-not-found` | `ContainerNotFound`. |
+| `auth-failed` | `AuthenticationFailed`, `AuthorizationFailure` and related codes, or HTTP 401/403. |
+| `size-exceeded` | Over `maxSizeBytes`, `RequestBodyTooLarge`, more than 50,000 blocks, or HTTP 413. |
+| `network` | `fetch` failed before a response. Safe to retry. |
+| `provider-error` | Any other non-2xx response. Safe to retry. |

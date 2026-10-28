@@ -1,4 +1,4 @@
-import { ArrowUpRight, Cloud, HardDrive, Image as ImageIcon, Server } from "lucide-react";
+import { ArrowUpRight, Cloud, Database, HardDrive, Image as ImageIcon, Server } from "lucide-react";
 import type { ReactNode } from "react";
 import { TrackedLink } from "./tracked-link";
 import { Badge, Section, SectionHeading } from "./ui";
@@ -16,9 +16,33 @@ const drivers: { name: string; status: "Stable" | "Coming Soon"; link: string; d
     name: "@fileway/s3",
     status: "Stable",
     link: "/docs/drivers/s3",
-    desc: "AWS S3, Cloudflare R2, MinIO, DigitalOcean Spaces",
+    desc: "AWS S3, Cloudflare R2, MinIO, Spaces, Backblaze B2",
     supports: "Universal",
     icon: <Server />,
+  },
+  {
+    name: "@fileway/gcs",
+    status: "Stable",
+    link: "/docs/drivers/gcs",
+    desc: "Google Cloud Storage with a service account",
+    supports: "Universal",
+    icon: <Cloud />,
+  },
+  {
+    name: "@fileway/azure",
+    status: "Stable",
+    link: "/docs/drivers/azure",
+    desc: "Azure Blob Storage with Shared Key or SAS",
+    supports: "Universal",
+    icon: <Cloud />,
+  },
+  {
+    name: "@fileway/supabase",
+    status: "Stable",
+    link: "/docs/drivers/supabase",
+    desc: "Supabase Storage, with RLS for user sessions",
+    supports: "Universal",
+    icon: <Database />,
   },
   {
     name: "@fileway/cloudinary",
@@ -27,14 +51,6 @@ const drivers: { name: string; status: "Stable" | "Coming Soon"; link: string; d
     desc: "Pure fetch + Web Crypto, zero Node dependencies",
     supports: "Universal",
     icon: <ImageIcon />,
-  },
-  {
-    name: "@fileway/driver-gcs",
-    status: "Coming Soon",
-    link: "/docs",
-    desc: "Google Cloud Storage adapter",
-    supports: "Universal",
-    icon: <Cloud />,
   },
 ];
 

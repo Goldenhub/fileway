@@ -9,7 +9,7 @@ const publicDir = join(root, "public");
 const SITE = process.env.NEXT_PUBLIC_SITE_URL ?? "https://www.usefileway.dev";
 const SITE_NAME = "Fileway";
 const SITE_DESCRIPTION =
-  "Runtime-agnostic file storage for JavaScript & TypeScript. Zero-dependency drivers for local disk, AWS S3, Cloudflare R2, MinIO, and Cloudinary with full type inference.";
+  "Runtime-agnostic file storage for JavaScript & TypeScript. Zero-dependency drivers for local disk, AWS S3, Cloudflare R2, Google Cloud Storage, Azure Blob, Supabase Storage, and Cloudinary with full type inference.";
 
 function parseFrontmatter(md) {
   const match = md.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?/);

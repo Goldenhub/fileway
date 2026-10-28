@@ -154,7 +154,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ slug: s
     return render({
       title: "One standard API for all your file storage.",
       highlight: "Zero dependencies.",
-      description: "Local disk, AWS S3, Cloudflare R2, MinIO and Cloudinary. Runs on Node.js, Bun, Deno and the edge.",
+      description: "Local disk, S3, R2, Google Cloud, Azure, Supabase and Cloudinary. Runs on Node.js, Bun, Deno and the edge.",
     });
   }
 

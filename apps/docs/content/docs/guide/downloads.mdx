@@ -11,6 +11,9 @@ Returns a static public URL built from the driver's `baseUrl` (or an auto-derive
 |--------|------------|
 | `LocalDriver` | `<baseUrl>/<path>`: defaults to `file://<directory>/<path>`. Set `baseUrl` to a CDN/web URL in production. |
 | `S3Driver` | `<baseUrl>/<path>`: virtual-hosted or path-style based on `forcePathStyle`. Assumes the bucket is publicly readable. |
+| `GCSDriver` | `<baseUrl>/<path>`: defaults to `https://storage.googleapis.com/<bucket>/<path>`. Assumes the object is publicly readable. |
+| `AzureDriver` | `<baseUrl>/<path>`: defaults to `https://<account>.blob.core.windows.net/<container>/<path>`. Assumes public read access. |
+| `SupabaseDriver` | The public object URL (`/storage/v1/object/public/<bucket>/<path>`). Works for public buckets only. |
 | `CloudinaryDriver` | The Cloudinary CDN URL for the asset. |
 
 ## Pre-signed URLs
@@ -48,4 +51,7 @@ The stream is pull-based with backpressure, so files are never buffered whole on
 |--------|----------|
 | `LocalDriver` | Streams the file from disk via `createReadStream` → `Readable.toWeb()`. Throws if the file is missing or the path escapes the storage directory. |
 | `S3Driver` | Authenticated SigV4 `GET`; returns the response body directly. Throws with the HTTP status on failure (e.g. 404). |
+| `GCSDriver` | Authenticated `GET ?alt=media`; returns the response body. |
+| `AzureDriver` | Signed (Shared Key) or SAS `GET`; returns the response body. |
+| `SupabaseDriver` | `GET` on the authenticated object route; returns the response body. |
 | `CloudinaryDriver` | `fetch`es the asset's public CDN URL and returns the response body. Throws on a non-2xx status. |

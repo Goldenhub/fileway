@@ -7,25 +7,25 @@ Fileway is intentionally minimal. This page is the overview: exactly what each d
 
 ## Coverage Matrix
 
-| Capability | `LocalDriver` | `S3Driver` | `CloudinaryDriver` |
-|------------|:---:|:---:|:---:|
-| Upload via `ReadableStream` | ✅ | ✅ | ✅ |
-| Upload cancellation (`AbortSignal`) | ✅ | ✅ | ✅ |
-| Upload progress (`onProgress`) | ✅ | ✅ | ✅ |
-| True streaming (no full buffering) | ✅ | ✅¹ | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> |
-| Multipart upload (large files) | <span style={{ color: "var(--color-fd-primary)" }}>n/a</span> | ✅ | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> |
-| Public URL retrieval (`getUrl`) | ✅ | ✅ | ✅ |
-| Pre-signed URLs | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> | ✅ | ✅ |
-| Download / read-back | ✅ | ✅ | ✅ |
-| Typed errors (`StorageError.code`) | ✅ | ✅ | ✅ |
-| Logging & error hooks (`logger`, `onError`) | ✅ | ✅ | ✅ |
-| User metadata (`options.metadata`) | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> | ✅ | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> |
-| Result metadata (`result.meta`) | ✅ | ✅ | ✅ |
-| Object tagging | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> |
-| TTL / expiration | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> |
-| Lifecycle rules | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> |
+| Capability | `LocalDriver` | `S3Driver` | `GCSDriver` | `AzureDriver` | `SupabaseDriver` | `CloudinaryDriver` |
+|------------|:---:|:---:|:---:|:---:|:---:|:---:|
+| Upload via `ReadableStream` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Upload cancellation (`AbortSignal`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Upload progress (`onProgress`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| True streaming (no full buffering) | ✅ | ✅¹ | ✅¹ | ✅¹ | ✅¹ | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> |
+| Multipart upload (large files) | <span style={{ color: "var(--color-fd-primary)" }}>n/a</span> | ✅ | ✅ | ✅ | ✅ | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> |
+| Public URL retrieval (`getUrl`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Pre-signed URLs | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Download / read-back | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Typed errors (`StorageError.code`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Logging & error hooks (`logger`, `onError`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| User metadata (`options.metadata`) | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> | ✅ | ✅ | ✅ | ✅ | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> |
+| Result metadata (`result.meta`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Object tagging | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> |
+| TTL / expiration | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> |
+| Lifecycle rules | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> |
 
-Legend: **✅** supported today · **¹** S3 always streams with bounded memory: `aws-chunked` when the size is known, multipart when it is not (see [uploads](/docs/guide/uploads)) · **n/a** not applicable (streams directly to disk, no parts) · <span style={{ color: "var(--color-fd-primary)" }}>✕</span> not yet supported (in the works).
+Legend: **✅** supported today · **¹** streams with bounded memory, one part, block or chunk at a time; S3 also streams a known size as one `aws-chunked` request (see [uploads](/docs/guide/uploads)) · **n/a** not applicable (streams directly to disk, no parts) · <span style={{ color: "var(--color-fd-primary)" }}>✕</span> not yet supported (in the works).
 
 ## Roadmap
 

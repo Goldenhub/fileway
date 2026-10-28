@@ -1,0 +1,121 @@
+---
+title: Google Cloud Storage Driver
+description: Upload files to Google Cloud Storage with a service account, no Google SDK
+---
+
+Uploads files to Google Cloud Storage with pure `fetch` and Web Crypto: service account JWTs and V4 signed URLs are signed in-process, so there is no Google SDK and it runs on Node.js, Bun, Deno, and edge runtimes.
+
+```bash
+npm install @fileway/core @fileway/gcs
+```
+
+```ts
+import { FilewayClient } from "@fileway/core";
+import { GCSDriver } from "@fileway/gcs";
+
+const client = new FilewayClient({
+  driver: new GCSDriver({
+    bucket: "my-bucket",
+    // The contents of the service account JSON key file.
+    serviceAccount: process.env.GCS_SERVICE_ACCOUNT_JSON!,
+  }),
+});
+
+const result = await client.upload(stream, {
+  filename: "report.pdf",
+  path: "invoices/2026",
+  mimeType: "application/pdf",
+});
+
+console.log(result.meta.generation);
+console.log(result.meta.md5Hash);
+```
+
+## Authentication
+
+Pick one:
+
+- **`serviceAccount`**: the JSON key file, as a string or parsed object. The driver signs a short-lived JWT, exchanges it for an access token, and caches the token until shortly before it expires.
+- **`credentials`**: the same key as `{ clientEmail, privateKey }`. Escaped newlines (`\n`) in an environment variable are handled.
+- **`getAccessToken`**: a function that returns an OAuth token. Use it on Google Cloud with Workload Identity or the metadata server, so no key file is needed:
+
+```ts
+new GCSDriver({
+  bucket: "my-bucket",
+  getAccessToken: async () => {
+    const res = await fetch(
+      "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token",
+      { headers: { "Metadata-Flavor": "Google" } },
+    );
+    return (await res.json()).access_token;
+  },
+});
+```
+
+The service account needs `storage.objects.create`, `get` and `delete` on the bucket (for example the Storage Object User role).
+
+## Upload strategy
+
+The stream is read one chunk at a time, so memory stays bounded by `chunkSize` (default 8 MiB) whatever the file size:
+
+- **Fits in one chunk**: a single `multipart/related` request carrying the metadata and the content.
+- **Larger, or unknown size**: a [resumable upload](https://cloud.google.com/storage/docs/resumable-uploads) session with one `PUT` per chunk. If Google stores only part of a chunk, the rest is sent again.
+
+If the stream ends before or after a declared `size`, or the upload fails or is cancelled, the session is deleted so nothing partial is stored.
+
+## Download and URLs
+
+- `get(path)` streams the object (`?alt=media`).
+- `getUrl(path)` returns `https://storage.googleapis.com/<bucket>/<path>`, which works for publicly readable objects. Set `baseUrl` for a CDN or custom domain.
+- `getPresignedUrl(path, { expiresIn })` returns a V4 signed URL (`GOOG4-RSA-SHA256`), up to 7 days. It needs `serviceAccount` or `credentials`; with only `getAccessToken` it throws a `config` error.
+
+## Upload status
+
+`pathFor` and `head` are implemented, so [`getUploadStatus`](/docs/guide/uploads#safe-retries-and-upload-status) reports `complete` or `missing`, and a lost upload response is recovered without uploading twice. Resumable sessions cannot be listed, so `pending` is never reported.
+
+## Using the S3 driver instead
+
+Google Cloud Storage also speaks the S3 API with [HMAC keys](https://cloud.google.com/storage/docs/authentication/hmackeys). If you already use `@fileway/s3`, see [Other S3-compatible services](/docs/drivers/s3#other-s3-compatible-services). The native driver is the better fit when you authenticate with a service account.
+
+## Config
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `bucket` | `string` | Required | Bucket name |
+| `serviceAccount` | `string \| object` | | Service account JSON key |
+| `credentials` | `{ clientEmail, privateKey }` | | The same key as separate fields |
+| `getAccessToken` | `() => Promise<string>` | | Supplies an OAuth access token |
+| `endpoint` | `string` | `https://storage.googleapis.com` | API endpoint, e.g. for an emulator |
+| `baseUrl` | `string` | `<endpoint>/<bucket>` | Base URL for `getUrl` |
+| `chunkSize` | `number` | `8 MiB` | Resumable chunk size, rounded down to a multiple of 256 KiB |
+| `maxSizeBytes` | `number` | | Reject larger uploads with `size-exceeded` |
+
+One of `serviceAccount`, `credentials` or `getAccessToken` is required.
+
+## Metadata
+
+`GCSDriver implements BaseDriver<GCSMeta>`
+
+| Field | Type | Description |
+|---|---|---|
+| `meta.bucket` | `string` | Bucket name |
+| `meta.generation` | `string \| undefined` | Object generation |
+| `meta.md5Hash` | `string \| undefined` | Base64 MD5 of the content |
+| `meta.etag` | `string \| undefined` | Object ETag |
+
+`options.metadata` is stored as custom object metadata.
+
+## Errors
+
+All failures are `StorageError`s (see the [error reference](/docs/guide/observability#errors)). For this driver:
+
+| Code | When |
+|------|------|
+| `validation` | Malformed upload options, a size mismatch, or an invalid `expiresIn`. |
+| `config` | No auth configured, an invalid service account JSON, a PKCS #1 key, or a presigned URL without a key. |
+| `not-found` | The object does not exist. |
+| `bucket-not-found` | The bucket does not exist. |
+| `auth-failed` | The token exchange was rejected, or HTTP 401/403. |
+| `size-exceeded` | Over `maxSizeBytes`, or HTTP 413. |
+| `network` | `fetch` failed before a response. Safe to retry. |
+| `provider-error` | Any other non-2xx response. Safe to retry. |

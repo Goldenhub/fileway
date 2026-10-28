@@ -20,6 +20,9 @@ const result = await client.upload(stream, {
 | Driver | Behavior |
 |--------|----------|
 | `S3Driver` | Sends metadata as signed `x-amz-meta-*` request headers, so it is persisted as S3 user metadata. |
+| `GCSDriver` | Stored as custom object metadata. |
+| `AzureDriver` | Stored as `x-ms-meta-*` blob metadata. Keys must be letters, digits and underscores (no hyphens). |
+| `SupabaseDriver` | Stored as the object's user metadata. |
 | `LocalDriver` | Metadata is **not persisted yet** (persistence is in the works). |
 | `CloudinaryDriver` | Metadata is **not sent yet** (support is in the works). |
 
@@ -31,6 +34,9 @@ Each driver returns its own typed metadata:
 |--------|--------------|
 | `LocalDriver` | `{ localPath: string }` |
 | `S3Driver` | `{ bucket: string; etag?: string }` |
+| `GCSDriver` | `{ bucket: string; generation?: string; md5Hash?: string; etag?: string }` |
+| `AzureDriver` | `{ container: string; etag?: string }` |
+| `SupabaseDriver` | `{ bucket: string; etag?: string }` |
 | `CloudinaryDriver` | `{ publicId, version, format, resourceType, bytes, secureUrl, width?, height? }` |
 
 ## Object tagging

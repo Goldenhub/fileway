@@ -17,6 +17,9 @@ const columns = [
     links: [
       { label: "Local", href: "/docs/drivers/local" },
       { label: "S3, R2 & MinIO", href: "/docs/drivers/s3" },
+      { label: "Google Cloud Storage", href: "/docs/drivers/gcs" },
+      { label: "Azure Blob Storage", href: "/docs/drivers/azure" },
+      { label: "Supabase Storage", href: "/docs/drivers/supabase" },
       { label: "Cloudinary", href: "/docs/drivers/cloudinary" },
     ],
   },

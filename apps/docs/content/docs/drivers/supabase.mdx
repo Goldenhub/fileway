@@ -1,0 +1,107 @@
+---
+title: Supabase Storage Driver
+description: Upload files to Supabase Storage with a secret key or a user's session, no supabase-js
+---
+
+Uploads files to Supabase Storage with pure `fetch` against the Storage REST and resumable (TUS) APIs: no `supabase-js` required, so it runs on Node.js, Bun, Deno, and edge runtimes.
+
+```bash
+npm install @fileway/core @fileway/supabase
+```
+
+```ts
+import { FilewayClient } from "@fileway/core";
+import { SupabaseDriver } from "@fileway/supabase";
+
+const client = new FilewayClient({
+  driver: new SupabaseDriver({
+    url: "https://<project-ref>.supabase.co",
+    key: process.env.SUPABASE_SECRET_KEY!,
+    bucket: "documents",
+  }),
+});
+
+const result = await client.upload(stream, {
+  filename: "report.pdf",
+  path: "invoices/2026",
+  mimeType: "application/pdf",
+});
+
+console.log(result.url);
+```
+
+## Authentication
+
+- **Server side**: pass a secret key (`sb_secret_...`) or the legacy service role key. It has full access and bypasses Row Level Security, so never ship it to a browser.
+- **As a signed-in user**: pass the publishable (or anon) key plus the user's JWT as `accessToken`. Storage then applies the bucket's RLS policies to every request.
+
+```ts
+new SupabaseDriver({
+  url: "https://<project-ref>.supabase.co",
+  key: process.env.SUPABASE_PUBLISHABLE_KEY!,
+  accessToken: session.access_token,
+  bucket: "avatars",
+});
+```
+
+## Upload strategy
+
+Every upload overwrites an existing object at the same path (`x-upsert`), and memory stays bounded whatever the file size:
+
+- **Up to 6 MiB**: one standard upload request.
+- **Known size above 6 MiB**: a [resumable upload](https://supabase.com/docs/guides/storage/uploads/resumable-uploads) in 6 MiB chunks, the size Supabase requires. A failed or cancelled upload is terminated.
+- **Unknown size above 6 MiB**: the stream is sent as the body of one standard upload, without buffering it. Standard uploads are limited to 5 GB, so pass `size` for larger files.
+
+If the stream ends before or after a declared `size`, the upload throws a `validation` error and nothing is stored. For large uploads, the direct storage hostname (`https://<project-ref>.storage.supabase.co`) is faster and works as `url` too.
+
+## Download and URLs
+
+- `get(path)` streams the object through the authenticated route.
+- `getUrl(path)` returns the public object URL (`/storage/v1/object/public/<bucket>/<path>`), which only works for public buckets. Set `baseUrl` for a custom domain.
+- `getPresignedUrl(path, { expiresIn })` returns a Supabase signed URL.
+
+## Upload status
+
+`pathFor` and `head` are implemented, so [`getUploadStatus`](/docs/guide/uploads#safe-retries-and-upload-status) reports `complete` or `missing`, and a lost upload response is recovered without uploading twice.
+
+## Using the S3 driver instead
+
+Supabase Storage also has an [S3-compatible endpoint](https://supabase.com/docs/guides/storage/s3/compatibility). See [Other S3-compatible services](/docs/drivers/s3#other-s3-compatible-services). The native driver is the better fit when you want RLS with user sessions.
+
+## Config
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `url` | `string` | Required | Project URL or direct storage hostname |
+| `key` | `string` | Required | Secret / service role key, or publishable / anon key with `accessToken` |
+| `bucket` | `string` | Required | Bucket name |
+| `accessToken` | `string` | | A user's JWT, so RLS policies apply |
+| `baseUrl` | `string` | public object URL | Base URL for `getUrl` |
+| `cacheControl` | `number` | `3600` | `Cache-Control` max-age in seconds |
+| `maxSizeBytes` | `number` | | Reject larger uploads with `size-exceeded` |
+
+## Metadata
+
+`SupabaseDriver implements BaseDriver<SupabaseMeta>`
+
+| Field | Type | Description |
+|---|---|---|
+| `meta.bucket` | `string` | Bucket name |
+| `meta.etag` | `string \| undefined` | Object ETag, when the response includes it |
+
+`options.metadata` is stored as the object's user metadata.
+
+## Errors
+
+All failures are `StorageError`s (see the [error reference](/docs/guide/observability#errors)). Storage often answers HTTP 400 with the real status in the JSON body, so the body is classified first:
+
+| Code | When |
+|------|------|
+| `validation` | Malformed upload options, a size mismatch, or an invalid `expiresIn`. |
+| `config` | Missing `url`, `key` or `bucket`. |
+| `not-found` | The object does not exist. |
+| `bucket-not-found` | The bucket does not exist. |
+| `auth-failed` | Invalid key or JWT, an RLS policy rejected the request, or HTTP 401/403. |
+| `size-exceeded` | Over `maxSizeBytes` or the bucket's file size limit, or HTTP 413. |
+| `network` | `fetch` failed before a response. Safe to retry. |
+| `provider-error` | Any other non-2xx response. Safe to retry. |

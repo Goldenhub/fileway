@@ -52,6 +52,9 @@ try {
 |--------|----------------|
 | `LocalDriver` | Missing file → `not-found`; escaping path → `validation`. |
 | `S3Driver` | Parses the AWS/MinIO XML `<Code>` (`NoSuchBucket`, `NoSuchKey`/`NoSuchUpload`, `AccessDenied`/`InvalidAccessKeyId`/`SignatureDoesNotMatch`/`ExpiredToken`/`InvalidToken`, `EntityTooLarge`) with an HTTP-status fallback (401/403 → `auth-failed`, 404 → `not-found`, 413 → `size-exceeded`, else `provider-error`). `fetch` failures → `network`; missing credentials → `config`. |
+| `GCSDriver` | JSON error body and HTTP status: 401/403 → `auth-failed`, 404 → `not-found` or `bucket-not-found` (from the message), 413 → `size-exceeded`; a rejected token exchange → `auth-failed`. |
+| `AzureDriver` | The `x-ms-error-code` header (`ContainerNotFound`, `BlobNotFound`, `AuthenticationFailed`/`AuthorizationFailure`, `RequestBodyTooLarge`), with an HTTP-status fallback. |
+| `SupabaseDriver` | The JSON body first (Storage often answers 400 with the real status inside): bucket or object not found, JWT and RLS failures → `auth-failed`, size limits → `size-exceeded`. |
 | `CloudinaryDriver` | HTTP status mapping: 401/403 → `auth-failed`, upload 404 → `bucket-not-found`, get 404 → `not-found`, 413 → `size-exceeded`, else `provider-error`. `fetch` failures → `network`. |
 
 Abort signals are never wrapped: cancelling an upload rejects with a plain `DOMException` named `AbortError` (see [Cancelling uploads](/docs/guide/uploads#cancelling-uploads)), which `isAbortError()` recognizes. This is the same error `fetch` itself throws on abort, so your cancellation handling works uniformly.

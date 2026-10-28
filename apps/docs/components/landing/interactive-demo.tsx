@@ -67,6 +67,68 @@ const result = await client.upload(stream, {
 })`,
   },
   {
+    id: "gcs",
+    label: "Google Cloud Storage",
+    description: "Service account auth, no Google SDK",
+    code: `import { FilewayClient } from "@fileway/core"
+import { GCSDriver } from "@fileway/gcs"
+
+const client = new FilewayClient({
+  driver: new GCSDriver({
+    bucket: "my-bucket",
+    serviceAccount: process.env.GCS_SERVICE_ACCOUNT_JSON,
+  }),
+})
+
+// TypeScript infers result.meta.generation
+const result = await client.upload(stream, {
+  filename: "profile.jpg",
+  metadata: { userId: "usr_123" },
+})`,
+  },
+  {
+    id: "azure",
+    label: "Azure Blob",
+    description: "Shared Key or SAS auth, no Azure SDK",
+    code: `import { FilewayClient } from "@fileway/core"
+import { AzureDriver } from "@fileway/azure"
+
+const client = new FilewayClient({
+  driver: new AzureDriver({
+    container: "uploads",
+    accountName: "mystorageaccount",
+    accountKey: process.env.AZURE_STORAGE_KEY,
+  }),
+})
+
+// TypeScript infers result.meta.container
+const result = await client.upload(stream, {
+  filename: "profile.jpg",
+  metadata: { userId: "usr_123" },
+})`,
+  },
+  {
+    id: "supabase",
+    label: "Supabase",
+    description: "Secret key or user session with RLS",
+    code: `import { FilewayClient } from "@fileway/core"
+import { SupabaseDriver } from "@fileway/supabase"
+
+const client = new FilewayClient({
+  driver: new SupabaseDriver({
+    url: "https://<project-ref>.supabase.co",
+    key: process.env.SUPABASE_SECRET_KEY,
+    bucket: "avatars",
+  }),
+})
+
+// Same API; uploads resume in 6 MiB chunks
+const result = await client.upload(stream, {
+  filename: "profile.jpg",
+  size: file.size,
+})`,
+  },
+  {
     id: "cloudinary",
     label: "Cloudinary",
     description: "Pure fetch + Web Crypto, zero Node deps",

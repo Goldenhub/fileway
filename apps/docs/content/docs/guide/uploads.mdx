@@ -26,6 +26,9 @@ const result = await client.upload(stream, {
 |--------|----------|
 | `LocalDriver` | **True streaming.** The web stream is piped to disk via Node.js streams with backpressure. Memory usage stays constant regardless of file size. Enforces `maxSizeBytes` while streaming. |
 | `S3Driver` | **Streams with bounded memory, always.** With `options.size` (≤ 5 GiB) the payload is sent as a SigV4 `aws-chunked` body whose chunks are signed lazily as they are read (backpressure preserved, zero buffering). Without a known size, or beyond 5 GiB, the driver falls back to a multipart upload, reading the stream into part-sized buffers (default 8 MiB, minimum 5 MiB), so peak memory stays bounded. |
+| `GCSDriver` | **Streams with bounded memory.** Files up to `chunkSize` (default 8 MiB) go up in one `multipart/related` request; larger or unknown sizes use a resumable session, one chunk in memory at a time. |
+| `AzureDriver` | **Streams with bounded memory.** Files up to `blockSize` (default 8 MiB) are one `Put Blob`; larger or unknown sizes are staged block by block and committed with `Put Block List`. |
+| `SupabaseDriver` | **Streams with bounded memory.** Up to 6 MiB is one request; a known larger size uses TUS in 6 MiB chunks; an unknown larger size is streamed as one request body. |
 | `CloudinaryDriver` | **Streams with bounded memory.** Files up to `chunkSize` (default 20 MiB) go up in one request; larger ones use Cloudinary's chunked upload, holding about one chunk in memory at a time. Enforces `maxSizeBytes` while streaming. |
 
 When the size is known, pass it to unlock the leanest (single-request) streaming path:
@@ -80,6 +83,9 @@ try {
 |--------|-------------------|
 | `LocalDriver` | Destroys the source and destination streams and unlinks the partial file, so nothing is left on disk. |
 | `S3Driver` | Cancels the request and source stream. For multipart uploads it first sends `AbortMultipartUpload` so no orphaned parts remain in the bucket. |
+| `GCSDriver` | Cancels the request and source stream, then deletes the resumable session. |
+| `AzureDriver` | Cancels the request and source stream. Staged blocks are never committed and Azure discards them. |
+| `SupabaseDriver` | Cancels the request and source stream, and terminates an unfinished TUS upload. |
 | `CloudinaryDriver` | Aborts the upload request. |
 
 ## Tracking upload progress
@@ -154,6 +160,9 @@ switch (status.state) {
 | Driver | `complete` | `pending` | Notes |
 |---|---|---|---|
 | `S3Driver` | `HEAD` on the object | Open multipart upload for the key | Token stored as `x-amz-meta-fileway-upload-token` |
+| `GCSDriver` | Object metadata `GET` | Not available | Token stored as custom metadata `fileway-upload-token` |
+| `AzureDriver` | `HEAD` on the blob | Blocks staged but not committed | Token stored as `x-ms-meta-fileway_upload_token` |
+| `SupabaseDriver` | `GET /object/info` | Not available | Token stored in user metadata |
 | `LocalDriver` | `stat` on the file | A `.partial` file is still being written | Writes to a temp file and renames it into place, so a failed retry never damages a finished file. No token; recovery checks size |
 | `CloudinaryDriver` | Admin API resource lookup | Not available | Token stored in context. Public IDs are `<folder>/<id>` (or `<id>` on dynamic-folder accounts) |
 

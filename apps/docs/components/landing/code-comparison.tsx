@@ -66,7 +66,7 @@ export function CodeComparison() {
       </div>
 
       <p className="mt-8 text-center text-sm text-ink-muted">
-        <span className="font-semibold text-ink">Same client</span> works with Local, S3, Cloudinary, and more. Just
+        <span className="font-semibold text-ink">Same client</span> works with Local, S3, GCS, Azure, Supabase, Cloudinary, and more. Just
         swap the driver.
       </p>
     </Section>

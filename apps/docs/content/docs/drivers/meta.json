@@ -1,4 +1,4 @@
 {
   "title": "Drivers",
-  "pages": ["local", "s3", "cloudinary"]
+  "pages": ["local", "s3", "gcs", "azure", "supabase", "cloudinary"]
 }

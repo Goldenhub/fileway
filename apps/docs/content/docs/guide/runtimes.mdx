@@ -50,10 +50,13 @@ deno run --allow-read --allow-env --allow-net \
 
 ### Vitest (unit tests)
 
-`@fileway/core` and `@fileway/cloudinary` already run tests under `@edge-runtime/vm` via vitest. Run:
+`@fileway/core`, `@fileway/gcs`, `@fileway/azure`, `@fileway/supabase` and `@fileway/cloudinary` run their unit tests under `@edge-runtime/vm` via vitest. Run:
 
 ```bash
 pnpm --filter @fileway/core test
+pnpm --filter @fileway/gcs test
+pnpm --filter @fileway/azure test
+pnpm --filter @fileway/supabase test
 pnpm --filter @fileway/cloudinary test
 ```
 
@@ -100,10 +103,10 @@ npx wrangler dev
 
 ## Compatibility Matrix
 
-| Runtime | `@fileway/core` | `@fileway/local` | `@fileway/s3` | `@fileway/cloudinary` |
-|---|---|---|---|---|
-| Node.js 18+ | <span className="text-green-500">✓</span> | <span className="text-green-500">✓</span> | <span className="text-green-500">✓</span> | <span className="text-green-500">✓</span> |
-| Bun | <span className="text-green-500">✓</span> | <span className="text-green-500">✓</span> | <span className="text-green-500">✓</span> | <span className="text-green-500">✓</span> |
-| Deno | <span className="text-green-500">✓</span> | <span className="text-red-500">✗</span> | <span className="text-green-500">✓</span> | <span className="text-green-500">✓</span> |
-| Cloudflare Workers | <span className="text-green-500">✓</span> | <span className="text-red-500">✗</span> | <span className="text-green-500">✓</span> | <span className="text-green-500">✓</span> |
-| Edge runtimes | <span className="text-green-500">✓</span> | <span className="text-red-500">✗</span> | <span className="text-green-500">✓</span> | <span className="text-green-500">✓</span> |
+| Runtime | `@fileway/core` | `@fileway/local` | `@fileway/s3` | `@fileway/gcs` | `@fileway/azure` | `@fileway/supabase` | `@fileway/cloudinary` |
+|---|---|---|---|---|---|---|---|
+| Node.js 18+ | <span className="text-green-500">✓</span> | <span className="text-green-500">✓</span> | <span className="text-green-500">✓</span> | <span className="text-green-500">✓</span> | <span className="text-green-500">✓</span> | <span className="text-green-500">✓</span> | <span className="text-green-500">✓</span> |
+| Bun | <span className="text-green-500">✓</span> | <span className="text-green-500">✓</span> | <span className="text-green-500">✓</span> | <span className="text-green-500">✓</span> | <span className="text-green-500">✓</span> | <span className="text-green-500">✓</span> | <span className="text-green-500">✓</span> |
+| Deno | <span className="text-green-500">✓</span> | <span className="text-red-500">✗</span> | <span className="text-green-500">✓</span> | <span className="text-green-500">✓</span> | <span className="text-green-500">✓</span> | <span className="text-green-500">✓</span> | <span className="text-green-500">✓</span> |
+| Cloudflare Workers | <span className="text-green-500">✓</span> | <span className="text-red-500">✗</span> | <span className="text-green-500">✓</span> | <span className="text-green-500">✓</span> | <span className="text-green-500">✓</span> | <span className="text-green-500">✓</span> | <span className="text-green-500">✓</span> |
+| Edge runtimes | <span className="text-green-500">✓</span> | <span className="text-red-500">✗</span> | <span className="text-green-500">✓</span> | <span className="text-green-500">✓</span> | <span className="text-green-500">✓</span> | <span className="text-green-500">✓</span> | <span className="text-green-500">✓</span> |

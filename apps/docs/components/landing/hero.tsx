@@ -66,8 +66,8 @@ export function Hero() {
           </h1>
 
           <p className="mt-6 max-w-xl text-lg leading-relaxed text-ink-muted">
-            Stream files effortlessly across Node.js, Cloudflare Workers, Bun, and Deno. Swap between Local, S3, and
-            Cloudinary drivers with a single line of code.
+            Stream files effortlessly across Node.js, Cloudflare Workers, Bun, and Deno. Swap between Local, S3, Google
+            Cloud Storage, Azure, Supabase and Cloudinary with a single line of code.
           </p>
 
           <div className="mt-8 flex flex-wrap items-center gap-3">
