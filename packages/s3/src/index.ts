@@ -37,8 +37,18 @@ export interface S3DriverConfig {
   forcePathStyle?: boolean;
   /** Multipart part size in bytes. Default 8 MiB, clamped to a 5 MiB minimum. */
   partSize?: number;
-  /** Force multipart for every upload, regardless of size. */
+  /** Force multipart for every upload, regardless of size. Defaults to `true`
+   * for a Google Cloud Storage endpoint (`storage.googleapis.com`). */
   forceMultipart?: boolean;
+}
+
+function isGcsEndpoint(endpoint: string | undefined): boolean {
+  if (!endpoint) return false;
+  try {
+    return new URL(endpoint).hostname === "storage.googleapis.com";
+  } catch {
+    return false;
+  }
 }
 
 export class S3Driver implements BaseDriver<{ bucket: string; etag?: string }> {
@@ -46,11 +56,15 @@ export class S3Driver implements BaseDriver<{ bucket: string; etag?: string }> {
   private config: Required<Pick<S3DriverConfig, "region">> & S3DriverConfig;
   private baseUrl: string;
   private partSize: number;
+  private forceMultipart: boolean;
 
   constructor(config: S3DriverConfig) {
     this.config = { region: "us-east-1", ...config };
     this.baseUrl = config.baseUrl ?? resolveBaseUrl(this.config);
     this.partSize = Math.max(config.partSize ?? DEFAULT_PART_SIZE, MIN_PART_SIZE);
+    // GCS's S3 interop stores aws-chunked signatures inside the object, so a
+    // streamed single PUT would corrupt it; multipart sends plain bodies.
+    this.forceMultipart = config.forceMultipart ?? isGcsEndpoint(config.endpoint);
   }
 
   async upload(
@@ -81,7 +95,7 @@ export class S3Driver implements BaseDriver<{ bucket: string; etag?: string }> {
     // Multipart: unknown size (memory-safe without buffering the whole file),
     // sizes beyond the 5 GiB single-PUT cap, or when explicitly requested.
     const useMultipart =
-      options.size === undefined || options.size > SINGLE_PUT_MAX || this.config.forceMultipart === true;
+      options.size === undefined || options.size > SINGLE_PUT_MAX || this.forceMultipart;
 
     if (useMultipart) {
       return this.multipartUpload(stream, {

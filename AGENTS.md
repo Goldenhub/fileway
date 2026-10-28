@@ -21,7 +21,7 @@ Implement Phase 1 and Phase 2 of the Fileway monorepo:
 3. **Strict Type Safety:** Use strict TypeScript flags (`noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`). Never return `any` types.
 4. **Dual Module Compilation:** Build all packages using `tsup` targeting both CommonJS (`.cjs`) and ES Modules (`.js`) with TypeScript declarations (`.d.ts`).
 5. **Workspace Linking:** Link internal packages inside `package.json` using `"@fileway/core": "workspace:*"`.
-6. **Universal Cross-Runtime Drivers:** `@fileway/core`, `@fileway/s3`, and `@fileway/cloudinary` MUST contain ZERO Node-built-in imports (`node:*`). Use only WHATWG `ReadableStream<Uint8Array>`, `fetch`, `FormData`, `Blob`, `globalThis.crypto.subtle`, `TextEncoder`, and `TextDecoder`.
+6. **Universal Cross-Runtime Drivers:** `@fileway/core`, `@fileway/s3`, `@fileway/gcs`, `@fileway/azure`, `@fileway/supabase`, and `@fileway/cloudinary` MUST contain ZERO Node-built-in imports (`node:*`). Use only WHATWG `ReadableStream<Uint8Array>`, `fetch`, `FormData`, `Blob`, `globalThis.crypto.subtle`, `TextEncoder`, and `TextDecoder`.
 7. **Server-Only Packages:** `@fileway/local` may use `node:fs` / `node:stream` but should fail gracefully in environments without filesystem access.
 
 ---
@@ -136,7 +136,7 @@ export class FilewayClient<const TConfig extends FilewayConfig> {
 - [x] **Remove edge duplicates**: `driver-cloudinary-edge` and `driver-s3-edge` deleted; their functionality is now in the universal `cloudinary` and `s3`.
 - [x] **Conditional exports**: All packages declare `worker`, `deno`, `bun`, `import`, `require` in `exports` map.
 - [x] **Edge-runtime tests**: `@fileway/core` and `@fileway/cloudinary` run vitest with `environment: "edge-runtime"` via `@edge-runtime/vm`.
-- [x] **All builds & tests pass**: 205 unit tests across 4 packages, plus 9 S3 integration tests against MinIO.
+- [x] **All builds & tests pass**: 275 unit tests across 7 packages, plus 9 S3 integration tests against MinIO and 6 Azure integration tests against Azurite.
 
 ## Typed Error Taxonomy (Complete)
 
@@ -155,7 +155,10 @@ export class FilewayClient<const TConfig extends FilewayConfig> {
 |---|---|---|---|
 | `@fileway/core` | None | Universal | 67 |
 | `@fileway/local` | `node:fs`, `node:path`, `node:stream` | Node.js, Bun | 27 |
-| `@fileway/s3` | None (pure fetch + Web Crypto SigV4) | Universal | 56 unit + 9 MinIO |
+| `@fileway/s3` | None (pure fetch + Web Crypto SigV4) | Universal | 57 unit + 9 MinIO |
+| `@fileway/gcs` | None (pure fetch + Web Crypto RS256 / V4 signing) | Universal | 21 (+ opt-in live) |
+| `@fileway/azure` | None (pure fetch + Web Crypto Shared Key / SAS) | Universal | 27 unit + 6 Azurite |
+| `@fileway/supabase` | None (pure fetch, REST + TUS) | Universal | 21 (+ opt-in live) |
 | `@fileway/cloudinary` | None | Universal | 55 |
 
 ## Relevant Files
@@ -165,6 +168,9 @@ export class FilewayClient<const TConfig extends FilewayConfig> {
 - `packages/core/src/index.ts`: FilewayClient class
 - `packages/local/src/index.ts`: LocalDriver (node:fs)
 - `packages/s3/src/index.ts`: S3Driver (pure fetch + Web Crypto SigV4, aws-chunked streaming + multipart)
+- `packages/gcs/src/index.ts`: GCSDriver (service account JWT, resumable uploads, V4 signed URLs in `auth.ts`)
+- `packages/azure/src/index.ts`: AzureDriver (block uploads; Shared Key and SAS signing in `sharedkey.ts`)
+- `packages/supabase/src/index.ts`: SupabaseDriver (REST + TUS resumable uploads)
 - `packages/cloudinary/src/index.ts`: CloudinaryDriver (pure fetch, FormData, Web Crypto)
 - `apps/docs/`: Fumadocs + Next.js 16 documentation site
 - `pnpm-workspace.yaml`: workspace config, catalog

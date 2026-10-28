@@ -30,7 +30,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Build packages
-        run: pnpm --filter @fileway/core --filter @fileway/local --filter @fileway/s3 --filter @fileway/cloudinary run build
+        run: pnpm --filter @fileway/core --filter @fileway/local --filter @fileway/s3 --filter @fileway/cloudinary --filter @fileway/gcs --filter @fileway/azure --filter @fileway/supabase run build
 
       - name: Typecheck packages
         run: pnpm typecheck
@@ -77,6 +77,29 @@ jobs:
           S3_BUCKET: fileway-ci
           MINIO_ACCESS_KEY: minioadmin
           MINIO_SECRET_KEY: minioadmin
+
+      - name: Start Azurite
+        run: |
+          docker run -d --name azurite -p 10000:10000 \
+            mcr.microsoft.com/azure-storage/azurite \
+            azurite-blob --blobHost 0.0.0.0 --inMemoryPersistence --skipApiVersionCheck
+          for i in $(seq 1 30); do
+            if curl -s -o /dev/null http://localhost:10000/; then
+              echo "Azurite ready"
+              break
+            fi
+            sleep 2
+          done
+          if ! curl -s -o /dev/null http://localhost:10000/; then
+            echo "Azurite failed to start" >&2
+            docker logs azurite >&2 || true
+            exit 1
+          fi
+
+      - name: Azure integration tests (Azurite)
+        run: pnpm --filter @fileway/azure exec vitest run src/azurite.integration.test.ts
+        env:
+          RUN_AZURITE_TESTS: "1"
 
       - name: Docs typecheck
         run: pnpm --filter @fileway/docs run types:check

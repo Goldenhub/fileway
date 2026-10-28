@@ -7,10 +7,10 @@
 
 **Fileway is a runtime-agnostic file storage engine for JavaScript/TypeScript.** One standard API for every storage provider and every runtime, with zero core dependencies.
 
-Instead of learning a different SDK for S3, Cloudinary, and local disk (and fighting Node-specific shims on every edge runtime), Fileway gives you one typed API. Upload a WHATWG `ReadableStream<Uint8Array>`, get back a typed result. Swap drivers by changing **one line of code**. No rewrites. No provider lock-in.
+Instead of learning a different SDK for S3, Google Cloud Storage, Azure, Supabase, Cloudinary, and local disk (and fighting Node-specific shims on every edge runtime), Fileway gives you one typed API. Upload a WHATWG `ReadableStream<Uint8Array>`, get back a typed result. Swap drivers by changing **one line of code**. No rewrites. No provider lock-in.
 
 - **Node.js 20+**, **Cloudflare Workers**, **Bun**, and **Deno 2**: the same code, everywhere.
-- **Zero core dependencies.** `@fileway/core` ships with no runtime deps. The S3 driver is pure `fetch` + Web Crypto, with no AWS SDK and no shims.
+- **Zero core dependencies.** `@fileway/core` ships with no runtime deps. Every cloud driver is pure `fetch` + Web Crypto, with no AWS, Google, Azure or Supabase SDK and no shims.
 - **Real streaming** via `ReadableStream<Uint8Array>`: no whole-file buffering. Local disk streams to disk with backpressure; S3 streams with per-chunk SigV4 signing when the size is known and bounded-memory multipart uploads when it is not.
 - **Type inference**: every driver returns its own metadata shape automatically.
 
@@ -22,7 +22,10 @@ Instead of learning a different SDK for S3, Cloudinary, and local disk (and figh
 | --- | --- | --- | :-: | :-: | :-: | :-: |
 | `@fileway/core` | Client engine, types, middleware | **Zero** | ✅ | ✅ | ✅ | ✅ |
 | `@fileway/local` | Local filesystem | `node:fs` | ✅ | n/a | ✅ | ✅ |
-| `@fileway/s3` | AWS S3, MinIO, Cloudflare R2 | **Zero** *(pure `fetch` + Web Crypto)* | ✅ | ✅ | ✅ | ✅ |
+| `@fileway/s3` | AWS S3, MinIO, Cloudflare R2, any S3-compatible service | **Zero** *(pure `fetch` + Web Crypto)* | ✅ | ✅ | ✅ | ✅ |
+| `@fileway/gcs` | Google Cloud Storage | **Zero** *(pure `fetch` + Web Crypto)* | ✅ | ✅ | ✅ | ✅ |
+| `@fileway/azure` | Azure Blob Storage | **Zero** *(pure `fetch` + Web Crypto)* | ✅ | ✅ | ✅ | ✅ |
+| `@fileway/supabase` | Supabase Storage | **Zero** *(pure `fetch`)* | ✅ | ✅ | ✅ | ✅ |
 | `@fileway/cloudinary` | Cloudinary | **Zero** *(pure `fetch` + Web Crypto)* | ✅ | ✅ | ✅ | ✅ |
 
 ## 30-second quickstart
@@ -273,6 +276,9 @@ const client = new FilewayClient({
 | --- | --- | --- |
 | `@fileway/local` | `npm i @fileway/local` | `directory`, optional `baseUrl`, `maxSizeBytes` |
 | `@fileway/s3` | `npm i @fileway/s3` | AWS, MinIO, Cloudflare R2, any S3-compatible endpoint |
+| `@fileway/gcs` | `npm i @fileway/gcs` | `bucket`, plus `serviceAccount` JSON or `getAccessToken` |
+| `@fileway/azure` | `npm i @fileway/azure` | `container`, plus an account key, SAS token or connection string |
+| `@fileway/supabase` | `npm i @fileway/supabase` | `url`, `key`, `bucket`, optional user `accessToken` for RLS |
 | `@fileway/cloudinary` | `npm i @fileway/cloudinary` | `cloudName`, `apiKey`, `apiSecret` |
 
 ```ts
@@ -296,6 +302,25 @@ const r2 = new S3Driver({
   region: "auto",
   baseUrl: "https://pub-<HASH>.r2.dev",
   credentials: { accessKeyId: "...", secretAccessKey: "..." },
+});
+
+// Google Cloud Storage: a service account key, or getAccessToken on Google Cloud
+const gcs = new GCSDriver({
+  bucket: "my-bucket",
+  serviceAccount: process.env.GCS_SERVICE_ACCOUNT_JSON,
+});
+
+// Azure Blob Storage: account key, SAS token or connection string
+const azure = new AzureDriver({
+  container: "uploads",
+  connectionString: process.env.AZURE_STORAGE_CONNECTION_STRING,
+});
+
+// Supabase Storage: secret key on the server, or a publishable key + user JWT for RLS
+const supabase = new SupabaseDriver({
+  url: "https://<PROJECT_REF>.supabase.co",
+  key: process.env.SUPABASE_SECRET_KEY,
+  bucket: "avatars",
 });
 
 // Cloudinary
@@ -397,7 +422,7 @@ const client = new FilewayClient({
 - [x] Stream transformation in `beforeUpload` middlewares: return a replacement `stream` (plus its `size`, when known)
 - [x] Retries with exponential backoff (on `network`/`provider-error` codes and HTTP 429/5xx): `retry` config on `FilewayClient`
 
-**Planned drivers:** Cloudflare R2 (native), Google Cloud Storage, Backblaze B2, Azure Blob Storage, DigitalOcean Spaces (S3-compatible).
+**Planned drivers:** Vercel Blob. Backblaze B2, DigitalOcean Spaces and Cloudflare R2 already work through `@fileway/s3`.
 
 ## Community
 
@@ -439,6 +464,7 @@ pnpm build         # build all packages
 pnpm typecheck     # typecheck all packages
 pnpm test          # unit tests across all packages
 pnpm test:integration  # S3 integration tests against local MinIO (Docker)
+pnpm test:integration:azure  # Azure integration tests against local Azurite
 ```
 
 ### Project structure
@@ -449,6 +475,9 @@ fileway/
 │   ├── core/              # @fileway/core
 │   ├── local/      # @fileway/local
 │   ├── s3/         # @fileway/s3
+│   ├── gcs/        # @fileway/gcs
+│   ├── azure/      # @fileway/azure
+│   ├── supabase/   # @fileway/supabase
 │   └── cloudinary/ # @fileway/cloudinary
 ├── apps/
 │   └── docs/              # Documentation site (Fumadocs + Next.js)

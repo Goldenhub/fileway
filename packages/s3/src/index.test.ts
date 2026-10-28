@@ -372,6 +372,34 @@ describe("S3Driver multipart upload", () => {
     });
   });
 
+  it("uses multipart by default for a GCS endpoint, even with a known size", async () => {
+    const make = (extra: { forceMultipart?: boolean } = {}) =>
+      new S3Driver({
+        bucket: "b",
+        region: "auto",
+        endpoint: "https://storage.googleapis.com",
+        credentials: { accessKeyId: "GOOG1", secretAccessKey: "secret" },
+        ...extra,
+      });
+    mockMultipart();
+    await make().upload(new ReadableStream({ start: (c) => { c.enqueue(new Uint8Array(3)); c.close(); } }), {
+      filename: "a.txt",
+      size: 3,
+    });
+    expect(String(mockFetch.mock.calls[0]![0])).toContain("?uploads=");
+    const [, putInit] = mockFetch.mock.calls[1]!;
+    expect((putInit.headers as Record<string, string>)["x-amz-content-sha256"]).not.toContain("STREAMING");
+
+    vi.clearAllMocks();
+    mockFetch.mockResolvedValueOnce(okResponse());
+    await make({ forceMultipart: false }).upload(
+      new ReadableStream({ start: (c) => { c.enqueue(new Uint8Array(3)); c.close(); } }),
+      { filename: "a.txt", size: 3 },
+    );
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    expect(mockFetch.mock.calls[0]![1].method).toBe("PUT");
+  });
+
   it("splits a payload larger than partSize into signed parts", async () => {
     driver = new S3Driver({
       bucket: "test-bucket",

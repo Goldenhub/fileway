@@ -15,6 +15,19 @@ The first stable release. Target scope, tracked on the [roadmap](README.md#roadm
 
 Expected: once the public API is frozen and has gone through real-world feedback via [GitHub Discussions](https://github.com/Goldenhub/fileway/discussions).
 
+## Unreleased
+
+**New drivers**
+
+All three are zero-dependency (`fetch` and Web Crypto only), run on Node.js, Bun, Deno and edge runtimes, stream with bounded memory, and support presigned URLs, typed errors, lost-response recovery and `getUploadStatus`.
+
+- **`@fileway/gcs`** ([docs](https://www.usefileway.dev/docs/drivers/gcs)): Google Cloud Storage. Authenticates with a service account key (JWT signed in-process, token cached) or your own `getAccessToken`. Small files go up in one request, larger ones through a resumable session; V4 signed URLs.
+- **`@fileway/azure`** ([docs](https://www.usefileway.dev/docs/drivers/azure)): Azure Blob Storage. Shared Key, SAS token or connection string (including `UseDevelopmentStorage=true` for Azurite). Block uploads with `Put Block List`, service SAS download links, and `pending` status while blocks are staged. Integration tests run against Azurite in CI.
+- **`@fileway/supabase`** ([docs](https://www.usefileway.dev/docs/drivers/supabase)): Supabase Storage. A secret key on the server, or a publishable key plus a user's JWT so RLS applies. Resumable TUS uploads in 6 MiB chunks for large files, Supabase signed URLs.
+
+**Changes**
+- **S3:** `forceMultipart` now defaults to `true` for a `storage.googleapis.com` endpoint. Google Cloud Storage's S3 interop stores `aws-chunked` signatures inside the object, so a streamed single `PUT` would corrupt it.
+
 ## v0.4.0 (2026-10-26)
 
 **Features**

@@ -1,0 +1,51 @@
+{
+  "name": "@fileway/azure",
+  "version": "0.4.0",
+  "license": "MIT",
+  "keywords": [
+    "fileway",
+    "file-upload",
+    "storage",
+    "azure",
+    "azure-blob",
+    "blob-storage",
+    "azurite",
+    "stream"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Goldenhub/fileway.git"
+  },
+  "type": "module",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "worker": "./dist/index.js",
+      "deno": "./dist/index.js",
+      "bun": "./dist/index.js",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "scripts": {
+    "prepublishOnly": "tsup",
+    "build": "tsup",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@fileway/core": "workspace:*"
+  },
+  "devDependencies": {
+    "tsup": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

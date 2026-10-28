@@ -11,8 +11,9 @@
   "scripts": {
     "build": "pnpm --filter \"@fileway/*\" run build",
     "test": "pnpm --filter \"@fileway/*\" run test",
-    "typecheck": "pnpm --filter @fileway/core --filter @fileway/local --filter @fileway/s3 --filter @fileway/cloudinary exec tsc --noEmit -p tsconfig.json",
+    "typecheck": "pnpm --filter @fileway/core --filter @fileway/local --filter @fileway/s3 --filter @fileway/cloudinary --filter @fileway/gcs --filter @fileway/azure --filter @fileway/supabase exec tsc --noEmit -p tsconfig.json",
     "test:integration": "RUN_MINIO_TESTS=1 pnpm --filter @fileway/s3 exec vitest run src/minio.integration.test.ts",
+    "test:integration:azure": "RUN_AZURITE_TESTS=1 pnpm --filter @fileway/azure exec vitest run src/azurite.integration.test.ts",
     "version:patch": "pnpm -r version patch --no-git-tag-version",
     "version:minor": "pnpm -r version minor --no-git-tag-version",
     "version:major": "pnpm -r version major --no-git-tag-version",
@@ -31,6 +32,9 @@
     "@fileway/cloudinary": "workspace:*",
     "@fileway/core": "workspace:*",
     "@fileway/local": "workspace:*",
-    "@fileway/s3": "workspace:*"
+    "@fileway/s3": "workspace:*",
+    "@fileway/gcs": "workspace:*",
+    "@fileway/azure": "workspace:*",
+    "@fileway/supabase": "workspace:*"
   }
 }

@@ -29,18 +29,27 @@ importers:
       '@edge-runtime/vm':
         specifier: 'catalog:'
         version: 5.0.0
+      '@fileway/azure':
+        specifier: workspace:*
+        version: link:packages/azure
       '@fileway/cloudinary':
         specifier: workspace:*
         version: link:packages/cloudinary
       '@fileway/core':
         specifier: workspace:*
         version: link:packages/core
+      '@fileway/gcs':
+        specifier: workspace:*
+        version: link:packages/gcs
       '@fileway/local':
         specifier: workspace:*
         version: link:packages/local
       '@fileway/s3':
         specifier: workspace:*
         version: link:packages/s3
+      '@fileway/supabase':
+        specifier: workspace:*
+        version: link:packages/supabase
 
   apps/docs:
     dependencies:
@@ -91,6 +100,22 @@ importers:
         specifier: 'catalog:'
         version: 5.9.3
 
+  packages/azure:
+    dependencies:
+      '@fileway/core':
+        specifier: workspace:*
+        version: link:../core
+    devDependencies:
+      tsup:
+        specifier: 'catalog:'
+        version: 8.5.1(jiti@2.7.0)(postcss@8.5.16)(typescript@5.9.3)(yaml@2.9.0)
+      typescript:
+        specifier: 'catalog:'
+        version: 5.9.3
+      vitest:
+        specifier: 'catalog:'
+        version: 1.6.1(@edge-runtime/vm@5.0.0)(@types/node@20.19.43)(lightningcss@1.32.0)
+
   packages/cloudinary:
     dependencies:
       '@fileway/core':
@@ -108,6 +133,22 @@ importers:
         version: 1.6.1(@edge-runtime/vm@5.0.0)(@types/node@20.19.43)(lightningcss@1.32.0)
 
   packages/core:
+    devDependencies:
+      tsup:
+        specifier: 'catalog:'
+        version: 8.5.1(jiti@2.7.0)(postcss@8.5.16)(typescript@5.9.3)(yaml@2.9.0)
+      typescript:
+        specifier: 'catalog:'
+        version: 5.9.3
+      vitest:
+        specifier: 'catalog:'
+        version: 1.6.1(@edge-runtime/vm@5.0.0)(@types/node@20.19.43)(lightningcss@1.32.0)
+
+  packages/gcs:
+    dependencies:
+      '@fileway/core':
+        specifier: workspace:*
+        version: link:../core
     devDependencies:
       tsup:
         specifier: 'catalog:'
@@ -139,6 +180,22 @@ importers:
         version: 1.6.1(@edge-runtime/vm@5.0.0)(@types/node@20.19.43)(lightningcss@1.32.0)
 
   packages/s3:
+    dependencies:
+      '@fileway/core':
+        specifier: workspace:*
+        version: link:../core
+    devDependencies:
+      tsup:
+        specifier: 'catalog:'
+        version: 8.5.1(jiti@2.7.0)(postcss@8.5.16)(typescript@5.9.3)(yaml@2.9.0)
+      typescript:
+        specifier: 'catalog:'
+        version: 5.9.3
+      vitest:
+        specifier: 'catalog:'
+        version: 1.6.1(@edge-runtime/vm@5.0.0)(@types/node@20.19.43)(lightningcss@1.32.0)
+
+  packages/supabase:
     dependencies:
       '@fileway/core':
         specifier: workspace:*
