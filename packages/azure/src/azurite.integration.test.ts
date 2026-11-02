@@ -42,8 +42,7 @@ describeEnv("AzureDriver against Azurite", () => {
       path: "docs",
       mimeType: "text/plain",
       metadata: { owner: "ada" },
-      uploadToken: "tok-small",
-    });
+    }, { uploadToken: "tok-small" });
     expect(result.size).toBe(1000);
 
     const object = await driver.head(result.path);
@@ -55,14 +54,15 @@ describeEnv("AzureDriver against Azurite", () => {
     expect(downloaded.byteLength).toBe(1000);
     expect(downloaded[300]).toBe(300 % 251);
 
-    await expect(driver.delete(result.path)).resolves.toBe(true);
+    await expect(driver.delete(result.path)).resolves.toBeUndefined();
     await expect(driver.head(result.path)).resolves.toBeNull();
-    await expect(driver.delete(result.path)).resolves.toBe(false);
+    // Deleting again is not an error.
+    await expect(driver.delete(result.path)).resolves.toBeUndefined();
   });
 
   it("uploads a multi-block blob of unknown size", async () => {
     const size = Math.floor(2.5 * 1024 * 1024);
-    const result = await driver.upload(bytes(size), { filename: "big.bin", mimeType: "application/zip", uploadToken: "tok-big" });
+    const result = await driver.upload(bytes(size), { filename: "big.bin", mimeType: "application/zip" }, { uploadToken: "tok-big" });
     const object = await driver.head(result.path);
     expect(object?.size).toBe(size);
     expect(object?.contentType).toBe("application/zip");

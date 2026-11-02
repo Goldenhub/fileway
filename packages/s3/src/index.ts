@@ -1,4 +1,4 @@
-import type { BaseDriver, PresignedUrlOptions, StorageErrorCode, StoredObject, UploadOptions, UploadResult } from "@fileway/core";
+import type { BaseDriver, OperationOptions, PresignedUrlOptions, StorageErrorCode, StoredObject, UploadContext, UploadOptions, UploadResult } from "@fileway/core";
 import { validateUploadOptions, ValidationError, urlEncodePath, abortError, isAbortError, StorageError } from "@fileway/core";
 import { buildCanonicalQueryString, createStreamingBody, presignUrl, sign, signStreamingRequest, sha256 } from "./sigv4.js";
 import type { SigV4Credentials } from "./sigv4.js";
@@ -40,7 +40,14 @@ export interface S3DriverConfig {
   /** Force multipart for every upload, regardless of size. Defaults to `true`
    * for a Google Cloud Storage endpoint (`storage.googleapis.com`). */
   forceMultipart?: boolean;
+  /** Reject uploads larger than this many bytes with a `size-exceeded` error. */
+  maxSizeBytes?: number;
 }
+
+export type S3Meta = {
+  bucket: string;
+  etag?: string;
+};
 
 function isGcsEndpoint(endpoint: string | undefined): boolean {
   if (!endpoint) return false;
@@ -51,7 +58,7 @@ function isGcsEndpoint(endpoint: string | undefined): boolean {
   }
 }
 
-export class S3Driver implements BaseDriver<{ bucket: string; etag?: string }> {
+export class S3Driver implements BaseDriver<S3Meta> {
   readonly name = "s3";
   private config: Required<Pick<S3DriverConfig, "region">> & S3DriverConfig;
   private baseUrl: string;
@@ -70,8 +77,13 @@ export class S3Driver implements BaseDriver<{ bucket: string; etag?: string }> {
   async upload(
     stream: ReadableStream<Uint8Array>,
     options: UploadOptions,
-  ): Promise<UploadResult<{ bucket: string; etag?: string }>> {
+    context?: UploadContext,
+  ): Promise<UploadResult<S3Meta>> {
     validateUploadOptions(options);
+    const maxSize = this.config.maxSizeBytes;
+    if (maxSize !== undefined && options.size !== undefined && options.size > maxSize) {
+      throw new StorageError("size-exceeded", `file size ${options.size} exceeds maxSizeBytes ${maxSize}`, { provider: "s3" });
+    }
 
     const id = options.id ?? randomUUID();
     const key = this.pathFor({ ...options, id });
@@ -87,7 +99,7 @@ export class S3Driver implements BaseDriver<{ bucket: string; etag?: string }> {
             ]),
           )
         : {}),
-      ...(options.uploadToken ? { [TOKEN_HEADER]: options.uploadToken } : {}),
+      ...(context?.uploadToken ? { [TOKEN_HEADER]: context.uploadToken } : {}),
     };
 
     const typeHeader = options.mimeType ?? "application/octet-stream";
@@ -154,7 +166,7 @@ export class S3Driver implements BaseDriver<{ bucket: string; etag?: string }> {
 
     if (!response.ok) {
       const body = await response.text().catch(() => "");
-      throw s3Error(`S3 upload failed: ${response.status} ${response.statusText}${body ? ` — ${body}` : ""}`, response.status, body);
+      throw s3Error(`S3 upload failed: ${response.status} ${response.statusText}${body ? `: ${body}` : ""}`, response.status, body);
     }
 
     const etag = response.headers.get("etag") ?? undefined;
@@ -182,7 +194,7 @@ export class S3Driver implements BaseDriver<{ bucket: string; etag?: string }> {
       signal?: AbortSignal;
       expectedSize?: number;
     },
-  ): Promise<UploadResult<{ bucket: string; etag?: string }>> {
+  ): Promise<UploadResult<S3Meta>> {
     const { id, key, metaHeaders, typeHeader, signal, expectedSize } = args;
     const cred = { ...args.cred, region: this.config.region!, service: SERVICE };
 
@@ -190,7 +202,7 @@ export class S3Driver implements BaseDriver<{ bucket: string; etag?: string }> {
     // signature more than ~15 minutes off the server clock, and a multipart
     // upload can run far longer than that.
 
-    // 1. CreateMultipartUpload — object metadata and content-type live here.
+    // 1. CreateMultipartUpload: object metadata and content-type live here.
     const create = buildEndpoint(this.config, key, { uploads: "" });
     const createHeaders = await sign(
       "POST",
@@ -208,7 +220,7 @@ export class S3Driver implements BaseDriver<{ bucket: string; etag?: string }> {
     }, "s3");
     if (!createRes.ok) {
       const body = await createRes.text().catch(() => "");
-      throw s3Error(`S3 multipart create failed: ${createRes.status} ${createRes.statusText}${body ? ` — ${body}` : ""}`, createRes.status, body);
+      throw s3Error(`S3 multipart create failed: ${createRes.status} ${createRes.statusText}${body ? `: ${body}` : ""}`, createRes.status, body);
     }
     const uploadId = extractXml(await createRes.text(), "UploadId");
     if (!uploadId) {
@@ -217,7 +229,7 @@ export class S3Driver implements BaseDriver<{ bucket: string; etag?: string }> {
 
     const abort = () => this.abortMultipart(key, uploadId, cred);
 
-    // 2. UploadPart — stream into one part-sized buffer at a time, so peak
+    // 2. UploadPart: stream into one part-sized buffer at a time, so peak
     // memory is bounded by `partSize` regardless of file size.
     const reader = stream.getReader();
     let aborted = false;
@@ -296,6 +308,10 @@ export class S3Driver implements BaseDriver<{ bucket: string; etag?: string }> {
         await ensureNotAborted();
         if (done) break;
         totalBytes += value.byteLength;
+        if (this.config.maxSizeBytes !== undefined && totalBytes > this.config.maxSizeBytes) {
+          await abort();
+          throw new StorageError("size-exceeded", `upload exceeds maxSizeBytes ${this.config.maxSizeBytes}`, { provider: "s3" });
+        }
         buffer.push(value);
         bufferedLen += value.byteLength;
 
@@ -372,7 +388,7 @@ export class S3Driver implements BaseDriver<{ bucket: string; etag?: string }> {
     typeHeader: string,
     baseCred: S3Credentials,
     signal?: AbortSignal,
-  ): Promise<UploadResult<{ bucket: string; etag?: string }>> {
+  ): Promise<UploadResult<S3Meta>> {
     const cred = { ...baseCred, region: this.config.region!, service: SERVICE };
     const now = new Date();
     const { url, canonicalPath, host } = buildEndpoint(this.config, key);
@@ -399,7 +415,7 @@ export class S3Driver implements BaseDriver<{ bucket: string; etag?: string }> {
     }, "s3");
     if (!response.ok) {
       const body = await response.text().catch(() => "");
-      throw s3Error(`S3 upload failed: ${response.status} ${response.statusText}${body ? ` — ${body}` : ""}`, response.status, body);
+      throw s3Error(`S3 upload failed: ${response.status} ${response.statusText}${body ? `: ${body}` : ""}`, response.status, body);
     }
 
     const etag = response.headers.get("etag") ?? undefined;
@@ -429,7 +445,8 @@ export class S3Driver implements BaseDriver<{ bucket: string; etag?: string }> {
     }
   }
 
-  async delete(path: string): Promise<boolean> {
+  /** Deletes the object. S3 answers success whether or not it existed. */
+  async delete(path: string, options?: OperationOptions): Promise<void> {
     const cred = getCredentials(this.config);
     const { url, canonicalPath, host } = buildEndpoint(this.config, path);
     const now = new Date();
@@ -443,14 +460,14 @@ export class S3Driver implements BaseDriver<{ bucket: string; etag?: string }> {
       now,
     );
 
-    const response = await fetchWithAbort(url, { method: "DELETE", headers: sigHeaders }, "s3");
+    const response = await fetchWithAbort(url, { method: "DELETE", headers: sigHeaders, signal: options?.signal ?? null }, "s3");
     if (!response.ok) {
       const body = await response.text().catch(() => "");
-      throw s3Error(`S3 delete failed: ${response.status} ${response.statusText}${body ? ` — ${body}` : ""}`, response.status, body);
+      const error = s3Error(`S3 delete failed: ${response.status} ${response.statusText}${body ? `: ${body}` : ""}`, response.status, body);
+      // Some S3-compatible services answer 404 for a missing key.
+      if (error.code === "not-found") return;
+      throw error;
     }
-    // S3 answers 204 whether or not the key existed, so `true` means
-    // "the object is gone now", not "an object was removed".
-    return true;
   }
 
   /** The object key an upload with `options.id` is stored under: `<path>/<id>.<ext>`. */
@@ -461,7 +478,7 @@ export class S3Driver implements BaseDriver<{ bucket: string; etag?: string }> {
   }
 
   /** The object at `path` (a signed `HEAD`), or `null` if it does not exist. */
-  async head(path: string): Promise<StoredObject<{ bucket: string; etag?: string }> | null> {
+  async head(path: string, options?: OperationOptions): Promise<StoredObject<S3Meta> | null> {
     const cred = getCredentials(this.config);
     const { url, canonicalPath, host } = buildEndpoint(this.config, path);
     const headers = await sign(
@@ -472,7 +489,7 @@ export class S3Driver implements BaseDriver<{ bucket: string; etag?: string }> {
       { ...cred, region: this.config.region!, service: SERVICE },
       new Date(),
     );
-    const response = await fetchWithAbort(url, { method: "HEAD", headers }, "s3");
+    const response = await fetchWithAbort(url, { method: "HEAD", headers, signal: options?.signal ?? null }, "s3");
     if (response.status === 404) return null;
     if (!response.ok) {
       throw s3Error(`S3 head failed: ${response.status} ${response.statusText}`, response.status);
@@ -496,7 +513,7 @@ export class S3Driver implements BaseDriver<{ bucket: string; etag?: string }> {
   }
 
   /** Whether a multipart upload to exactly `path` has been started and not completed or aborted. */
-  async isPending(path: string): Promise<boolean> {
+  async isPending(path: string, options?: OperationOptions): Promise<boolean> {
     const cred = getCredentials(this.config);
     const query = { prefix: path, uploads: "" };
     const { url, canonicalPath, host } = buildEndpoint(this.config, "", query);
@@ -509,7 +526,7 @@ export class S3Driver implements BaseDriver<{ bucket: string; etag?: string }> {
       new Date(),
       query,
     );
-    const response = await fetchWithAbort(url, { method: "GET", headers }, "s3");
+    const response = await fetchWithAbort(url, { method: "GET", headers, signal: options?.signal ?? null }, "s3");
     const body = await response.text().catch(() => "");
     if (!response.ok) {
       throw s3Error(`S3 list multipart uploads failed: ${response.status} ${response.statusText}`, response.status, body);
@@ -519,7 +536,7 @@ export class S3Driver implements BaseDriver<{ bucket: string; etag?: string }> {
     return [...body.matchAll(/<Key>(.*?)<\/Key>/gs)].some((m) => m[1] === wanted);
   }
 
-  async getUrl(path: string): Promise<string> {
+  async getUrl(path: string, _options?: OperationOptions): Promise<string> {
     return `${this.baseUrl}/${urlEncodePath(path)}`;
   }
 
@@ -550,7 +567,8 @@ export class S3Driver implements BaseDriver<{ bucket: string; etag?: string }> {
     return `${url}?${queryString}`;
   }
 
-  async get(path: string): Promise<ReadableStream<Uint8Array>> {
+  /** Streams the object. `options.signal` also cancels reading the body. */
+  async get(path: string, options?: OperationOptions): Promise<ReadableStream<Uint8Array>> {
     const cred = getCredentials(this.config);
     const { url, canonicalPath, host } = buildEndpoint(this.config, path);
     const now = new Date();
@@ -564,10 +582,10 @@ export class S3Driver implements BaseDriver<{ bucket: string; etag?: string }> {
       now,
     );
 
-    const response = await fetchWithAbort(url, { method: "GET", headers: sigHeaders }, "s3");
+    const response = await fetchWithAbort(url, { method: "GET", headers: sigHeaders, signal: options?.signal ?? null }, "s3");
     if (!response.ok) {
       const body = await response.text().catch(() => "");
-      throw s3Error(`S3 get failed: ${response.status} ${response.statusText}${body ? ` — ${body}` : ""}`, response.status, body);
+      throw s3Error(`S3 get failed: ${response.status} ${response.statusText}${body ? `: ${body}` : ""}`, response.status, body);
     }
 
     if (!response.body) {
@@ -612,7 +630,12 @@ function classifyS3Error(status: number, body: string): StorageErrorCode {
       return "auth-failed";
     case "EntityTooLarge":
       return "size-exceeded";
+    case "SlowDown":
+    case "TooManyRequests":
+    case "RequestLimitExceeded":
+      return "rate-limited";
   }
+  if (status === 429) return "rate-limited";
   if (status === 401 || status === 403) return "auth-failed";
   if (status === 404) return "not-found";
   if (status === 413) return "size-exceeded";

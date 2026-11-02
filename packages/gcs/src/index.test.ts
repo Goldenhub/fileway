@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, beforeAll } from "vitest";
 import { FilewayClient, StorageError, ValidationError } from "@fileway/core";
-import { GCSDriver, classifyGcsError } from "./index.js";
+import { GCSDriver } from "./index.js";
+import { classifyGcsError } from "./errors.js";
 import { sha256Hex, rfc3986 } from "./auth.js";
 
 const mockFetch = vi.fn();
@@ -151,9 +152,8 @@ describe("upload", () => {
       id: "inv_42",
       mimeType: "application/pdf",
       metadata: { owner: "ada" },
-      uploadToken: "tok-1",
       size: 5,
-    });
+    }, { uploadToken: "tok-1" });
 
     expect(mockFetch).toHaveBeenCalledTimes(1);
     const { url, init, headers } = call(0);
@@ -195,8 +195,7 @@ describe("upload", () => {
     const result = await tokenDriver({ chunkSize: 300 * KiB }).upload(body(total, 64 * KiB), {
       filename: "big.bin",
       mimeType: "video/mp4",
-      uploadToken: "tok",
-    });
+    }, { uploadToken: "tok" });
 
     expect(mockFetch).toHaveBeenCalledTimes(4);
     const start = call(0);
@@ -280,14 +279,24 @@ describe("upload", () => {
 });
 
 describe("delete, get, head", () => {
-  it("deletes, returning false for a missing object", async () => {
+  it("deletes, treating a missing object as success", async () => {
     mockFetch.mockResolvedValueOnce(new Response(null, { status: 204 }));
-    await expect(tokenDriver().delete("docs/a b.txt")).resolves.toBe(true);
+    await expect(tokenDriver().delete("docs/a b.txt")).resolves.toBeUndefined();
     expect(call(0).url.pathname).toBe("/storage/v1/b/bkt/o/docs%2Fa%20b.txt");
     mockFetch.mockResolvedValueOnce(gcsFailure(404, "No such object: bkt/docs/a b.txt"));
-    await expect(tokenDriver().delete("docs/a b.txt")).resolves.toBe(false);
+    await expect(tokenDriver().delete("docs/a b.txt")).resolves.toBeUndefined();
     mockFetch.mockResolvedValueOnce(gcsFailure(404, "The specified bucket does not exist."));
     await expect(tokenDriver().delete("x")).rejects.toMatchObject({ code: "bucket-not-found" });
+  });
+
+  it("passes the signal and classifies throttling", async () => {
+    const controller = new AbortController();
+    mockFetch.mockImplementation(async () => new Response("x"));
+    await tokenDriver().get("a", { signal: controller.signal });
+    await tokenDriver().delete("a", { signal: controller.signal });
+    for (const [, init] of mockFetch.mock.calls) expect((init as RequestInit).signal).toBe(controller.signal);
+    mockFetch.mockImplementation(async () => gcsFailure(429, "rateLimitExceeded"));
+    await expect(tokenDriver().get("a")).rejects.toMatchObject({ code: "rate-limited" });
   });
 
   it("streams an object with alt=media", async () => {

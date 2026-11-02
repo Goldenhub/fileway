@@ -1,4 +1,5 @@
-import type { BaseDriver, PresignedUrlOptions, StorageErrorCode, StoredObject, UploadOptions, UploadResult } from "@fileway/core";
+import type { BaseDriver, OperationOptions, PresignedUrlOptions, StoredObject, UploadContext, UploadOptions, UploadResult } from "@fileway/core";
+import { classifySupabaseError } from "./errors.js";
 import { validateUploadOptions, ValidationError, urlEncodePath, abortError, isAbortError, StorageError } from "@fileway/core";
 
 const randomUUID = () => globalThis.crypto.randomUUID();
@@ -70,7 +71,11 @@ export class SupabaseDriver implements BaseDriver<SupabaseMeta> {
     this.cacheControl = `max-age=${config.cacheControl ?? 3600}`;
   }
 
-  async upload(stream: ReadableStream<Uint8Array>, options: UploadOptions): Promise<UploadResult<SupabaseMeta>> {
+  async upload(
+    stream: ReadableStream<Uint8Array>,
+    options: UploadOptions,
+    context?: UploadContext,
+  ): Promise<UploadResult<SupabaseMeta>> {
     validateUploadOptions(options);
     if (this.maxSizeBytes !== undefined && options.size !== undefined && options.size > this.maxSizeBytes) {
       throw new StorageError("size-exceeded", `file size ${options.size} exceeds maxSizeBytes ${this.maxSizeBytes}`, { provider: PROVIDER });
@@ -79,7 +84,7 @@ export class SupabaseDriver implements BaseDriver<SupabaseMeta> {
     const id = options.id ?? randomUUID();
     const path = this.pathFor({ ...options, id });
     const contentType = options.mimeType ?? "application/octet-stream";
-    const metadata = { ...options.metadata, ...(options.uploadToken ? { [TOKEN_KEY]: options.uploadToken } : {}) };
+    const metadata = { ...options.metadata, ...(context?.uploadToken ? { [TOKEN_KEY]: context.uploadToken } : {}) };
     const signal = options.signal;
 
     const reader = stream.getReader();
@@ -302,23 +307,27 @@ export class SupabaseDriver implements BaseDriver<SupabaseMeta> {
     return current;
   }
 
-  async delete(path: string): Promise<boolean> {
+  /** Deletes the object; a missing object is not an error. */
+  async delete(path: string, options?: OperationOptions): Promise<void> {
     const res = await fetchWithAbort(`${this.api}/object/${encodeURIComponent(this.bucket)}`, {
       method: "DELETE",
       headers: { ...this.headers, "content-type": "application/json" },
       body: JSON.stringify({ prefixes: [path] }),
+      signal: options?.signal ?? null,
     });
     if (!res.ok) throw await supabaseError("Supabase delete failed", res);
-    const removed = (await res.json().catch(() => [])) as unknown[];
-    return Array.isArray(removed) && removed.length > 0;
   }
 
-  async getUrl(path: string): Promise<string> {
+  async getUrl(path: string, _options?: OperationOptions): Promise<string> {
     return `${this.baseUrl}/${urlEncodePath(path)}`;
   }
 
-  async get(path: string): Promise<ReadableStream<Uint8Array>> {
-    const res = await fetchWithAbort(this.objectUrl("object/authenticated", path), { headers: this.headers });
+  /** Streams the object. `options.signal` also cancels reading the body. */
+  async get(path: string, options?: OperationOptions): Promise<ReadableStream<Uint8Array>> {
+    const res = await fetchWithAbort(this.objectUrl("object/authenticated", path), {
+      headers: this.headers,
+      signal: options?.signal ?? null,
+    });
     if (!res.ok) throw await supabaseError("Supabase get failed", res);
     if (!res.body) {
       throw new StorageError("provider-error", "Supabase get returned no response body", { provider: PROVIDER });
@@ -336,6 +345,7 @@ export class SupabaseDriver implements BaseDriver<SupabaseMeta> {
       method: "POST",
       headers: { ...this.headers, "content-type": "application/json" },
       body: JSON.stringify({ expiresIn }),
+      signal: options?.signal ?? null,
     });
     if (!res.ok) throw await supabaseError("Supabase sign failed", res);
     const { signedURL } = (await res.json()) as { signedURL?: string };
@@ -353,8 +363,11 @@ export class SupabaseDriver implements BaseDriver<SupabaseMeta> {
   }
 
   /** The object at `path` (`GET /object/info`), or `null` if it does not exist. */
-  async head(path: string): Promise<StoredObject<SupabaseMeta> | null> {
-    const res = await fetchWithAbort(this.objectUrl("object/info", path), { headers: this.headers });
+  async head(path: string, options?: OperationOptions): Promise<StoredObject<SupabaseMeta> | null> {
+    const res = await fetchWithAbort(this.objectUrl("object/info", path), {
+      headers: this.headers,
+      signal: options?.signal ?? null,
+    });
     if (!res.ok) {
       const error = await supabaseError("Supabase info failed", res);
       if (error.code === "not-found") return null;
@@ -390,33 +403,6 @@ async function fetchWithAbort(url: string | URL, init: RequestInit): Promise<Res
     const cause = err instanceof Error ? err : new Error(String(err));
     throw new StorageError("network", `${PROVIDER} network error: ${cause.message}`, { provider: PROVIDER, cause });
   }
-}
-
-/**
- * Classifies a Supabase Storage failure. The API often answers 400 with the
- * real status in the JSON body (`{ statusCode: "404", error, message }`), so
- * the body is checked before the HTTP status.
- */
-export function classifySupabaseError(status: number, body: string): StorageErrorCode {
-  let parsed: { statusCode?: string | number; error?: string; message?: string } = {};
-  try {
-    parsed = JSON.parse(body) as typeof parsed;
-  } catch {
-    // Not JSON (e.g. a TUS error); fall through to text and status checks.
-  }
-  const text = `${parsed.error ?? ""} ${parsed.message ?? ""} ${parsed.error === undefined ? body : ""}`.toLowerCase();
-  const code = Number(parsed.statusCode ?? status);
-
-  if (text.includes("bucket not found")) return "bucket-not-found";
-  if (text.includes("not found") || text.includes("not_found") || text.includes("no such")) return "not-found";
-  if (text.includes("exceeded the maximum allowed size") || text.includes("payload too large") || code === 413) {
-    return "size-exceeded";
-  }
-  if (code === 401 || code === 403 || text.includes("jwt") || text.includes("unauthorized") || text.includes("row-level security")) {
-    return "auth-failed";
-  }
-  if (code === 404) return "not-found";
-  return "provider-error";
 }
 
 async function supabaseError(prefix: string, res: Response): Promise<StorageError> {

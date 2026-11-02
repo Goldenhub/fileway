@@ -28,8 +28,8 @@ describeEnv("GCSDriver against Google Cloud Storage", () => {
   const prefix = `fileway-test-${Date.now()}`;
 
   it("uploads small and resumable objects, reads them back and deletes them", async () => {
-    const small = await driver.upload(bytes(1000), { filename: "small.txt", path: prefix, mimeType: "text/plain", uploadToken: "t1" });
-    const big = await driver.upload(bytes(700 * 1024), { filename: "big.bin", path: prefix, uploadToken: "t2" });
+    const small = await driver.upload(bytes(1000), { filename: "small.txt", path: prefix, mimeType: "text/plain" }, { uploadToken: "t1" });
+    const big = await driver.upload(bytes(700 * 1024), { filename: "big.bin", path: prefix }, { uploadToken: "t2" });
 
     expect((await driver.head(small.path))?.uploadToken).toBe("t1");
     expect((await driver.head(big.path))?.size).toBe(700 * 1024);
@@ -39,8 +39,8 @@ describeEnv("GCSDriver against Google Cloud Storage", () => {
     const res = await fetch(await driver.getPresignedUrl(small.path, { expiresIn: 60 }));
     expect(res.status).toBe(200);
 
-    await expect(driver.delete(small.path)).resolves.toBe(true);
-    await expect(driver.delete(big.path)).resolves.toBe(true);
+    await expect(driver.delete(small.path)).resolves.toBeUndefined();
+    await expect(driver.delete(big.path)).resolves.toBeUndefined();
     await expect(driver.head(small.path)).resolves.toBeNull();
   }, 60_000);
 

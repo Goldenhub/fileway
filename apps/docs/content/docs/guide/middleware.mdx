@@ -14,13 +14,14 @@ interface BeforeUploadResult {
   size?: number;                       // byte length of the replacement stream
 }
 
-interface MiddlewareHook {
+interface MiddlewareHook<TMeta extends Record<string, unknown> = Record<string, unknown>> {
   beforeUpload?: (
     stream: ReadableStream<Uint8Array>,
     options: UploadOptions,
   ) => Promise<BeforeUploadResult | void>;
   afterUpload?: (
-    result: UploadResult<Record<string, unknown>>,
+    result: UploadResult<TMeta>,
+    options: UploadOptions,
   ) => Promise<void>;
 }
 ```
@@ -68,14 +69,29 @@ Spreading the incoming options (`{ ...options }`) does not count, because it cop
 
 ## afterUpload
 
-Runs after the driver returns a successful upload result. Useful for logging, webhook calls, database indexing, or cache invalidation.
+Runs after the driver returns a successful upload result, with the options the driver received (after `beforeUpload`). Useful for logging, webhook calls, database indexing, or cache invalidation.
 
 ```ts
 const logger: MiddlewareHook = {
-  async afterUpload(result) {
-    console.log(`Uploaded ${result.path} (${result.size} bytes)`);
+  async afterUpload(result, options) {
+    console.log(`Uploaded ${options.filename} to ${result.path} (${result.size} bytes)`);
   },
 };
+```
+
+Written inline, `afterUpload` knows the driver's metadata type:
+
+```ts
+const client = new FilewayClient({
+  driver: new S3Driver({ bucket: "uploads", credentials }),
+  middlewares: [
+    {
+      async afterUpload(result) {
+        await db.files.insert({ key: result.path, etag: result.meta.etag }); // typed as S3Meta
+      },
+    },
+  ],
+});
 ```
 
 ## Usage

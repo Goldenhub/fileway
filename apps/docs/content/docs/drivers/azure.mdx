@@ -113,5 +113,6 @@ All failures are `StorageError`s (see the [error reference](/docs/guide/observab
 | `bucket-not-found` | `ContainerNotFound`. |
 | `auth-failed` | `AuthenticationFailed`, `AuthorizationFailure` and related codes, or HTTP 401/403. |
 | `size-exceeded` | Over `maxSizeBytes`, `RequestBodyTooLarge`, more than 50,000 blocks, or HTTP 413. |
+| `rate-limited` | `ServerBusy`, `TooManyRequests`, or HTTP 429. Safe to retry. |
 | `network` | `fetch` failed before a response. Safe to retry. |
 | `provider-error` | Any other non-2xx response. Safe to retry. |

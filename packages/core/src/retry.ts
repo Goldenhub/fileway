@@ -1,12 +1,14 @@
 import { isAbortError, StorageError } from "./errors.js";
 import type { RetryConfig } from "./types.js";
 
+// Internal retry helpers for FilewayClient. Not exported from the package.
+
 /** Error codes whose failures are safe to retry (transient by nature). */
-const RETRYABLE_CODES = new Set(["network", "provider-error"]);
+const RETRYABLE_CODES = new Set(["network", "timeout", "rate-limited", "provider-error"]);
 
 /**
- * True when `err` may be worth retrying. Retryable codes are `network` and
- * `provider-error`, plus any `StorageError` (or plain error) carrying an HTTP
+ * True when `err` may be worth retrying. Retryable codes are `network`,
+ * `timeout`, `rate-limited` and `provider-error`, plus any `StorageError` (or plain error) carrying an HTTP
  * status of 429 or 5xx. Validation, config, auth, not-found, size, and abort
  * errors are never retried.
  */

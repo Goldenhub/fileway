@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { FilewayClient, StorageError, ValidationError } from "@fileway/core";
-import { AzureDriver, classifyAzureError, parseConnectionString } from "./index.js";
+import { AzureDriver } from "./index.js";
+import { classifyAzureError, parseConnectionString } from "./internal.js";
 import { buildStringToSign, hmacBase64, signRequest } from "./sharedkey.js";
 
 const mockFetch = vi.fn();
@@ -146,9 +147,8 @@ describe("upload", () => {
       id: "inv_42",
       mimeType: "application/pdf",
       metadata: { owner: "ada" },
-      uploadToken: "tok-1",
       size: 5,
-    });
+    }, { uploadToken: "tok-1" });
 
     expect(mockFetch).toHaveBeenCalledTimes(1);
     const { url, init, headers } = call(0);
@@ -175,8 +175,7 @@ describe("upload", () => {
     const result = await driver.upload(body(Math.floor(2.5 * MiB), 64 * 1024), {
       filename: "big.bin",
       mimeType: "video/mp4",
-      uploadToken: "tok",
-    });
+    }, { uploadToken: "tok" });
 
     expect(mockFetch).toHaveBeenCalledTimes(4);
     const ids: string[] = [];
@@ -270,15 +269,25 @@ describe("SAS auth", () => {
 });
 
 describe("delete, get, head, isPending", () => {
-  it("deletes, returning false for a missing blob", async () => {
+  it("deletes, treating a missing blob as success", async () => {
     const driver = makeDriver();
     mockFetch.mockResolvedValueOnce(new Response(null, { status: 202 }));
-    await expect(driver.delete("a.txt")).resolves.toBe(true);
+    await expect(driver.delete("a.txt")).resolves.toBeUndefined();
     expect(call(0).init.method).toBe("DELETE");
     mockFetch.mockResolvedValueOnce(failure(404, "BlobNotFound"));
-    await expect(driver.delete("a.txt")).resolves.toBe(false);
+    await expect(driver.delete("a.txt")).resolves.toBeUndefined();
     mockFetch.mockResolvedValueOnce(failure(404, "ContainerNotFound"));
     await expect(driver.delete("a.txt")).rejects.toMatchObject({ code: "bucket-not-found" });
+  });
+
+  it("passes the signal and classifies throttling", async () => {
+    const controller = new AbortController();
+    mockFetch.mockImplementation(async () => new Response("x"));
+    await makeDriver().get("a", { signal: controller.signal });
+    await makeDriver().head("a", { signal: controller.signal });
+    for (const [, init] of mockFetch.mock.calls) expect((init as RequestInit).signal).toBe(controller.signal);
+    mockFetch.mockImplementation(async () => failure(503, "ServerBusy"));
+    await expect(makeDriver().get("a")).rejects.toMatchObject({ code: "rate-limited", statusCode: 503 });
   });
 
   it("streams a blob and classifies a missing one", async () => {

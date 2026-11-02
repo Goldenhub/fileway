@@ -55,5 +55,5 @@ console.log("  meta:", JSON.stringify(result.meta));
 const url = await client.getUrl(result.path);
 console.log("\nGenerated URL:", url);
 
-const deleted = await client.delete(result.path);
-console.log("Deleted:", deleted);
+await client.delete(result.path);
+console.log("Deleted:", result.path);

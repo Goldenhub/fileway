@@ -22,7 +22,7 @@ describeEnv("S3Driver integration against MinIO", () => {
   const host = new URL(base).host;
   const cred = { accessKeyId, secretAccessKey, region: "us-east-1", service: "s3" };
 
-  let client: FilewayClient<{ driver: S3Driver }>;
+  let client: FilewayClient<S3Driver>;
 
   async function s3Request(
     method: string,
@@ -98,8 +98,7 @@ describeEnv("S3Driver integration against MinIO", () => {
     expect(read.ok).toBe(true);
     expect(await read.text()).toBe("hello minio");
 
-    const deleted = await client.delete(result.path);
-    expect(deleted).toBe(true);
+    await expect(client.delete(result.path)).resolves.toBeUndefined();
 
     const gone = await s3Request("GET", result.path);
     expect(gone.ok).toBe(false);
@@ -196,8 +195,7 @@ describeEnv("S3Driver integration against MinIO", () => {
     expect(read.ok).toBe(true);
     expect(new Uint8Array(await read.arrayBuffer())).toEqual(bytes);
 
-    const deleted = await client.delete(result.path);
-    expect(deleted).toBe(true);
+    await expect(client.delete(result.path)).resolves.toBeUndefined();
   });
 
   it("uploads a large file via multipart (multiple parts) and reads it back intact", async () => {

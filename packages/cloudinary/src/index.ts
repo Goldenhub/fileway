@@ -1,4 +1,4 @@
-import type { BaseDriver, PresignedUrlOptions, StorageErrorCode, StoredObject, UploadOptions, UploadResult } from "@fileway/core";
+import type { BaseDriver, OperationOptions, PresignedUrlOptions, StorageErrorCode, StoredObject, UploadContext, UploadOptions, UploadResult } from "@fileway/core";
 import { validateUploadOptions, ValidationError, isAbortError, abortError, StorageError } from "@fileway/core";
 
 const randomUUID = () => globalThis.crypto.randomUUID();
@@ -53,7 +53,7 @@ export interface CloudinaryMeta extends Record<string, unknown> {
   height?: number;
 }
 
-export interface CloudinaryLookupOptions {
+export interface CloudinaryLookupOptions extends OperationOptions {
   /**
    * The asset's resource type. Cloudinary does not encode the resource type in
    * a public ID, so it is resolved from cache or the Admin API when omitted and
@@ -131,7 +131,11 @@ export class CloudinaryDriver implements BaseDriver<CloudinaryMeta> {
    * (`X-Unique-Upload-Id` + `Content-Range`), so peak memory stays at about
    * one chunk regardless of file size.
    */
-  async upload(stream: ReadableStream<Uint8Array>, options: CloudinaryUploadOptions): Promise<UploadResult<CloudinaryMeta>> {
+  async upload(
+    stream: ReadableStream<Uint8Array>,
+    options: CloudinaryUploadOptions,
+    uploadContext?: UploadContext,
+  ): Promise<UploadResult<CloudinaryMeta>> {
     validateUploadOptions(options);
 
     const { signal } = options;
@@ -142,7 +146,7 @@ export class CloudinaryDriver implements BaseDriver<CloudinaryMeta> {
     // A stable public ID makes retries overwrite the same asset instead of
     // creating a second one; the token lets `head` recognize this upload.
     const publicId = options.id ?? randomUUID();
-    const context = options.uploadToken ? `${TOKEN_CONTEXT_KEY}=${options.uploadToken}` : undefined;
+    const context = uploadContext?.uploadToken ? `${TOKEN_CONTEXT_KEY}=${uploadContext.uploadToken}` : undefined;
     const uploadId = randomUUID();
     const timestamp = Math.floor(Date.now() / 1000).toString();
     const signature = await this.generateSignature({
@@ -272,7 +276,7 @@ export class CloudinaryDriver implements BaseDriver<CloudinaryMeta> {
       for (const resourceType of resourceTypes) {
         const res = await fetchWithAbort(
           `https://api.cloudinary.com/v1_1/${this.cloudName}/resources/${resourceType}/${deliveryType}/${urlEncodePublicId(candidate)}`,
-          { headers: { authorization: this.adminAuth() } },
+          { headers: { authorization: this.adminAuth() }, signal: options?.signal ?? null },
           "cloudinary",
         );
         if (res.status === 404) continue;
@@ -319,16 +323,16 @@ export class CloudinaryDriver implements BaseDriver<CloudinaryMeta> {
   }
 
   /**
-   * Deletes the asset. Returns `false` when it does not exist; throws a
+   * Deletes the asset; a missing asset is not an error. Throws a
    * `StorageError` for any other failure (auth, network, provider).
    */
-  async delete(publicId: string, options?: CloudinaryLookupOptions): Promise<boolean> {
+  async delete(publicId: string, options?: CloudinaryLookupOptions): Promise<void> {
     const asset = await this.resolveAsset(publicId, options);
-    if (!asset.found) return false;
+    if (!asset.found) return;
 
     const res = await fetchWithAbort(
       `https://api.cloudinary.com/v1_1/${this.cloudName}/resources/${asset.resourceType}/${asset.deliveryType}?public_ids[]=${encodeURIComponent(publicId)}`,
-      { method: "DELETE", headers: { authorization: this.adminAuth() } },
+      { method: "DELETE", headers: { authorization: this.adminAuth() }, signal: options?.signal ?? null },
       "cloudinary",
     );
     if (!res.ok) {
@@ -343,8 +347,7 @@ export class CloudinaryDriver implements BaseDriver<CloudinaryMeta> {
     if (status === "deleted" || status === "not_found") {
       this.cache.delete(publicId);
     }
-    if (status === "deleted") return true;
-    if (status === "not_found") return false;
+    if (status === "deleted" || status === "not_found") return;
     throw new StorageError("provider-error", `Cloudinary delete returned unexpected status: ${status ?? "none"}`, {
       provider: "cloudinary",
     });
@@ -365,7 +368,7 @@ export class CloudinaryDriver implements BaseDriver<CloudinaryMeta> {
 
   async get(publicId: string, options?: CloudinaryLookupOptions): Promise<ReadableStream<Uint8Array>> {
     const url = await this.getUrl(publicId, options);
-    const response = await fetchWithAbort(url, {}, "cloudinary");
+    const response = await fetchWithAbort(url, { signal: options?.signal ?? null }, "cloudinary");
     if (!response.ok) {
       throw new StorageError(classifyCloudinaryStatus(response.status, "get"), `Cloudinary get failed: ${response.status} ${response.statusText}`, {
         statusCode: response.status,
@@ -455,7 +458,7 @@ export class CloudinaryDriver implements BaseDriver<CloudinaryMeta> {
       return { found: true, ...cached };
     }
 
-    const found = await this.lookupResource(publicId, wantedType);
+    const found = await this.lookupResource(publicId, wantedType, options?.signal);
     if (found) return found;
 
     return { found: false, resourceType: "image", deliveryType: wantedType ?? this.deliveryType };
@@ -463,7 +466,11 @@ export class CloudinaryDriver implements BaseDriver<CloudinaryMeta> {
 
   /** Looks the public ID up via the Admin Search API. Returns `null` when no
    * asset matches; throws a `StorageError` when the lookup itself fails. */
-  private async lookupResource(publicId: string, deliveryType?: CloudinaryDeliveryType): Promise<ResolvedAsset | null> {
+  private async lookupResource(
+    publicId: string,
+    deliveryType: CloudinaryDeliveryType | undefined,
+    signal: AbortSignal | undefined,
+  ): Promise<ResolvedAsset | null> {
     const expression = deliveryType === undefined
       ? `public_id="${escapeSearchValue(publicId)}"`
       : `public_id="${escapeSearchValue(publicId)}" AND type=${deliveryType}`;
@@ -476,6 +483,7 @@ export class CloudinaryDriver implements BaseDriver<CloudinaryMeta> {
           authorization: this.adminAuth(),
         },
         body: JSON.stringify({ expression, max_results: 1 }),
+        signal: signal ?? null,
       },
       "cloudinary",
     );
@@ -592,6 +600,7 @@ async function fetchWithAbort(url: string | URL, init: RequestInit, provider: st
  * cloud → `bucket-not-found`). Cloudinary signals rate limiting with 420. */
 function classifyCloudinaryStatus(status: number, context: "upload" | "get"): StorageErrorCode {
   if (status === 401 || status === 403) return "auth-failed";
+  if (status === 420 || status === 429) return "rate-limited";
   if (status === 404) return context === "upload" ? "bucket-not-found" : "not-found";
   if (status === 413) return "size-exceeded";
   return "provider-error";

@@ -1,5 +1,7 @@
 import type { UploadProgress } from "./types.js";
 
+// Internal: used by FilewayClient for `onProgress`. Not exported from the package.
+
 /**
  * Minimum time between progress callbacks for small chunks on fast streams.
  * Large or infrequent chunks report immediately (see `MIN_CHUNK_BYTES`).

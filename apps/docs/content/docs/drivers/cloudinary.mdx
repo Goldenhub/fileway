@@ -138,7 +138,7 @@ const url = await client.getPresignedUrl(result.meta.publicId, { expiresIn: 300 
 
 ## Delete
 
-`delete(publicId, options?)` removes an asset via the Cloudinary Admin API, using the same resolution chain as `getUrl` to pick the correct `resource_type` path (`/resources/{type}/upload`). Returns `true` when Cloudinary confirms the deletion and `false` when the asset does not exist. Any other failure (auth, network, rate limit, outage, including a failed Admin API lookup) throws a `StorageError`.
+`delete(publicId, options?)` removes an asset via the Cloudinary Admin API, using the same resolution chain as `getUrl` to pick the correct `resource_type` path (`/resources/{type}/upload`). Deleting an asset that does not exist is not an error. Any other failure (auth, network, rate limit, outage, including a failed Admin API lookup) throws a `StorageError`.
 
 ## Cancellation
 
@@ -201,5 +201,6 @@ All failures are `StorageError`s from `@fileway/core` (see the [error reference]
 | `bucket-not-found` | Upload-time HTTP 404: the cloud does not exist. |
 | `not-found` | Download-time HTTP 404: the asset does not exist at the CDN URL. |
 | `size-exceeded` | Upload size exceeding `maxSizeBytes`, or HTTP 413. |
+| `rate-limited` | Admin API rate limit (HTTP 420) or HTTP 429. Safe to retry. |
 | `network` | `fetch` failed before an HTTP response; the original error is preserved as `cause`. Safe to retry. |
 | `provider-error` | Any other non-2xx response (e.g. HTTP 500). Safe to retry. |

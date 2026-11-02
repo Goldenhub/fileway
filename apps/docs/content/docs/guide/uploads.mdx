@@ -123,7 +123,7 @@ Configure backoff with the client's `retry` option (e.g. `maxRetries`, `baseDela
 A network failure is ambiguous: the provider may have stored the file even though its response never reached you (a reset connection, a timeout, a proxy that dropped the reply). Fileway handles this with a **stable upload ID**:
 
 - Every `upload()` call gets one `id` (generated, or yours via `options.id`), and every retry of that call reuses it, so the stored name never changes between attempts.
-- The client also stamps a per-call token on the object (S3 object metadata, Cloudinary context).
+- The client also gives the driver a per-call token (`context.uploadToken`, the third argument of `driver.upload`), which the driver stores with the object (S3 object metadata, Cloudinary context, and so on).
 - When an attempt fails with a retryable error, the client first asks the driver whether that object already landed. If it did, with this call's token and the expected size, the upload **succeeds without re-sending anything**. This works even without `streamFactory`.
 - Only if the object is not there does the client retry (with `streamFactory`) or throw.
 

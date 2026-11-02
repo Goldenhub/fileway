@@ -1,6 +1,8 @@
 import { describe, it, expect, vi } from "vitest";
-import { FilewayClient, version, abortError, isAbortError, StorageError, ValidationError, isRetryable } from "./index.js";
-import type { BaseDriver, StoredObject, UploadOptions, UploadResult } from "./types.js";
+import * as core from "./index.js";
+import { FilewayClient, version, abortError, isAbortError, StorageError, ValidationError } from "./index.js";
+import { isRetryable } from "./retry.js";
+import type { BaseDriver, OperationOptions, StoredObject, UploadContext, UploadOptions, UploadResult } from "./types.js";
 
 describe("version", () => {
   it("should export the current version", () => {
@@ -98,7 +100,7 @@ describe("FilewayClient", () => {
           };
         },
       ),
-      delete: vi.fn(async () => true),
+      delete: vi.fn(async () => {}),
       getUrl: vi.fn(async (path: string) => `https://example.com${path}`),
       get: vi.fn(async () => new ReadableStream<Uint8Array>()),
       getPresignedUrl: vi.fn(async (_path: string, options?: { expiresIn?: number }) =>
@@ -115,12 +117,13 @@ describe("FilewayClient", () => {
 
     await client.upload(stream, options);
 
-    // The client adds a stable id and a per-call token to the caller's options.
-    expect(driver.upload).toHaveBeenCalledWith(stream, {
-      ...options,
-      id: expect.stringMatching(/^[0-9a-f-]{36}$/),
-      uploadToken: expect.stringMatching(/^[0-9a-f-]{36}$/),
-    });
+    // The client adds a stable id to the caller's options and passes the
+    // per-call token separately, as upload context.
+    expect(driver.upload).toHaveBeenCalledWith(
+      stream,
+      { ...options, id: expect.stringMatching(/^[0-9a-f-]{36}$/) },
+      { uploadToken: expect.stringMatching(/^[0-9a-f-]{36}$/) },
+    );
   });
 
   it("should run middlewares in order", async () => {
@@ -158,10 +161,9 @@ describe("FilewayClient", () => {
     const driver = createMockDriver();
     const client = new FilewayClient({ driver });
 
-    const result = await client.delete("/uploads/test.txt");
+    await expect(client.delete("/uploads/test.txt")).resolves.toBeUndefined();
 
-    expect(driver.delete).toHaveBeenCalledWith("/uploads/test.txt");
-    expect(result).toBe(true);
+    expect(driver.delete).toHaveBeenCalledWith("/uploads/test.txt", undefined);
   });
 
   it("should call driver.getUrl", async () => {
@@ -170,7 +172,7 @@ describe("FilewayClient", () => {
 
     const url = await client.getUrl("/uploads/test.txt");
 
-    expect(driver.getUrl).toHaveBeenCalledWith("/uploads/test.txt");
+    expect(driver.getUrl).toHaveBeenCalledWith("/uploads/test.txt", undefined);
     expect(url).toBe("https://example.com/uploads/test.txt");
   });
 
@@ -180,7 +182,7 @@ describe("FilewayClient", () => {
 
     const stream = await client.get("/uploads/test.txt");
 
-    expect(driver.get).toHaveBeenCalledWith("/uploads/test.txt");
+    expect(driver.get).toHaveBeenCalledWith("/uploads/test.txt", undefined);
     expect(stream).toBeInstanceOf(ReadableStream);
   });
 
@@ -219,6 +221,7 @@ describe("FilewayClient", () => {
     expect(driver.upload).toHaveBeenCalledWith(
       expect.any(ReadableStream),
       expect.objectContaining({ signal: controller.signal }),
+      expect.anything(),
     );
   });
 });
@@ -243,7 +246,7 @@ describe("FilewayClient upload progress", () => {
           };
         },
       ),
-      delete: vi.fn(async () => true),
+      delete: vi.fn(async () => {}),
       getUrl: vi.fn(async (path: string) => `https://example.com${path}`),
       get: vi.fn(async () => new ReadableStream<Uint8Array>()),
     };
@@ -274,7 +277,7 @@ describe("FilewayClient upload progress", () => {
       name: "mock",
       upload,
       lastStreamBytes: async () => lastReadBytes,
-      delete: vi.fn(async () => true),
+      delete: vi.fn(async () => {}),
       getUrl: vi.fn(async (path: string) => `https://example.com${path}`),
       get: vi.fn(async () => new ReadableStream<Uint8Array>()),
     };
@@ -355,7 +358,7 @@ describe("FilewayClient upload progress", () => {
           seen.push({ size: options.size, bytes });
           return { id: "f", url: "u", path: "p", size: bytes, meta: {} };
         }),
-        delete: vi.fn(async () => true),
+        delete: vi.fn(async () => {}),
         getUrl: vi.fn(async (p: string) => p),
         get: vi.fn(async () => new ReadableStream<Uint8Array>()),
       };
@@ -489,7 +492,7 @@ describe("FilewayClient upload progress", () => {
 
     await client.upload(stream, { filename: "test.txt" });
 
-    expect(driver.upload).toHaveBeenCalledWith(stream, expect.anything());
+    expect(driver.upload).toHaveBeenCalledWith(stream, expect.anything(), expect.anything());
   });
 
   it("reports every significant chunk immediately and throttles small fast chunks", async () => {
@@ -542,7 +545,7 @@ describe("FilewayClient logging & onError", () => {
         meta: {},
       }),
     ),
-    delete: vi.fn(async () => true),
+    delete: vi.fn(async () => {}),
     getUrl: vi.fn(async (p: string) => `https://example.com${p}`),
     get: vi.fn(async () => new ReadableStream<Uint8Array>()),
   });
@@ -735,15 +738,13 @@ describe("FilewayClient retry", () => {
         .fn()
         .mockRejectedValueOnce(new StorageError("network", "flaky", { provider: "s3" }))
         .mockRejectedValueOnce(new StorageError("network", "flaky", { provider: "s3" }))
-        .mockResolvedValueOnce(true),
+        .mockResolvedValueOnce(undefined),
       getUrl: vi.fn(async (p) => `u${p}`),
       get: vi.fn(async () => new ReadableStream()),
     };
     const client = new FilewayClient({ driver, retry: { maxRetries: 5, baseDelayMs: 1, maxDelayMs: 5, jitter: false } });
 
-    const result = await client.delete("x");
-
-    expect(result).toBe(true);
+    await expect(client.delete("x")).resolves.toBeUndefined();
     expect(driver.delete).toHaveBeenCalledTimes(3);
   });
 
@@ -790,7 +791,7 @@ describe("FilewayClient retry", () => {
         if (attempt < 3) throw new StorageError("network", "flaky", { provider: "s3" });
         return { id: `f${attempt}`, url: "u", path: "p", size: 0, meta: {} };
       }),
-      delete: vi.fn(async () => true),
+      delete: vi.fn(async () => {}),
       getUrl: vi.fn(async (p) => `u${p}`),
       get: vi.fn(async () => new ReadableStream()),
     };
@@ -819,7 +820,7 @@ describe("FilewayClient retry", () => {
         if (++attempt < 3) throw new StorageError("network", "flaky", { provider: "s3" });
         return { id: "f", url: "u", path: options.path ?? "", size: 0, meta: {} };
       }),
-      delete: vi.fn(async () => true),
+      delete: vi.fn(async () => {}),
       getUrl: vi.fn(async (p) => `u${p}`),
       get: vi.fn(async () => new ReadableStream()),
     };
@@ -851,7 +852,7 @@ describe("FilewayClient retry", () => {
       upload: vi.fn(async () => {
         throw new StorageError("network", "flaky", { provider: "s3" });
       }),
-      delete: vi.fn(async () => true),
+      delete: vi.fn(async () => {}),
       getUrl: vi.fn(async (p) => `u${p}`),
       get: vi.fn(async () => new ReadableStream()),
     };
@@ -887,7 +888,7 @@ describe("FilewayClient retry", () => {
     const driver: BaseDriver = {
       name: "mock",
       upload: vi.fn(async () => ({ id: "f", url: "u", path: "p", size: 0, meta: {} })),
-      delete: vi.fn(async () => true),
+      delete: vi.fn(async () => {}),
       getUrl: vi.fn(async (p) => `u${p}`),
       get: vi.fn(async () => new ReadableStream()),
     };
@@ -945,7 +946,7 @@ describe("lost-response recovery and upload status", () => {
       name: "store",
       store,
       pending,
-      upload: vi.fn(async (stream: ReadableStream<Uint8Array>, o: UploadOptions) => {
+      upload: vi.fn(async (stream: ReadableStream<Uint8Array>, o: UploadOptions, context?: UploadContext) => {
         const size = (await new Response(stream).arrayBuffer()).byteLength;
         const path = pathFor({ ...o, id: o.id! });
         const object: StoredObject = {
@@ -954,7 +955,7 @@ describe("lost-response recovery and upload status", () => {
           path,
           size,
           meta: {},
-          ...(keepsTokens && o.uploadToken ? { uploadToken: o.uploadToken } : {}),
+          ...(keepsTokens && context ? { uploadToken: context.uploadToken } : {}),
         };
         store.set(path, object);
         if (lost < loseResponses) {
@@ -963,7 +964,7 @@ describe("lost-response recovery and upload status", () => {
         }
         return { id: object.id, url: object.url, path, size, meta: {} };
       }),
-      delete: vi.fn(async () => true),
+      delete: vi.fn(async () => {}),
       getUrl: vi.fn(async (p: string) => p),
       get: vi.fn(async () => new ReadableStream<Uint8Array>()),
       pathFor,
@@ -1008,7 +1009,7 @@ describe("lost-response recovery and upload status", () => {
 
     await client.upload(bytes(1), { filename: "a.txt", streamFactory: () => bytes(1) });
 
-    const seen = driver.upload.mock.calls.map(([, o]) => [o.id, o.uploadToken]);
+    const seen = driver.upload.mock.calls.map(([, o, context]) => [o.id, context?.uploadToken]);
     expect(seen).toHaveLength(3);
     expect(new Set(seen.map(([id]) => id)).size).toBe(1);
     expect(new Set(seen.map(([, t]) => t)).size).toBe(1);
@@ -1082,7 +1083,7 @@ describe("lost-response recovery and upload status", () => {
     const driver: BaseDriver = {
       name: "plain",
       upload: vi.fn(async () => ({ id: "f", url: "u", path: "p", size: 0, meta: {} })),
-      delete: vi.fn(async () => true),
+      delete: vi.fn(async () => {}),
       getUrl: vi.fn(async (p: string) => p),
       get: vi.fn(async () => new ReadableStream<Uint8Array>()),
     };
@@ -1112,7 +1113,7 @@ describe("retry.idleTimeoutMs", () => {
   const baseDriver = (upload: BaseDriver["upload"]): BaseDriver => ({
     name: "mock",
     upload: vi.fn(upload),
-    delete: vi.fn(async () => true),
+    delete: vi.fn(async () => {}),
     getUrl: vi.fn(async (p: string) => p),
     get: vi.fn(async () => new ReadableStream<Uint8Array>()),
   });
@@ -1154,7 +1155,7 @@ describe("retry.idleTimeoutMs", () => {
     expect(driver.upload).toHaveBeenCalledTimes(1);
   });
 
-  it("times out waiting for the reply after the body is sent, as a retryable network error", async () => {
+  it("times out waiting for the reply after the body is sent, as a retryable timeout error", async () => {
     const driver = baseDriver(async (stream, o) => {
       await new Response(stream).arrayBuffer();
       return hang(o);
@@ -1165,7 +1166,7 @@ describe("retry.idleTimeoutMs", () => {
     // No streamFactory: the timeout surfaces as the final error.
     await expect(client.upload(trickle(1, 0), { filename: "a.bin" })).rejects.toMatchObject({
       name: "StorageError",
-      code: "network",
+      code: "timeout",
       message: "upload attempt timed out after 40 ms without progress",
     });
     expect(isRetryable(onError.mock.calls[0]![0])).toBe(true);
@@ -1191,17 +1192,24 @@ describe("retry.idleTimeoutMs", () => {
     const driver = baseDriver(() => new Promise<never>(() => {})); // never settles, ignores abort
     const client = new FilewayClient({ driver, retry: { maxRetries: 0, idleTimeoutMs: 30 } });
 
-    await expect(client.upload(trickle(1, 0), { filename: "a.bin" })).rejects.toMatchObject({ code: "network" });
+    await expect(client.upload(trickle(1, 0), { filename: "a.bin" })).rejects.toMatchObject({ code: "timeout" });
   });
 
   it("limits each attempt of other operations and retries them", async () => {
     const driver = baseDriver(async (_s, o) => okResult(o));
     let calls = 0;
-    driver.delete = vi.fn(() => (++calls === 1 ? new Promise<boolean>(() => {}) : Promise.resolve(true)));
+    const signals: (AbortSignal | undefined)[] = [];
+    driver.delete = vi.fn((_path: string, options?: OperationOptions) => {
+      signals.push(options?.signal);
+      return ++calls === 1 ? new Promise<void>(() => {}) : Promise.resolve();
+    });
     const client = new FilewayClient({ driver, retry: { ...quickRetry, idleTimeoutMs: 30 } });
 
-    await expect(client.delete("x")).resolves.toBe(true);
+    await expect(client.delete("x")).resolves.toBeUndefined();
     expect(calls).toBe(2);
+    // The timed-out attempt's request is cancelled, not just abandoned.
+    expect(signals[0]?.aborted).toBe(true);
+    expect(signals[1]?.aborted).toBe(false);
   });
 
   it("is off by default and validates its value", () => {
@@ -1209,5 +1217,91 @@ describe("retry.idleTimeoutMs", () => {
     expect(() => new FilewayClient({ driver, retry: { idleTimeoutMs: 0 } })).toThrow(/idleTimeoutMs/);
     expect(() => new FilewayClient({ driver, retry: { idleTimeoutMs: Number.NaN } })).toThrow(/idleTimeoutMs/);
     expect(() => new FilewayClient({ driver })).not.toThrow();
+  });
+});
+
+describe("1.0 API surface", () => {
+  it("exports only the client, types, errors and driver helpers", () => {
+    expect(Object.keys(core).sort()).toEqual(
+      [
+        "FilewayClient",
+        "StorageError",
+        "ValidationError",
+        "abortError",
+        "isAbortError",
+        "urlEncodePath",
+        "validateUploadOptions",
+        "version",
+      ].sort(),
+    );
+  });
+
+  it("retries the timeout and rate-limited codes", () => {
+    expect(isRetryable(new StorageError("timeout", "slow"))).toBe(true);
+    expect(isRetryable(new StorageError("rate-limited", "slow down", { statusCode: 429 }))).toBe(true);
+  });
+
+  function optionsDriver() {
+    return {
+      name: "opts",
+      upload: vi.fn(async (_s: ReadableStream<Uint8Array>, o: UploadOptions) => ({
+        id: o.id!, url: "u", path: "p", size: 0, meta: { bucket: "b" },
+      })),
+      delete: vi.fn(async (_p: string, _o?: OperationOptions & { version?: string }) => {}),
+      getUrl: vi.fn(async (p: string, _o?: OperationOptions & { version?: string }) => p),
+      get: vi.fn(async (_p: string, _o?: OperationOptions & { version?: string }) => new ReadableStream<Uint8Array>()),
+      getPresignedUrl: vi.fn(async (p: string, _o?: { expiresIn?: number; signal?: AbortSignal; version?: string }) => p),
+    };
+  }
+
+  it("passes the caller's signal and driver-specific options to the driver", async () => {
+    const driver = optionsDriver();
+    const client = new FilewayClient({ driver });
+    const controller = new AbortController();
+
+    await client.delete("a", { version: "2", signal: controller.signal });
+    await client.getUrl("a", { version: "2" });
+    await client.get("a", { signal: controller.signal });
+    await client.getPresignedUrl("a", { expiresIn: 60, version: "2" });
+
+    expect(driver.delete).toHaveBeenCalledWith("a", { version: "2", signal: controller.signal });
+    expect(driver.getUrl).toHaveBeenCalledWith("a", { version: "2" });
+    expect(driver.get).toHaveBeenCalledWith("a", { signal: controller.signal });
+    expect(driver.getPresignedUrl).toHaveBeenCalledWith("a", { expiresIn: 60, version: "2" });
+  });
+
+  it("aborts the driver's request when the caller aborts", async () => {
+    const driver = optionsDriver();
+    driver.get.mockImplementation(
+      (_p, o) =>
+        new Promise((_resolve, reject) => {
+          o?.signal?.addEventListener("abort", () => reject(abortError("get aborted")));
+        }),
+    );
+    const client = new FilewayClient({ driver });
+    const controller = new AbortController();
+    const pending = client.get("a", { signal: controller.signal });
+    controller.abort();
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+    expect(driver.get).toHaveBeenCalledTimes(1);
+  });
+
+  it("gives afterUpload the driver's typed meta and the upload options", async () => {
+    const driver = optionsDriver();
+    const seen: unknown[] = [];
+    const client = new FilewayClient({
+      driver,
+      middlewares: [
+        {
+          afterUpload: async (result, options) => {
+            // Compile-time check: `meta.bucket` is typed from the driver.
+            const bucket: string = result.meta.bucket;
+            seen.push(bucket, options.filename, options.id);
+          },
+        },
+      ],
+    });
+    await client.upload(new ReadableStream(), { filename: "a.txt", id: "abc" });
+    expect(seen).toEqual(["b", "a.txt", "abc"]);
   });
 });

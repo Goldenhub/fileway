@@ -392,17 +392,13 @@ describe("CloudinaryDriver", () => {
     it("should delete an asset by public_id", async () => {
       mockSearch({ resource_type: "image" }, { abc123: "deleted" });
 
-      const deleted = await driver.delete("abc123");
-
-      expect(deleted).toBe(true);
+      await expect(driver.delete("abc123")).resolves.toBeUndefined();
     });
 
     it("should delete a foreign raw asset via the Admin API with the resolved type", async () => {
       mockSearch({ resource_type: "raw" }, { "assets/sheet.csv": "deleted" });
 
-      const deleted = await driver.delete("assets/sheet.csv");
-
-      expect(deleted).toBe(true);
+      await expect(driver.delete("assets/sheet.csv")).resolves.toBeUndefined();
       const search = mockFetch.mock.calls.find(([url]) => String(url).includes("/resources/search"));
       expect(search).toBeDefined();
       const destroy = mockFetch.mock.calls.find(([url]) => String(url).includes("/resources/raw/upload"));
@@ -417,31 +413,38 @@ describe("CloudinaryDriver", () => {
     it("should use an explicit resourceType hint and skip the Admin lookup", async () => {
       mockSearch({ resource_type: "image" }, { clip1: "deleted" });
 
-      const deleted = await driver.delete("clip1", { resourceType: "video" });
-
-      expect(deleted).toBe(true);
+      await expect(driver.delete("clip1", { resourceType: "video" })).resolves.toBeUndefined();
       expect(mockFetch.mock.calls.some(([url]) => String(url).includes("/resources/search"))).toBe(false);
       expect(
         mockFetch.mock.calls.some(([url]) => String(url).includes("/resources/video/upload")),
       ).toBe(true);
     });
 
-    it("should return false without a destroy call when the asset is unknown", async () => {
+    it("treats an unknown asset as already deleted, without a destroy call", async () => {
       mockSearch(undefined);
 
-      const deleted = await driver.delete("nonexistent_id");
-
-      expect(deleted).toBe(false);
+      await expect(driver.delete("nonexistent_id")).resolves.toBeUndefined();
       expect(
         mockFetch.mock.calls.some(([, init]) => (init as RequestInit)?.method === "DELETE"),
       ).toBe(false);
     });
 
-    it("should return false on delete failure", async () => {
+    it("classifies Cloudinary's 420 rate limit", async () => {
+      mockFetch.mockResolvedValue(new Response("", { status: 420 }));
+      await expect(driver.delete("abc123")).rejects.toMatchObject({ code: "rate-limited", statusCode: 420 });
+    });
+
+    it("passes the signal to its requests", async () => {
+      const controller = new AbortController();
+      mockSearch({ resource_type: "image" }, { abc123: "deleted" });
+      await driver.delete("abc123", { signal: controller.signal });
+      for (const [, init] of mockFetch.mock.calls) expect((init as RequestInit).signal).toBe(controller.signal);
+    });
+
+    it("treats not_found from destroy as already deleted", async () => {
       mockSearch({ resource_type: "image" }, { nonexistent_id: "not_found" });
 
-      const deleted = await driver.delete("nonexistent_id");
-      expect(deleted).toBe(false);
+      await expect(driver.delete("nonexistent_id")).resolves.toBeUndefined();
     });
 
     it("should throw a network error when fetch fails", async () => {
@@ -497,7 +500,7 @@ describe("CloudinaryDriver", () => {
       });
       await driver.upload(stream, { filename: "test.png" });
 
-      expect(await driver.delete("abc123")).toBe(true);
+      await expect(driver.delete("abc123")).resolves.toBeUndefined();
 
       // Cache is gone → the next getUrl falls back to the Admin lookup.
       mockFetch.mockClear();
@@ -611,7 +614,7 @@ describe("CloudinaryDriver", () => {
 
       expect(mockFetch).toHaveBeenCalledWith(
         "https://res.cloudinary.com/demo/image/upload/abc123",
-        {},
+        { signal: null },
       );
       expect(stream).toBe(body);
     });
@@ -846,7 +849,7 @@ describe("CloudinaryDriver", () => {
     it("deletes through the asset's delivery type path", async () => {
       mockFetch.mockImplementation(async () => mockResponse({ deleted: { abc: "deleted" } }));
 
-      expect(await driver.delete("abc", { resourceType: "raw", deliveryType: "authenticated" })).toBe(true);
+      await expect(driver.delete("abc", { resourceType: "raw", deliveryType: "authenticated" })).resolves.toBeUndefined();
 
       expect(String(mockFetch.mock.calls[0]![0])).toContain("/resources/raw/authenticated?public_ids[]=abc");
     });
@@ -978,7 +981,7 @@ describe("CloudinaryDriver stable ids and upload status", () => {
       return resource();
     });
 
-    await driver.upload(small(), { filename: "r.pdf", path: "docs", id: "inv_42", uploadToken: "tok-1" });
+    await driver.upload(small(), { filename: "r.pdf", path: "docs", id: "inv_42" }, { uploadToken: "tok-1" });
 
     expect(body!.get("public_id")).toBe("inv_42");
     expect(body!.get("overwrite")).toBe("true");

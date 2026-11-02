@@ -130,13 +130,45 @@ describe("S3Driver (AWS S3)", () => {
 
   it("should delete an object", async () => {
     mockFetch.mockResolvedValue(okResponse());
-    const result = await driver.delete("test.txt");
-    expect(result).toBe(true);
+    await expect(driver.delete("test.txt")).resolves.toBeUndefined();
     expect(mockFetch).toHaveBeenCalledTimes(1);
 
     const [url, opts] = mockFetch.mock.calls[0]!;
     expect(url).toContain("test.txt");
     expect(opts.method).toBe("DELETE");
+  });
+
+  it("treats a 404 on delete as already deleted", async () => {
+    mockFetch.mockResolvedValue(new Response("<Error><Code>NoSuchKey</Code></Error>", { status: 404 }));
+    await expect(driver.delete("test.txt")).resolves.toBeUndefined();
+  });
+
+  it("classifies throttling as rate-limited", async () => {
+    mockFetch.mockResolvedValue(new Response("<Error><Code>SlowDown</Code></Error>", { status: 503 }));
+    await expect(driver.get("test.txt")).rejects.toMatchObject({ code: "rate-limited", statusCode: 503 });
+    mockFetch.mockResolvedValue(new Response("", { status: 429 }));
+    await expect(driver.get("test.txt")).rejects.toMatchObject({ code: "rate-limited" });
+  });
+
+  it("passes the signal to read requests", async () => {
+    const controller = new AbortController();
+    mockFetch.mockImplementation(async () => new Response("x"));
+    await driver.get("a.txt", { signal: controller.signal });
+    await driver.head("a.txt", { signal: controller.signal });
+    await driver.delete("a.txt", { signal: controller.signal });
+    for (const [, init] of mockFetch.mock.calls) expect((init as RequestInit).signal).toBe(controller.signal);
+  });
+
+  it("enforces maxSizeBytes up front and during multipart", async () => {
+    const body = (n: number) =>
+      new ReadableStream<Uint8Array>({ start: (c) => { c.enqueue(new Uint8Array(n)); c.close(); } });
+    const limited = new S3Driver({ bucket: "b", credentials: { accessKeyId: "AKID", secretAccessKey: "secret" }, maxSizeBytes: 4 });
+    await expect(limited.upload(body(10), { filename: "a.bin", size: 10 })).rejects.toMatchObject({ code: "size-exceeded" });
+    expect(mockFetch).not.toHaveBeenCalled();
+    mockMultipart();
+    await expect(limited.upload(body(10), { filename: "a.bin" })).rejects.toMatchObject({ code: "size-exceeded" });
+    // The multipart session is aborted.
+    expect(mockFetch.mock.calls.some(([, init]) => (init as RequestInit).method === "DELETE")).toBe(true);
   });
 
   it("should throw a typed error when delete fails", async () => {
@@ -885,8 +917,7 @@ describe("S3Driver stable ids and upload status", () => {
       path: "docs",
       size: 3,
       id: "inv_42",
-      uploadToken: "tok-1",
-    });
+    }, { uploadToken: "tok-1" });
 
     expect(result.path).toBe("docs/inv_42.pdf");
     const [url, init] = mockFetch.mock.calls[0]!;
@@ -898,7 +929,7 @@ describe("S3Driver stable ids and upload status", () => {
 
   it("sends the token on the multipart create request", async () => {
     mockMultipart();
-    await driver.upload(body(3), { filename: "a.bin", id: "big", uploadToken: "tok-2" });
+    await driver.upload(body(3), { filename: "a.bin", id: "big" }, { uploadToken: "tok-2" });
     const [createUrl, createInit] = mockFetch.mock.calls[0]!;
     expect(String(createUrl)).toContain("/big.bin?uploads=");
     expect(((createInit as RequestInit).headers as Record<string, string>)["x-amz-meta-fileway-upload-token"]).toBe("tok-2");

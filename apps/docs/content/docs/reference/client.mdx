@@ -6,18 +6,20 @@ description: API reference for the FilewayClient engine and its configuration
 ## Constructor
 
 ```ts
-new FilewayClient<TConfig extends FilewayConfig>(config: TConfig)
+new FilewayClient<TDriver extends BaseDriver>(config: FilewayConfig<TDriver>)
 ```
+
+The type parameter is the driver, inferred from `config.driver`. To annotate a client, use the driver type: `FilewayClient<S3Driver>`.
 
 ### `config`
 
 | Option | Type | Description |
 |--------|------|-------------|
 | `driver` | `BaseDriver` | The storage driver. See [Drivers](/docs/drivers/local). |
-| `middlewares` | `MiddlewareHook[]` | Optional. Middleware run around uploads. See [Middleware](/docs/guide/middleware). |
+| `middlewares` | `MiddlewareHook<TMeta>[]` | Optional. Middleware run around uploads; inline hooks get the driver's metadata type. See [Middleware](/docs/guide/middleware). |
 | `logger` | `Logger` | Optional. Structured logger; receives `info` per operation and `error` on failure. See [Observability](/docs/guide/observability#logger). |
 | `onError` | `(error, context) => void \| Promise<void>` | Optional. Called (and awaited) before an error is re-thrown. Aborts are skipped. See [Observability](/docs/guide/observability#onerror). |
-| `retry` | `RetryConfig` | Optional. Retries transient failures (`network`, `provider-error`, HTTP 429/5xx). See [Observability](/docs/guide/observability#retries). |
+| `retry` | `RetryConfig` | Optional. Retries transient failures (`network`, `timeout`, `rate-limited`, `provider-error`, HTTP 429/5xx). See [Observability](/docs/guide/observability#retries). |
 
 ## `upload(stream, options)`
 
@@ -46,36 +48,28 @@ An `upload` retries on transient failures only when `options.streamFactory` is p
 | `id` | `string` | | Stable upload ID; the stored name is built from it and reused on every retry. Generated per call when omitted. Reusing an ID overwrites that object. |
 | `streamFactory` | `() => ReadableStream<Uint8Array>` | | Re-produces the stream for retry attempts. Required to retry an upload (see [Retries](/docs/guide/observability#retries)). Sync-only today; an async (Promise-returning) variant is planned; see [Retrying uploads](/docs/guide/uploads#retrying-uploads). |
 
-## `get(path)`
+## Options for `get`, `delete`, `getUrl` and `getPresignedUrl`
 
-Streams a stored file back as `ReadableStream<Uint8Array>` (see [Downloads](/docs/guide/downloads#download--read-back-getpath)).
+Each takes an optional second argument:
 
-| Param | Type | Description |
-|-------|------|-------------|
-| `path` | `string` | Path of the stored file. |
+- `signal` (`AbortSignal`): cancels the request in flight and any pending retries, and rejects with an `AbortError`. For `get`, it also stops reading the returned stream.
+- The driver's own options, if it has any. For example Cloudinary accepts `{ resourceType, deliveryType }`:
 
-Throws `StorageError("not-found")` when the file does not exist.
+```ts
+await client.delete("avatars/u1", { deliveryType: "authenticated", signal });
+```
+
+## `get(path, options?)`
+
+Streams a stored file back as `ReadableStream<Uint8Array>` (see [Downloads](/docs/guide/downloads#download--read-back-getpath)). Throws `StorageError("not-found")` when the file does not exist.
 
 ## `delete(path, options?)`
 
-Deletes a stored file.
+Deletes a stored file. Returns `Promise<void>`. Deleting a file that does not exist is not an error; any other failure throws a `StorageError`.
 
-| Param | Type | Description |
-|-------|------|-------------|
-| `path` | `string` | Path of the stored file. |
-| `options.signal` | `AbortSignal` | Cancels the call and any pending retries. |
-
-Returns `Promise<boolean>`: `true` when the file is gone, `false` when it did not exist. Any other failure throws a `StorageError`. (S3 cannot tell whether an object existed, so it always returns `true` on success.)
-
-`get`, `getUrl` and `getPresignedUrl` accept the same `options.signal`.
-
-## `getUrl(path)`
+## `getUrl(path, options?)`
 
 Returns the public URL for a stored file (see [Downloads](/docs/guide/downloads#geturlpath)).
-
-| Param | Type | Description |
-|-------|------|-------------|
-| `path` | `string` | Path of the stored file. |
 
 ## `getUploadStatus(id, options)`
 
@@ -92,9 +86,10 @@ Returns `{ state: "complete", object }`, `{ state: "pending" }`, `{ state: "miss
 
 ## `getPresignedUrl(path, options?)`
 
-Returns a time-limited, signed download URL. Only available on drivers that implement it (`S3Driver`, `CloudinaryDriver`); otherwise throws `StorageError("config")` (see [Downloads](/docs/guide/downloads#pre-signed-urls)).
+Returns a time-limited, signed download URL. Available on every driver except `LocalDriver`, which throws `StorageError("config")` (see [Downloads](/docs/guide/downloads#pre-signed-urls)).
 
 | Param | Type | Description |
 |-------|------|-------------|
 | `path` | `string` | Path of the stored file. |
-| `options.expiresIn` | `number` | Lifetime in seconds (default `3600`; bounds are driver-specific). |
+| `options.expiresIn` | `number` | Lifetime in seconds (default `3600`). S3, GCS and Azure allow at most 604800 (7 days); Cloudinary and Supabase accept any positive integer. |
+| `options.signal` | `AbortSignal` | Cancels the call. |

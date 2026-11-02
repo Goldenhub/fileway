@@ -189,10 +189,11 @@ The native [Google Cloud Storage](/docs/drivers/gcs) and [Supabase](/docs/driver
 | `baseUrl` | `string` | auto-derived | Base URL for generated URLs. For R2, set to the public dev URL or custom domain for browser-accessible links |
 | `partSize` | `number` | `8 MiB` | Multipart part size in bytes (clamped to a 5 MiB minimum) |
 | `forceMultipart` | `boolean` | `true` for a GCS endpoint, else `false` | Always use multipart uploads, regardless of size |
+| `maxSizeBytes` | `number` | | Reject larger uploads with `size-exceeded` (checked up front when `size` is known, and while streaming) |
 
 ## Metadata
 
-`S3Driver implements BaseDriver<{ bucket: string; etag?: string }>`
+`S3Driver implements BaseDriver<S3Meta>`
 
 | Field | Type | Description |
 |---|---|---|
@@ -210,7 +211,8 @@ All failures are `StorageError`s from `@fileway/core` (see the [error reference]
 | `not-found` | The object does not exist (`NoSuchKey`, or HTTP 404). |
 | `bucket-not-found` | The bucket does not exist (`NoSuchBucket`). |
 | `auth-failed` | Invalid/expired credentials or access denied (`AccessDenied`, `InvalidAccessKeyId`, `SignatureDoesNotMatch`, `ExpiredToken`, `InvalidToken`, or HTTP 401/403). |
-| `size-exceeded` | Payload over the limit (`EntityTooLarge`, or HTTP 413). |
+| `size-exceeded` | Over `maxSizeBytes`, or the provider's limit (`EntityTooLarge`, or HTTP 413). |
+| `rate-limited` | Throttled (`SlowDown`, `TooManyRequests`, `RequestLimitExceeded`, or HTTP 429). Safe to retry. |
 | `network` | `fetch` failed before an HTTP response (DNS, socket, timeout); the original error is preserved as `cause`. Safe to retry. |
 | `provider-error` | Any other non-2xx response (e.g. HTTP 500). Safe to retry. |
 

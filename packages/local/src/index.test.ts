@@ -62,9 +62,8 @@ describe("LocalDriver", () => {
 
     expect(existsSync(result.meta.localPath)).toBe(true);
 
-    const deleted = await driver.delete(result.path);
+    await expect(driver.delete(result.path)).resolves.toBeUndefined();
 
-    expect(deleted).toBe(true);
     expect(existsSync(result.meta.localPath)).toBe(false);
   });
 
@@ -84,9 +83,26 @@ describe("LocalDriver", () => {
     expect(readdirSync(tmpDir)).toEqual([]);
   });
 
-  it("should return false when deleting non-existent file", async () => {
-    const result = await driver.delete("nonexistent.txt");
-    expect(result).toBe(false);
+  it("treats deleting a non-existent file as success", async () => {
+    await expect(driver.delete("nonexistent.txt")).resolves.toBeUndefined();
+  });
+
+  it("honors an aborted signal on read operations", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    await expect(driver.get("x.txt", { signal: controller.signal })).rejects.toMatchObject({ name: "AbortError" });
+    await expect(driver.delete("x.txt", { signal: controller.signal })).rejects.toMatchObject({ name: "AbortError" });
+  });
+
+  it("stops a download stream when its signal aborts", async () => {
+    const result = await driver.upload(
+      new ReadableStream({ start(c) { c.enqueue(new Uint8Array(1024 * 1024)); c.close(); } }),
+      { filename: "big.bin" },
+    );
+    const controller = new AbortController();
+    const stream = await driver.get(result.path, { signal: controller.signal });
+    controller.abort();
+    await expect(new Response(stream).arrayBuffer()).rejects.toThrow();
   });
 
   it("should generate a URL", async () => {

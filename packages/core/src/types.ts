@@ -13,8 +13,9 @@ export interface UploadProgress {
  * Controls retry behavior for `FilewayClient` operations. Retries apply to
  * idempotent operations (`delete`, `get`, `getUrl`, `getPresignedUrl`) and to
  * `upload` when `UploadOptions.streamFactory` is provided (so each attempt can
- * produce a fresh stream). Only transient failures are retried: `network` and
- * `provider-error` codes, plus any error carrying HTTP 429/5xx. Validation,
+ * produce a fresh stream). Only transient failures are retried: `network`,
+ * `timeout`, `rate-limited` and `provider-error` codes, plus any error
+ * carrying HTTP 429/5xx. Validation,
  * config, auth, not-found, size, and abort errors are never retried.
  */
 export interface RetryConfig {
@@ -36,7 +37,7 @@ export interface RetryConfig {
   retryGenericErrors?: boolean;
   /**
    * Cancels an attempt that makes no progress for this long (ms) and treats it
-   * as a retryable `network` failure, so a hung connection retries instead of
+   * as a retryable `timeout` failure, so a hung connection retries instead of
    * waiting forever. Off by default.
    *
    * For `upload`, the timer resets whenever the driver reads from the stream,
@@ -70,7 +71,7 @@ export interface UploadOptions {
   onProgress?: (progress: UploadProgress) => void;
   /**
    * Returns a fresh stream for retry attempts. A `ReadableStream` is consumed
-   * after one read, so without this retrying an `upload` is impossible — the
+   * after one read, so without this retrying an `upload` is impossible: the
    * data is gone after the first attempt. When provided, the client calls this
    * on each retry to re-produce the payload. The data source must be re-readable
    * (a file path, in-memory bytes, re-fetchable URL); a one-shot feed is not.
@@ -86,13 +87,17 @@ export interface UploadOptions {
    * 1 to 128 characters of `A-Z a-z 0-9 _ -`.
    */
   id?: string;
+}
+
+/** Passed by `FilewayClient` as the third argument of `BaseDriver.upload`. */
+export interface UploadContext {
   /**
-   * Set by `FilewayClient`: a random token unique to one `upload()` call
-   * (shared by its retries). Drivers store it with the object so a lost
-   * response can be recovered without confusing it with an older upload
-   * that used the same `id`.
+   * A random token unique to one `upload()` call (shared by its retries).
+   * Drivers store it with the object and return it from `head`, so a lost
+   * response can be recovered without confusing it with an older upload that
+   * used the same `id`.
    */
-  uploadToken?: string;
+  uploadToken: string;
 }
 
 export interface UploadResult<TMeta extends Record<string, unknown>> {
@@ -103,33 +108,39 @@ export interface UploadResult<TMeta extends Record<string, unknown>> {
   meta: TMeta;
 }
 
-/** Per-call options for `FilewayClient.delete`, `get`, `getUrl` and
- * `getPresignedUrl`. */
+/** Per-call options for every operation other than `upload`, on both
+ * `FilewayClient` and `BaseDriver`. */
 export interface OperationOptions {
-  /** Cancels the operation: no further retry attempts are made and a pending
-   * retry delay rejects with a `DOMException` named `AbortError`. */
+  /** Cancels the operation: the request in flight is aborted, no further
+   * retry attempts are made, and it rejects with a `DOMException` named
+   * `AbortError`. */
   signal?: AbortSignal;
 }
 
-export interface PresignedUrlOptions {
-  /** Lifetime of the URL in seconds. Bounds are driver-specific
-   * (e.g. S3 allows 1..604800). Defaults to 3600 when omitted. */
+export interface PresignedUrlOptions extends OperationOptions {
+  /** Lifetime of the URL in seconds. Defaults to 3600. Limits are
+   * provider-specific: S3, GCS and Azure allow at most 604800 (7 days);
+   * Cloudinary and Supabase accept any positive integer. */
   expiresIn?: number;
 }
 
 export interface BaseDriver<TMeta extends Record<string, unknown> = Record<string, unknown>> {
   name: string;
+  /** Stores the stream. `context` is supplied by `FilewayClient`; drivers
+   * used directly may receive none. */
   upload(
     stream: ReadableStream<Uint8Array>,
     options: UploadOptions,
+    context?: UploadContext,
   ): Promise<UploadResult<TMeta>>;
-  delete(path: string): Promise<boolean>;
-  getUrl(path: string): Promise<string>;
+  /** Deletes the object at `path`. Deleting a missing object is not an error. */
+  delete(path: string, options?: OperationOptions): Promise<void>;
+  getUrl(path: string, options?: OperationOptions): Promise<string>;
   /**
    * Streams the stored file back as a WHATWG `ReadableStream<Uint8Array>`.
    * Throws when `path` does not exist.
    */
-  get(path: string): Promise<ReadableStream<Uint8Array>>;
+  get(path: string, options?: OperationOptions): Promise<ReadableStream<Uint8Array>>;
   /**
    * Returns a time-limited, signed URL granting read access to `path`.
    * Optional: drivers that cannot presign (e.g. LocalDriver) omit it.
@@ -142,10 +153,13 @@ export interface BaseDriver<TMeta extends Record<string, unknown> = Record<strin
    */
   pathFor?(options: UploadOptions & { id: string }): string;
   /** The stored object at `path`, or `null` when there is none. */
-  head?(path: string): Promise<StoredObject<TMeta> | null>;
+  head?(path: string, options?: OperationOptions): Promise<StoredObject<TMeta> | null>;
   /** Whether an upload to `path` has started but not finished (e.g. an open multipart upload). */
-  isPending?(path: string): Promise<boolean>;
+  isPending?(path: string, options?: OperationOptions): Promise<boolean>;
 }
+
+/** The `result.meta` shape of a driver's uploads. */
+export type DriverMeta<TDriver extends BaseDriver> = Awaited<ReturnType<TDriver["upload"]>>["meta"];
 
 /** A stored object as reported by `BaseDriver.head`. */
 export interface StoredObject<TMeta extends Record<string, unknown> = Record<string, unknown>>
@@ -185,18 +199,25 @@ export interface BeforeUploadResult {
   size?: number;
 }
 
-export interface MiddlewareHook {
+/**
+ * Upload hooks. `TMeta` is the driver's metadata shape; inline middleware on a
+ * `FilewayClient` gets it inferred, while a reusable middleware can leave it
+ * as the default and work with any driver.
+ */
+export interface MiddlewareHook<TMeta extends Record<string, unknown> = Record<string, unknown>> {
   beforeUpload?: (
     stream: ReadableStream<Uint8Array>,
     options: UploadOptions,
   ) => Promise<BeforeUploadResult | void>;
-  afterUpload?: (result: UploadResult<Record<string, unknown>>) => Promise<void>;
+  /** Runs after a successful upload with its result and the options the
+   * driver received (after `beforeUpload`). */
+  afterUpload?: (result: UploadResult<TMeta>, options: UploadOptions) => Promise<void>;
 }
 
 export interface FilewayConfig<TDriver extends BaseDriver> {
   driver: TDriver;
-  middlewares?: MiddlewareHook[];
-  /** Optional structured logger (dependency-free contract — adapt Pino,
+  middlewares?: MiddlewareHook<DriverMeta<TDriver>>[];
+  /** Optional structured logger (a dependency-free contract: adapt Pino,
    * Sentry, Datadog, etc.). Receives `info` events per operation and `error`
    * events on failure. Absent by default: nothing is logged. */
   logger?: Logger;

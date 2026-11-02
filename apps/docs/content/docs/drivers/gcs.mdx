@@ -117,5 +117,6 @@ All failures are `StorageError`s (see the [error reference](/docs/guide/observab
 | `bucket-not-found` | The bucket does not exist. |
 | `auth-failed` | The token exchange was rejected, or HTTP 401/403. |
 | `size-exceeded` | Over `maxSizeBytes`, or HTTP 413. |
+| `rate-limited` | HTTP 429. Safe to retry. |
 | `network` | `fetch` failed before a response. Safe to retry. |
 | `provider-error` | Any other non-2xx response. Safe to retry. |

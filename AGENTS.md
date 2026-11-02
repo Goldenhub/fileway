@@ -28,6 +28,8 @@ Implement Phase 1 and Phase 2 of the Fileway monorepo:
 
 ## 🛠️ Reference Architectures & Code Contracts
 
+> The snippets below are the original Phase 1 sketch. The live contract is `packages/core/src/types.ts` (see "Pre-1.0 API Cleanup" below): `delete` returns `Promise<void>`, driver methods take `{ signal }`, the upload token arrives as `upload(stream, options, context)`, and `afterUpload(result, options)` is typed by the driver's meta.
+
 ### 1. Core Interfaces (`packages/core/src/types.ts`)
 
 ```typescript
@@ -136,30 +138,38 @@ export class FilewayClient<const TConfig extends FilewayConfig> {
 - [x] **Remove edge duplicates**: `driver-cloudinary-edge` and `driver-s3-edge` deleted; their functionality is now in the universal `cloudinary` and `s3`.
 - [x] **Conditional exports**: All packages declare `worker`, `deno`, `bun`, `import`, `require` in `exports` map.
 - [x] **Edge-runtime tests**: `@fileway/core` and `@fileway/cloudinary` run vitest with `environment: "edge-runtime"` via `@edge-runtime/vm`.
-- [x] **All builds & tests pass**: 275 unit tests across 7 packages, plus 9 S3 integration tests against MinIO and 6 Azure integration tests against Azurite.
+- [x] **All builds & tests pass**: 291 unit tests across 7 packages, plus 9 S3 integration tests against MinIO and 6 Azure integration tests against Azurite.
 
 ## Typed Error Taxonomy (Complete)
 
-- [x] **Single `StorageError`**: `packages/core/src/errors.ts` defines `StorageError` + the `StorageErrorCode` union (`validation`, `config`, `not-found`, `bucket-not-found`, `auth-failed`, `size-exceeded`, `network`, `provider-error`) with optional `statusCode`/`provider`/`cause`, `toJSON()`, and `isAbortError()`. `ValidationError` is a subclass (`code === "validation"`); aborts stay standard `DOMException`/`AbortError`.
+- [x] **Single `StorageError`**: `packages/core/src/errors.ts` defines `StorageError` + the `StorageErrorCode` union (`validation`, `config`, `not-found`, `bucket-not-found`, `auth-failed`, `size-exceeded`, `rate-limited`, `timeout`, `network`, `provider-error`) with optional `statusCode`/`provider`/`cause`, `toJSON()`, and `isAbortError()`. `ValidationError` is a subclass (`code === "validation"`); aborts stay standard `DOMException`/`AbortError`.
 - [x] **All drivers throw typed errors**: S3 parses AWS/MinIO XML `<Code>` with HTTP fallback and wraps fetch failures as `network`; Cloudinary maps HTTP status by context (upload vs get); Local classifies missing files as `not-found`; missing S3 credentials and unsupported presigned-URL drivers throw `config`. Message strings unchanged (non-breaking).
-- [x] **Retry implementation**: `packages/core/src/retry.ts` exports `isRetryable(err, config)`, `sleep()`, `delayWithJitter()`; `FilewayClient` retries transient failures (`network`/`provider-error`/HTTP 429/5xx) on `delete`/`get`/`getUrl`/`getPresignedUrl` by default via `retry` config (exponential backoff + full jitter, abort-interruptible), and on `upload` only when `UploadOptions.streamFactory` re-produces the stream. Non-retryable: `validation`/`config`/`auth-failed`/`not-found`/`bucket-not-found`/`size-exceeded`/`AbortError`. Each retry logs a `warn` (`operation: "retry"`); `onError` fires only on the final failure.
+- [x] **Retry implementation**: `packages/core/src/retry.ts` (internal, not exported) holds `isRetryable(err, config)`, `sleep()`, `delayWithJitter()`; `FilewayClient` retries transient failures (`network`/`timeout`/`rate-limited`/`provider-error`/HTTP 429/5xx) on `delete`/`get`/`getUrl`/`getPresignedUrl` by default via `retry` config (exponential backoff + full jitter, abort-interruptible), and on `upload` only when `UploadOptions.streamFactory` re-produces the stream. Non-retryable: `validation`/`config`/`auth-failed`/`not-found`/`bucket-not-found`/`size-exceeded`/`AbortError`. Each retry logs a `warn` (`operation: "retry"`); `onError` fires only on the final failure.
 
 ## Dependency-Free Logging & Error Hooks (Complete)
 
 - [x] **`logger`**: optional `{ debug?, info?, warn?, error? }` on `FilewayClient` config (`packages/core/src/logging.ts`). Fires `info` on every operation start/success with structured meta and `error` on failures; silent when omitted; a throwing logger never breaks the operation.
 - [x] **`onError(error, context)`**: awaited before rethrow; skipped for aborts, fires for `ValidationError`/`config`; a throwing hook never masks the original error. No logger SDK is imported anywhere (zero core deps preserved).
 
+## Pre-1.0 API Cleanup (Complete, v0.5.0)
+
+- [x] **Driver contract**: every `BaseDriver` method except `upload` takes `options?: OperationOptions` (`{ signal }`), and drivers pass the signal to every request. `delete` returns `Promise<void>` and treats a missing object as success. The upload token moved out of `UploadOptions` into `upload(stream, options, context?: UploadContext)`.
+- [x] **Client**: `FilewayClient<TDriver>` (generic over the driver, not the config). `get`/`delete`/`getUrl`/`getPresignedUrl` forward the caller's signal plus the driver's own option type; with `idleTimeoutMs` a timed-out attempt's request is aborted.
+- [x] **Middleware**: `MiddlewareHook<TMeta>`; `afterUpload(result, options)` with the driver's meta type inferred for inline hooks.
+- [x] **Errors**: new `rate-limited` (HTTP 429 and provider throttling codes) and `timeout` (idle timeout) codes, both retryable.
+- [x] **Exports**: core exports only the client, types, errors, `version`, and the driver helpers `ValidationError`, `abortError`, `validateUploadOptions`, `urlEncodePath`. Driver packages export only the driver, its config and meta types; classifiers and parsers are internal. `S3Meta`, `LocalMeta` named; S3 gained `maxSizeBytes`.
+
 ## Current Packages
 
 | Package | Node deps | Runtime | Tests |
 |---|---|---|---|
-| `@fileway/core` | None | Universal | 67 |
-| `@fileway/local` | `node:fs`, `node:path`, `node:stream` | Node.js, Bun | 27 |
-| `@fileway/s3` | None (pure fetch + Web Crypto SigV4) | Universal | 57 unit + 9 MinIO |
-| `@fileway/gcs` | None (pure fetch + Web Crypto RS256 / V4 signing) | Universal | 21 (+ opt-in live) |
-| `@fileway/azure` | None (pure fetch + Web Crypto Shared Key / SAS) | Universal | 27 unit + 6 Azurite |
-| `@fileway/supabase` | None (pure fetch, REST + TUS) | Universal | 21 (+ opt-in live) |
-| `@fileway/cloudinary` | None | Universal | 55 |
+| `@fileway/core` | None | Universal | 72 |
+| `@fileway/local` | `node:fs`, `node:path`, `node:stream` | Node.js, Bun | 29 |
+| `@fileway/s3` | None (pure fetch + Web Crypto SigV4) | Universal | 61 unit + 9 MinIO |
+| `@fileway/gcs` | None (pure fetch + Web Crypto RS256 / V4 signing) | Universal | 22 (+ opt-in live) |
+| `@fileway/azure` | None (pure fetch + Web Crypto Shared Key / SAS) | Universal | 28 unit + 6 Azurite |
+| `@fileway/supabase` | None (pure fetch, REST + TUS) | Universal | 22 (+ opt-in live) |
+| `@fileway/cloudinary` | None | Universal | 57 |
 
 ## Relevant Files
 

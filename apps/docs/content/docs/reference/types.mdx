@@ -18,11 +18,20 @@ interface UploadOptions {
   onProgress?: (progress: UploadProgress) => void;
   streamFactory?: () => ReadableStream<Uint8Array>; // sync today; async return is a planned future feature
   id?: string; // stable upload id; generated per upload() call when omitted
-  uploadToken?: string; // set by FilewayClient; drivers store it with the object
 }
 ```
 
-See [Safe retries and upload status](/docs/guide/uploads#safe-retries-and-upload-status) for `id` and `uploadToken`.
+See [Safe retries and upload status](/docs/guide/uploads#safe-retries-and-upload-status) for `id`.
+
+## `OperationOptions`
+
+```ts
+interface OperationOptions {
+  signal?: AbortSignal; // cancels the request in flight and any pending retries
+}
+```
+
+Accepted by `get`, `delete`, `getUrl`, `getPresignedUrl` and `getUploadStatus` on the client, and by the matching `BaseDriver` methods.
 
 ## `UploadProgress`
 
@@ -49,14 +58,14 @@ interface UploadResult<TMeta extends Record<string, unknown>> {
 ## `PresignedUrlOptions`
 
 ```ts
-interface PresignedUrlOptions {
-  expiresIn?: number; // seconds; default 3600, bounds driver-specific
+interface PresignedUrlOptions extends OperationOptions {
+  expiresIn?: number; // seconds; default 3600. At most 604800 on S3, GCS and Azure
 }
 ```
 
 ## `RetryConfig`
 
-Controls automatic retries for transient failures. Passed as `retry` in `FilewayConfig`. Only `network`, `provider-error`, and HTTP `429`/`5xx` statuses are retried; `validation`, `config`, `auth-failed`, `not-found`, `bucket-not-found`, `size-exceeded`, and `AbortError` are never retried. See [Retries](/docs/guide/observability#retries) for how it behaves.
+Controls automatic retries for transient failures. Passed as `retry` in `FilewayConfig`. Only `network`, `timeout`, `rate-limited`, `provider-error`, and HTTP `429`/`5xx` statuses are retried; `validation`, `config`, `auth-failed`, `not-found`, `bucket-not-found`, `size-exceeded`, and `AbortError` are never retried. See [Retries](/docs/guide/observability#retries) for how it behaves.
 
 ```ts
 interface RetryConfig {
@@ -79,15 +88,20 @@ interface BaseDriver<TMeta extends Record<string, unknown> = Record<string, unkn
   upload(
     stream: ReadableStream<Uint8Array>,
     options: UploadOptions,
+    context?: UploadContext,
   ): Promise<UploadResult<TMeta>>;
-  delete(path: string): Promise<boolean>;
-  getUrl(path: string): Promise<string>;
-  get(path: string): Promise<ReadableStream<Uint8Array>>;
+  delete(path: string, options?: OperationOptions): Promise<void>; // missing object: no error
+  getUrl(path: string, options?: OperationOptions): Promise<string>;
+  get(path: string, options?: OperationOptions): Promise<ReadableStream<Uint8Array>>;
   getPresignedUrl?(path: string, options?: PresignedUrlOptions): Promise<string>;
   // Optional: enable lost-response recovery and getUploadStatus.
   pathFor?(options: UploadOptions & { id: string }): string;
-  head?(path: string): Promise<StoredObject<TMeta> | null>;
-  isPending?(path: string): Promise<boolean>;
+  head?(path: string, options?: OperationOptions): Promise<StoredObject<TMeta> | null>;
+  isPending?(path: string, options?: OperationOptions): Promise<boolean>;
+}
+
+interface UploadContext {
+  uploadToken: string; // unique per upload() call; store it with the object
 }
 
 interface StoredObject<TMeta> extends UploadResult<TMeta> {
@@ -103,21 +117,26 @@ type UploadStatus<TMeta> =
   | { state: "unsupported" };
 ```
 
-A custom driver that implements `pathFor` and `head` gets lost-response recovery and `getUploadStatus` for free. `pathFor` must return exactly where `upload` stores an object with that `id`, and `head` should return the `uploadToken` it was stored with when the provider can keep it.
+A custom driver that implements `pathFor` and `head` gets lost-response recovery and `getUploadStatus` for free. `pathFor` must return exactly where `upload` stores an object with that `id`, and `head` should return the `context.uploadToken` it was stored with when the provider can keep it. Pass `options.signal` to every request so callers can cancel. A driver may accept extra options on its methods (a type that extends `OperationOptions`); the client passes them through.
+
+`DriverMeta<TDriver>` is the `result.meta` type of a driver's uploads.
 
 ## `MiddlewareHook`
 
 ```ts
-interface MiddlewareHook {
+interface MiddlewareHook<TMeta extends Record<string, unknown> = Record<string, unknown>> {
   beforeUpload?: (
     stream: ReadableStream<Uint8Array>,
     options: UploadOptions,
   ) => Promise<
-    | { stream?: ReadableStream<Uint8Array>; options?: UploadOptions }
+    | { stream?: ReadableStream<Uint8Array>; options?: UploadOptions; size?: number }
     | void
   >;
-  afterUpload?: (result: UploadResult<Record<string, unknown>>) => Promise<void>;
+  afterUpload?: (result: UploadResult<TMeta>, options: UploadOptions) => Promise<void>;
 }
+```
+
+Inline middleware on a client gets `TMeta` inferred from the driver. A reusable middleware typed as plain `MiddlewareHook` works with any driver.
 ```
 
 ## `FilewayConfig`
@@ -125,7 +144,7 @@ interface MiddlewareHook {
 ```ts
 interface FilewayConfig<TDriver extends BaseDriver> {
   driver: TDriver;
-  middlewares?: MiddlewareHook[];
+  middlewares?: MiddlewareHook<DriverMeta<TDriver>>[];
   logger?: Logger;
   onError?: (error: unknown, context: ErrorContext) => void | Promise<void>;
   retry?: RetryConfig;
@@ -147,7 +166,7 @@ interface Logger {
 
 ```ts
 interface ErrorContext {
-  operation: "upload" | "delete" | "get" | "getUrl" | "getPresignedUrl" | "retry";
+  operation: "upload" | "delete" | "get" | "getUrl" | "getPresignedUrl" | "getUploadStatus" | "retry";
   durationMs: number;
   filename?: string;
   path?: string;
@@ -166,6 +185,8 @@ type StorageErrorCode =
   | "bucket-not-found"
   | "auth-failed"
   | "size-exceeded"
+  | "rate-limited" // the provider is throttling (HTTP 429 or its own code); retried
+  | "timeout"      // an attempt made no progress within retry.idleTimeoutMs; retried
   | "network"
   | "provider-error";
 
@@ -178,4 +199,8 @@ class StorageError extends Error {
 }
 ```
 
-`ValidationError` is a `StorageError` subclass with `code === "validation"`. `isAbortError(err)` detects the `AbortError` thrown by upload cancellation. See the [error reference](/docs/guide/observability#errors) for what each code means and when to retry.
+`ValidationError` is a `StorageError` subclass with `code === "validation"`. `isAbortError(err)` detects the `AbortError` thrown by cancellation.
+
+## Helpers for driver authors
+
+`@fileway/core` also exports `validateUploadOptions`, `urlEncodePath` and `abortError` for custom drivers. Retry timing, progress tracking and ID validation are internal to the client. See the [error reference](/docs/guide/observability#errors) for what each code means and when to retry.

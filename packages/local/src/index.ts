@@ -1,4 +1,4 @@
-import type { BaseDriver, StoredObject, UploadOptions, UploadResult } from "@fileway/core";
+import type { BaseDriver, OperationOptions, StoredObject, UploadOptions, UploadResult } from "@fileway/core";
 import { validateUploadOptions, ValidationError, urlEncodePath, abortError, StorageError } from "@fileway/core";
 import { createWriteStream, createReadStream } from "node:fs";
 import { mkdir, unlink, access, lstat, rename, stat, readdir } from "node:fs/promises";
@@ -15,7 +15,12 @@ export interface LocalDriverConfig {
   maxSizeBytes?: number;
 }
 
-export class LocalDriver implements BaseDriver<{ localPath: string }> {
+export type LocalMeta = {
+  /** Absolute path of the stored file on disk. */
+  localPath: string;
+};
+
+export class LocalDriver implements BaseDriver<LocalMeta> {
   readonly name = "local";
   private directory: string;
   private resolvedDir: string;
@@ -55,7 +60,7 @@ export class LocalDriver implements BaseDriver<{ localPath: string }> {
   async upload(
     stream: ReadableStream<Uint8Array>,
     options: UploadOptions,
-  ): Promise<UploadResult<{ localPath: string }>> {
+  ): Promise<UploadResult<LocalMeta>> {
     validateUploadOptions(options);
 
     const id = options.id ?? randomUUID();
@@ -139,7 +144,8 @@ export class LocalDriver implements BaseDriver<{ localPath: string }> {
    * The stored file at `path`, or `null` if there is none. Local disk keeps no
    * upload token, so `FilewayClient` verifies a recovered upload by size.
    */
-  async head(path: string): Promise<StoredObject<{ localPath: string }> | null> {
+  async head(path: string, options?: OperationOptions): Promise<StoredObject<LocalMeta> | null> {
+    throwIfAborted(options?.signal);
     const fullPath = this.resolveInside(path);
     await this.assertSafePath(fullPath);
     const info = await stat(fullPath).catch((err: NodeJS.ErrnoException) => {
@@ -159,7 +165,8 @@ export class LocalDriver implements BaseDriver<{ localPath: string }> {
   }
 
   /** Whether an upload to `path` is still being written (a `.partial` file exists). */
-  async isPending(path: string): Promise<boolean> {
+  async isPending(path: string, options?: OperationOptions): Promise<boolean> {
+    throwIfAborted(options?.signal);
     const fullPath = this.resolveInside(path);
     const prefix = `${basename(fullPath)}.`;
     const entries = await readdir(dirname(fullPath)).catch(() => [] as string[]);
@@ -167,18 +174,18 @@ export class LocalDriver implements BaseDriver<{ localPath: string }> {
   }
 
   /**
-   * Deletes the file. Returns `false` when it does not exist; throws a
+   * Deletes the file; a missing file is not an error. Throws a
    * `ValidationError` for paths outside the storage directory and a
    * `StorageError` for any other filesystem failure.
    */
-  async delete(path: string): Promise<boolean> {
+  async delete(path: string, options?: OperationOptions): Promise<void> {
+    throwIfAborted(options?.signal);
     const fullPath = this.resolveInside(path);
     await this.assertSafePath(fullPath);
     try {
       await unlink(fullPath);
-      return true;
     } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === "ENOENT") return false;
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") return;
       throw new StorageError("provider-error", `failed to delete ${path}: ${(err as Error).message}`, {
         provider: "local",
         cause: err,
@@ -190,7 +197,9 @@ export class LocalDriver implements BaseDriver<{ localPath: string }> {
     return `${this.baseUrl}/${urlEncodePath(path)}`;
   }
 
-  async get(path: string): Promise<ReadableStream<Uint8Array>> {
+  /** Streams the file. `options.signal` also stops reading it mid-stream. */
+  async get(path: string, options?: OperationOptions): Promise<ReadableStream<Uint8Array>> {
+    throwIfAborted(options?.signal);
     const fullPath = this.resolveInside(path);
     await this.assertSafePath(fullPath);
 
@@ -200,6 +209,11 @@ export class LocalDriver implements BaseDriver<{ localPath: string }> {
       throw new StorageError("not-found", `file not found: ${path}`, { provider: "local" });
     }
 
-    return Readable.toWeb(createReadStream(fullPath)) as ReadableStream<Uint8Array>;
+    const file = createReadStream(fullPath, options?.signal ? { signal: options.signal } : {});
+    return Readable.toWeb(file) as ReadableStream<Uint8Array>;
   }
+}
+
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted) throw abortError("operation aborted");
 }

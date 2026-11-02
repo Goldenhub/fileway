@@ -1,6 +1,7 @@
-import type { BaseDriver, PresignedUrlOptions, StorageErrorCode, StoredObject, UploadOptions, UploadResult } from "@fileway/core";
+import type { BaseDriver, OperationOptions, PresignedUrlOptions, StoredObject, UploadContext, UploadOptions, UploadResult } from "@fileway/core";
 import { validateUploadOptions, ValidationError, urlEncodePath, abortError, isAbortError, StorageError } from "@fileway/core";
 import { signedReadUrl, TokenSource } from "./auth.js";
+import { classifyGcsError } from "./errors.js";
 import type { ServiceAccountKey } from "./auth.js";
 
 const randomUUID = () => globalThis.crypto.randomUUID();
@@ -97,7 +98,11 @@ export class GCSDriver implements BaseDriver<GCSMeta> {
     this.maxSizeBytes = config.maxSizeBytes;
   }
 
-  async upload(stream: ReadableStream<Uint8Array>, options: UploadOptions): Promise<UploadResult<GCSMeta>> {
+  async upload(
+    stream: ReadableStream<Uint8Array>,
+    options: UploadOptions,
+    context?: UploadContext,
+  ): Promise<UploadResult<GCSMeta>> {
     validateUploadOptions(options);
     if (this.maxSizeBytes !== undefined && options.size !== undefined && options.size > this.maxSizeBytes) {
       throw new StorageError("size-exceeded", `file size ${options.size} exceeds maxSizeBytes ${this.maxSizeBytes}`, { provider: PROVIDER });
@@ -110,7 +115,7 @@ export class GCSDriver implements BaseDriver<GCSMeta> {
       contentType: options.mimeType ?? "application/octet-stream",
       metadata: {
         ...options.metadata,
-        ...(options.uploadToken ? { [TOKEN_KEY]: options.uploadToken } : {}),
+        ...(context?.uploadToken ? { [TOKEN_KEY]: context.uploadToken } : {}),
       },
     };
     const signal = options.signal;
@@ -273,20 +278,28 @@ export class GCSDriver implements BaseDriver<GCSMeta> {
     throw new StorageError("provider-error", "GCS did not persist the uploaded chunk", { provider: PROVIDER });
   }
 
-  async delete(path: string): Promise<boolean> {
-    const res = await fetchWithAbort(this.objectUrl(path), { method: "DELETE", headers: await this.authHeaders() });
-    if (res.ok) return true;
+  /** Deletes the object; a missing object is not an error. */
+  async delete(path: string, options?: OperationOptions): Promise<void> {
+    const res = await fetchWithAbort(this.objectUrl(path), {
+      method: "DELETE",
+      headers: await this.authHeaders(),
+      signal: options?.signal ?? null,
+    });
+    if (res.ok) return;
     const error = await gcsError("GCS delete failed", res);
-    if (error.code === "not-found") return false;
-    throw error;
+    if (error.code !== "not-found") throw error;
   }
 
-  async getUrl(path: string): Promise<string> {
+  async getUrl(path: string, _options?: OperationOptions): Promise<string> {
     return `${this.baseUrl}/${urlEncodePath(path)}`;
   }
 
-  async get(path: string): Promise<ReadableStream<Uint8Array>> {
-    const res = await fetchWithAbort(`${this.objectUrl(path)}?alt=media`, { headers: await this.authHeaders() });
+  /** Streams the object. `options.signal` also cancels reading the body. */
+  async get(path: string, options?: OperationOptions): Promise<ReadableStream<Uint8Array>> {
+    const res = await fetchWithAbort(`${this.objectUrl(path)}?alt=media`, {
+      headers: await this.authHeaders(),
+      signal: options?.signal ?? null,
+    });
     if (!res.ok) throw await gcsError("GCS get failed", res);
     if (!res.body) {
       throw new StorageError("provider-error", "GCS get returned no response body", { provider: PROVIDER });
@@ -329,8 +342,11 @@ export class GCSDriver implements BaseDriver<GCSMeta> {
   }
 
   /** The object at `path` (its JSON metadata), or `null` if it does not exist. */
-  async head(path: string): Promise<StoredObject<GCSMeta> | null> {
-    const res = await fetchWithAbort(this.objectUrl(path), { headers: await this.authHeaders() });
+  async head(path: string, options?: OperationOptions): Promise<StoredObject<GCSMeta> | null> {
+    const res = await fetchWithAbort(this.objectUrl(path), {
+      headers: await this.authHeaders(),
+      signal: options?.signal ?? null,
+    });
     if (!res.ok) {
       const error = await gcsError("GCS head failed", res);
       if (error.code === "not-found") return null;
@@ -405,21 +421,6 @@ async function fetchWithAbort(url: string | URL, init: RequestInit): Promise<Res
     const cause = err instanceof Error ? err : new Error(String(err));
     throw new StorageError("network", `${PROVIDER} network error: ${cause.message}`, { provider: PROVIDER, cause });
   }
-}
-
-/** Classifies a GCS failure from the JSON error body (`error.message`),
- * falling back to the HTTP status. */
-export function classifyGcsError(status: number, body: string): StorageErrorCode {
-  let message = "";
-  try {
-    message = ((JSON.parse(body) as { error?: { message?: string } }).error?.message ?? "").toLowerCase();
-  } catch {
-    message = body.toLowerCase();
-  }
-  if (status === 404) return message.includes("bucket") && !message.includes("no such object") ? "bucket-not-found" : "not-found";
-  if (status === 401 || status === 403) return "auth-failed";
-  if (status === 413) return "size-exceeded";
-  return "provider-error";
 }
 
 async function gcsError(prefix: string, res: Response): Promise<StorageError> {

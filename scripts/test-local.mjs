@@ -32,8 +32,8 @@ console.log("Content:", readFileSync(filePath, "utf-8"));
 const url = await client.getUrl(result.path);
 console.log("\nGenerated URL:", url);
 
-const deleted = await client.delete(result.path);
-console.log("Deleted:", deleted);
+await client.delete(result.path);
+console.log("Deleted:", result.path);
 console.log("File gone:", !existsSync(filePath));
 
 rmSync(tmpDir, { recursive: true, force: true });

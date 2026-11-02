@@ -1,6 +1,7 @@
-import type { BaseDriver, PresignedUrlOptions, StorageErrorCode, StoredObject, UploadOptions, UploadResult } from "@fileway/core";
+import type { BaseDriver, OperationOptions, PresignedUrlOptions, StoredObject, UploadContext, UploadOptions, UploadResult } from "@fileway/core";
 import { validateUploadOptions, ValidationError, urlEncodePath, abortError, isAbortError, StorageError } from "@fileway/core";
 import { blobReadSas, bytesToBase64, signRequest, SERVICE_VERSION } from "./sharedkey.js";
+import { classifyAzureError, parseConnectionString } from "./internal.js";
 
 const randomUUID = () => globalThis.crypto.randomUUID();
 const PROVIDER = "azure";
@@ -19,10 +20,6 @@ const TOKEN_KEY = "fileway_upload_token";
 const TOKEN_HEADER = `x-ms-meta-${TOKEN_KEY}`;
 const METADATA_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
-// Azurite's well-known development account (public, documented by Microsoft).
-const DEV_ACCOUNT = "devstoreaccount1";
-const DEV_KEY = "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==";
-const DEV_ENDPOINT = "http://127.0.0.1:10000/devstoreaccount1";
 
 export interface AzureDriverConfig {
   /** Container to store blobs in. */
@@ -98,7 +95,11 @@ export class AzureDriver implements BaseDriver<AzureMeta> {
     this.maxSizeBytes = config.maxSizeBytes;
   }
 
-  async upload(stream: ReadableStream<Uint8Array>, options: UploadOptions): Promise<UploadResult<AzureMeta>> {
+  async upload(
+    stream: ReadableStream<Uint8Array>,
+    options: UploadOptions,
+    context?: UploadContext,
+  ): Promise<UploadResult<AzureMeta>> {
     validateUploadOptions(options);
     for (const key of Object.keys(options.metadata ?? {})) {
       if (!METADATA_NAME.test(key)) {
@@ -116,7 +117,7 @@ export class AzureDriver implements BaseDriver<AzureMeta> {
     const contentType = options.mimeType ?? "application/octet-stream";
     const metaHeaders: Record<string, string> = {
       ...Object.fromEntries(Object.entries(options.metadata ?? {}).map(([k, v]) => [`x-ms-meta-${k}`, v])),
-      ...(options.uploadToken ? { [TOKEN_HEADER]: options.uploadToken } : {}),
+      ...(context?.uploadToken ? { [TOKEN_HEADER]: context.uploadToken } : {}),
     };
     const signal = options.signal;
 
@@ -220,19 +221,20 @@ export class AzureDriver implements BaseDriver<AzureMeta> {
     }
   }
 
-  async delete(path: string): Promise<boolean> {
-    const res = await this.request("DELETE", path);
-    if (res.status === 404 && errorCode(res) !== "ContainerNotFound") return false;
+  /** Deletes the blob; a missing blob is not an error. */
+  async delete(path: string, options?: OperationOptions): Promise<void> {
+    const res = await this.request("DELETE", path, withSignal(options));
+    if (res.status === 404 && errorCode(res) !== "ContainerNotFound") return;
     if (!res.ok) throw await azureError("Azure delete failed", res);
-    return true;
   }
 
-  async getUrl(path: string): Promise<string> {
+  async getUrl(path: string, _options?: OperationOptions): Promise<string> {
     return `${this.baseUrl}/${urlEncodePath(path)}`;
   }
 
-  async get(path: string): Promise<ReadableStream<Uint8Array>> {
-    const res = await this.request("GET", path);
+  /** Streams the blob. `options.signal` also cancels reading the body. */
+  async get(path: string, options?: OperationOptions): Promise<ReadableStream<Uint8Array>> {
+    const res = await this.request("GET", path, withSignal(options));
     if (!res.ok) throw await azureError("Azure get failed", res);
     if (!res.body) {
       throw new StorageError("provider-error", "Azure get returned no response body", { provider: PROVIDER });
@@ -267,8 +269,8 @@ export class AzureDriver implements BaseDriver<AzureMeta> {
   }
 
   /** The blob at `path` (a `HEAD` request), or `null` if it does not exist. */
-  async head(path: string): Promise<StoredObject<AzureMeta> | null> {
-    const res = await this.request("HEAD", path);
+  async head(path: string, options?: OperationOptions): Promise<StoredObject<AzureMeta> | null> {
+    const res = await this.request("HEAD", path, withSignal(options));
     if (res.status === 404 && errorCode(res) !== "ContainerNotFound") return null;
     if (!res.ok) throw await azureError("Azure head failed", res);
 
@@ -290,8 +292,11 @@ export class AzureDriver implements BaseDriver<AzureMeta> {
   }
 
   /** Whether blocks have been staged for `path` but not yet committed. */
-  async isPending(path: string): Promise<boolean> {
-    const res = await this.request("GET", path, { query: { comp: "blocklist", blocklisttype: "uncommitted" } });
+  async isPending(path: string, options?: OperationOptions): Promise<boolean> {
+    const res = await this.request("GET", path, {
+      query: { comp: "blocklist", blocklisttype: "uncommitted" },
+      ...withSignal(options),
+    });
     if (res.status === 404 && errorCode(res) !== "ContainerNotFound") return false;
     const body = await res.text().catch(() => "");
     if (!res.ok) throw azureErrorFrom("Azure get block list failed", res, body);
@@ -339,33 +344,8 @@ export class AzureDriver implements BaseDriver<AzureMeta> {
   }
 }
 
-/** Splits a connection string into the fields this driver understands. */
-export function parseConnectionString(value: string): {
-  accountName?: string;
-  accountKey?: string;
-  sasToken?: string;
-  endpoint?: string;
-} {
-  const parts: Record<string, string> = {};
-  for (const segment of value.split(";")) {
-    const eq = segment.indexOf("=");
-    if (eq > 0) parts[segment.slice(0, eq).trim()] = segment.slice(eq + 1).trim();
-  }
-  if (parts.UseDevelopmentStorage === "true") {
-    return { accountName: DEV_ACCOUNT, accountKey: DEV_KEY, endpoint: DEV_ENDPOINT };
-  }
-  const accountName = parts.AccountName;
-  const endpoint =
-    parts.BlobEndpoint ??
-    (accountName
-      ? `${parts.DefaultEndpointsProtocol ?? "https"}://${accountName}.blob.${parts.EndpointSuffix ?? "core.windows.net"}`
-      : undefined);
-  return {
-    ...(accountName ? { accountName } : {}),
-    ...(parts.AccountKey ? { accountKey: parts.AccountKey } : {}),
-    ...(parts.SharedAccessSignature ? { sasToken: parts.SharedAccessSignature } : {}),
-    ...(endpoint ? { endpoint } : {}),
-  };
+function withSignal(options: OperationOptions | undefined): { signal?: AbortSignal } {
+  return options?.signal ? { signal: options.signal } : {};
 }
 
 /** The account name from a `<account>.blob.<suffix>` host or an Azurite-style
@@ -392,33 +372,6 @@ async function fetchWithAbort(url: string | URL, init: RequestInit): Promise<Res
  * every failure (including bodiless HEAD responses), or the XML `<Code>`. */
 function errorCode(res: Response, body?: string): string | undefined {
   return res.headers.get("x-ms-error-code") ?? body?.match(/<Code>(.*?)<\/Code>/s)?.[1];
-}
-
-/** Classifies an Azure failure into a typed code from the service error code,
- * falling back to the HTTP status. */
-export function classifyAzureError(status: number, code: string | undefined): StorageErrorCode {
-  switch (code) {
-    case "ContainerNotFound":
-    case "ContainerBeingDeleted":
-      return "bucket-not-found";
-    case "BlobNotFound":
-    case "ResourceNotFound":
-      return "not-found";
-    case "AuthenticationFailed":
-    case "AuthorizationFailure":
-    case "AuthorizationPermissionMismatch":
-    case "AuthorizationResourceTypeMismatch":
-    case "NoAuthenticationInformation":
-    case "InvalidAuthenticationInfo":
-      return "auth-failed";
-    case "RequestBodyTooLarge":
-    case "BlockCountExceedsLimit":
-      return "size-exceeded";
-  }
-  if (status === 401 || status === 403) return "auth-failed";
-  if (status === 404) return "not-found";
-  if (status === 413) return "size-exceeded";
-  return "provider-error";
 }
 
 function azureErrorFrom(prefix: string, res: Response, body: string): StorageError {

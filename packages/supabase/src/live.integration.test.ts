@@ -31,9 +31,9 @@ describeEnv("SupabaseDriver against Supabase Storage", () => {
 
   it("uploads small, streamed and resumable objects and reads them back", async () => {
     const MiB = 1024 * 1024;
-    const small = await driver.upload(bytes(1000), { filename: "small.txt", path: prefix, mimeType: "text/plain", uploadToken: "t1", size: 1000 });
-    const streamed = await driver.upload(bytes(7 * MiB), { filename: "streamed.bin", path: prefix, uploadToken: "t2" });
-    const resumable = await driver.upload(bytes(13 * MiB), { filename: "tus.bin", path: prefix, uploadToken: "t3", size: 13 * MiB });
+    const small = await driver.upload(bytes(1000), { filename: "small.txt", path: prefix, mimeType: "text/plain", size: 1000 }, { uploadToken: "t1" });
+    const streamed = await driver.upload(bytes(7 * MiB), { filename: "streamed.bin", path: prefix }, { uploadToken: "t2" });
+    const resumable = await driver.upload(bytes(13 * MiB), { filename: "tus.bin", path: prefix, size: 13 * MiB }, { uploadToken: "t3" });
 
     expect(await driver.head(small.path)).toMatchObject({ size: 1000, uploadToken: "t1", contentType: "text/plain" });
     expect(await driver.head(streamed.path)).toMatchObject({ size: 7 * MiB, uploadToken: "t2" });
@@ -45,7 +45,7 @@ describeEnv("SupabaseDriver against Supabase Storage", () => {
     const res = await fetch(await driver.getPresignedUrl(small.path, { expiresIn: 60 }));
     expect(res.status).toBe(200);
 
-    for (const r of [small, streamed, resumable]) await expect(driver.delete(r.path)).resolves.toBe(true);
+    for (const r of [small, streamed, resumable]) await expect(driver.delete(r.path)).resolves.toBeUndefined();
     await expect(driver.head(small.path)).resolves.toBeNull();
   }, 120_000);
 

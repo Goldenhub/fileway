@@ -18,6 +18,8 @@ try {
       case "auth-failed": // bad/expired credentials
       case "bucket-not-found":
       case "size-exceeded":
+      case "rate-limited": // the provider is throttling; safe to retry
+      case "timeout": // an attempt stalled (retry.idleTimeoutMs); safe to retry
       case "network": // fetch-level failure; safe to retry
       case "provider-error": // 5xx etc.; safe to retry
     }
@@ -35,7 +37,9 @@ try {
 | `bucket-not-found` | The S3 bucket / Cloudinary cloud does not exist or is not reachable | No |
 | `auth-failed` | Invalid or expired credentials, access denied | Re-auth, then retry |
 | `size-exceeded` | Payload over the provider limit (`EntityTooLarge`, `413`) | No |
-| `network` | `fetch` failed before an HTTP response (DNS, socket, TLS, timeout) | Yes, with backoff |
+| `rate-limited` | The provider is throttling: HTTP 429, or its own code (S3 `SlowDown`, Azure `ServerBusy`, Cloudinary 420) | Yes, with backoff |
+| `timeout` | An attempt made no progress within `retry.idleTimeoutMs` | Yes, with backoff |
+| `network` | `fetch` failed before an HTTP response (DNS, socket, TLS) | Yes, with backoff |
 | `provider-error` | The provider returned an HTTP error without a more specific classification (e.g. 5xx) | Yes, with backoff |
 
 `StorageError` also exposes:
@@ -61,9 +65,9 @@ Abort signals are never wrapped: cancelling an upload rejects with a plain `DOME
 
 ## Retries
 
-Fileway retries **transient failures** automatically at the client layer: no driver changes, no manual loops. `isRetryable(err)` (exported from `@fileway/core`) decides what's worth retrying using the same rules as the client:
+Fileway retries **transient failures** automatically at the client layer: no driver changes, no manual loops. What is worth retrying:
 
-- **Retryable:** `network`, `provider-error`, or any error carrying HTTP `429` / `5xx`.
+- **Retryable:** `network`, `timeout`, `rate-limited`, `provider-error`, or any error carrying HTTP `429` / `5xx`.
 - **Never retried:** `validation`, `config`, `auth-failed`, `not-found`, `bucket-not-found`, `size-exceeded`, and `AbortError`.
 
 ```ts
@@ -103,7 +107,7 @@ Retries use exponential backoff with full jitter, capped at `maxDelayMs`; the wa
 
 ### Timing out stuck attempts
 
-A retry only happens after an attempt *fails*. A connection that stays open while the provider never answers would otherwise wait forever, so set `idleTimeoutMs` to cancel an attempt that stops making progress and retry it like any network failure:
+A retry only happens after an attempt *fails*. A connection that stays open while the provider never answers would otherwise wait forever, so set `idleTimeoutMs` to cancel an attempt that stops making progress and retry it:
 
 ```ts
 const client = new FilewayClient({
@@ -113,8 +117,8 @@ const client = new FilewayClient({
 ```
 
 - **Uploads:** the timer measures inactivity, not total time, so large uploads on slow links are fine as long as data keeps moving. It resets every time the driver reads from your stream, and once the stream is fully read it limits the wait for the provider's reply.
-- **Other operations:** `delete`, `get`, `getUrl`, `getPresignedUrl` and `getUploadStatus` get a plain time limit per attempt. For `get` it ends when the response starts, not after you read the body.
-- **What a timeout looks like:** a `StorageError` with code `network` ("upload attempt timed out after 30000 ms without progress"), retried like any other network failure. If the provider stored the file anyway, the [lost-response check](/docs/guide/uploads#safe-retries-and-upload-status) returns it instead of re-sending.
+- **Other operations:** `delete`, `get`, `getUrl`, `getPresignedUrl` and `getUploadStatus` get a plain time limit per attempt, and the timed-out request is cancelled. For `get` it ends when the response starts, not after you read the body.
+- **What a timeout looks like:** a `StorageError` with code `timeout` ("upload attempt timed out after 30000 ms without progress"), retried like a network failure. If the provider stored the file anyway, the [lost-response check](/docs/guide/uploads#safe-retries-and-upload-status) returns it instead of re-sending.
 - **Your own `signal` stays final.** Cancelling with `options.signal` ends the upload; it is never retried.
 
 Choosing a value:

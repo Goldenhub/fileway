@@ -7,6 +7,8 @@
 
 **Fileway is a runtime-agnostic file storage engine for JavaScript/TypeScript.** One standard API for every storage provider and every runtime, with zero core dependencies.
 
+[![Fund my work on FLOSSAfrica](https://flossafrica.com/badge.svg)](https://flossafrica.com/m/goldenhub?p=fileway)
+
 Instead of learning a different SDK for S3, Google Cloud Storage, Azure, Supabase, Cloudinary, and local disk (and fighting Node-specific shims on every edge runtime), Fileway gives you one typed API. Upload a WHATWG `ReadableStream<Uint8Array>`, get back a typed result. Swap drivers by changing **one line of code**. No rewrites. No provider lock-in.
 
 - **Node.js 20+**, **Cloudflare Workers**, **Bun**, and **Deno 2**: the same code, everywhere.
@@ -262,8 +264,8 @@ const client = new FilewayClient({
         console.log(`Uploading ${options.filename}...`);
         return { options: { ...options, path: options.path ?? "inbox" } };
       },
-      async afterUpload(result) {
-        console.log(`Done: ${result.path} (${result.size} bytes)`);
+      async afterUpload(result, options) {
+        console.log(`Done: ${options.filename} -> ${result.path} (${result.size} bytes)`);
       },
     },
   ],
@@ -400,10 +402,10 @@ const client = new FilewayClient({
 ### `client.get(path)` / `client.delete(path)` / `client.getUrl(path)` / `client.getPresignedUrl(path, options)`
 
 - `get(path)` returns a WHATWG `ReadableStream<Uint8Array>` for streaming the stored file back: pull-based with backpressure, never buffered whole. Throws when `path` does not exist.
-- `delete(path)` returns `Promise<boolean>`: `false` only when the file does not exist; other failures throw a `StorageError`.
-- Each of these accepts an optional `{ signal }` that cancels the call and any pending retries.
+- `delete(path)` returns `Promise<void>`. Deleting a missing file is not an error; other failures throw a `StorageError`.
+- Each of these accepts an optional `{ signal }` that cancels the request in flight and any pending retries, plus the driver's own options (e.g. Cloudinary's `deliveryType`).
 - `getUrl(path)` returns the public URL for a stored path.
-- `getPresignedUrl(path, { expiresIn })` returns a time-limited, signed download URL on `S3Driver` (SigV4 query-string) and `CloudinaryDriver` (signed private download URL). S3's `expiresIn` defaults to `3600` seconds and must be an integer in `1..604800` (AWS's 7-day cap); Cloudinary's must be a positive integer and defaults to `3600`; invalid values throw a `ValidationError`. Drivers that cannot presign throw a clear error.
+- `getPresignedUrl(path, { expiresIn })` returns a time-limited, signed download URL on every driver except Local. `expiresIn` defaults to `3600` seconds; S3, GCS and Azure allow at most `604800` (7 days), Cloudinary and Supabase any positive integer; invalid values throw a `ValidationError`. Drivers that cannot presign throw a clear error.
 
 ---
 
@@ -420,7 +422,7 @@ const client = new FilewayClient({
 - [x] Typed errors: every failure is a `StorageError` from `@fileway/core` with a stable `code` (`not-found`, `auth-failed`, `network`, `provider-error`, …) plus `statusCode`/`provider`/`cause`; `ValidationError` is a subclass and aborts stay `AbortError`
 - [x] Logging & error hooks: optional `logger` (Pino-style `{ debug, info, warn, error }`) and `onError` (Sentry/Datadog) config on `FilewayClient`, zero dependencies, aborts excluded
 - [x] Stream transformation in `beforeUpload` middlewares: return a replacement `stream` (plus its `size`, when known)
-- [x] Retries with exponential backoff (on `network`/`provider-error` codes and HTTP 429/5xx): `retry` config on `FilewayClient`
+- [x] Retries with exponential backoff (on `network`/`timeout`/`rate-limited`/`provider-error` codes and HTTP 429/5xx): `retry` config on `FilewayClient`
 
 **Planned drivers:** Vercel Blob. Backblaze B2, DigitalOcean Spaces and Cloudflare R2 already work through `@fileway/s3`.
 

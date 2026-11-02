@@ -90,11 +90,15 @@ export function raceAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<
   });
 }
 
-/** Settles with `promise`, or rejects with a timeout error after `ms`. */
-export function withTimeLimit<T>(promise: Promise<T>, ms: number, operation: string): Promise<T> {
+/** Settles with `promise`, or calls `onTimeout` and rejects with a timeout
+ * error after `ms`. */
+export function withTimeLimit<T>(promise: Promise<T>, ms: number, operation: string, onTimeout?: () => void): Promise<T> {
   promise.catch(() => {});
   return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => reject(timeoutError(operation, ms)), ms);
+    const timer = setTimeout(() => {
+      onTimeout?.();
+      reject(timeoutError(operation, ms));
+    }, ms);
     promise.then(
       (value) => {
         clearTimeout(timer);
@@ -110,7 +114,7 @@ export function withTimeLimit<T>(promise: Promise<T>, ms: number, operation: str
 
 /** The retryable error an attempt that made no progress is reported as. */
 export function timeoutError(operation: string, ms: number, cause?: unknown): StorageError {
-  return new StorageError("network", `${operation} attempt timed out after ${ms} ms without progress`, {
+  return new StorageError("timeout", `${operation} attempt timed out after ${ms} ms without progress`, {
     ...(cause !== undefined ? { cause } : {}),
   });
 }

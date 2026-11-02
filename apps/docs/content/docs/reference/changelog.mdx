@@ -11,7 +11,7 @@ All notable changes to Fileway are documented here. Releases are cut from `main`
 
 The first stable release. Target scope, tracked on the [roadmap](https://github.com/Goldenhub/fileway#roadmap):
 
-- **Stable public API**: ⏳ not yet. `UploadOptions`, `UploadResult<TMeta>`, `BaseDriver`, and `FilewayClient` lock in 1.0 semantics; after that, breaking changes become semver-major. The API is still changing (see the breaking changes in v0.3.0), so this is the main item left.
+- **Stable public API**: ⏳ almost. The breaking cleanup shipped in v0.5.0; what is left is collecting feedback on 0.5.x, then the freeze. `UploadOptions`, `UploadResult<TMeta>`, `BaseDriver`, and `FilewayClient` lock in 1.0 semantics; after that, breaking changes become semver-major.
 - **True streaming uploads**: ✅ landed for all drivers. Local pipes straight to disk with backpressure; S3 uses `aws-chunked` per-chunk SigV4 signing when `options.size` is known and bounded-memory multipart uploads otherwise; Cloudinary uses chunked uploads (`X-Unique-Upload-Id` + `Content-Range`) for files larger than `chunkSize`.
 - **Upload cancellation**: ✅ landed for all drivers: `options.signal` rejects with `AbortError` and cleans up partial artifacts.
 - **Middleware stream transformation**: ✅ landed: `beforeUpload` can return a replacement `stream` (and/or `options`), which is what the driver uploads. The known `size` is dropped when the stream is replaced unless the middleware returns the new length.
@@ -20,7 +20,47 @@ The first stable release. Target scope, tracked on the [roadmap](https://github.
 
 Expected: once the public API is frozen and has gone through real-world feedback via [GitHub Discussions](https://github.com/Goldenhub/fileway/discussions).
 
-## Unreleased
+## v0.5.0 (2026-11-02)
+
+**Breaking changes (pre-1.0 API cleanup)**
+
+This is the last planned breaking release before 1.0: it settles the public API so 1.0 can freeze it.
+
+- **`delete()` returns `Promise<void>`** on the client and every driver. Deleting a missing object is no longer reported (it was `false` on most drivers and always `true` on S3); any other failure still throws.
+- **Cancellation reaches the request.** Every `BaseDriver` method except `upload` takes `options?: { signal }`, and the client passes the caller's signal to the driver, so `get`, `delete`, `head` and the rest abort the request in flight instead of only stopping retries. With `retry.idleTimeoutMs`, a timed-out attempt's request is now cancelled too.
+- **Driver-specific options pass through the client.** `client.get`, `delete`, `getUrl` and `getPresignedUrl` accept the driver's own options (e.g. Cloudinary's `{ deliveryType, resourceType }`), like `upload` already did.
+- **`uploadToken` left `UploadOptions`.** The client passes it to drivers as a third argument: `upload(stream, options, context?: UploadContext)`.
+- **`FilewayClient` is generic over the driver**, not the config: `FilewayClient<S3Driver>` instead of `FilewayClient<{ driver: S3Driver }>`. Inferred usage (`new FilewayClient({ driver })`) is unchanged.
+- **Middleware:** `afterUpload(result, options)` now receives the options the driver got, and `MiddlewareHook<TMeta>` types `result.meta` from the driver for inline hooks.
+- **New error codes** `rate-limited` (HTTP 429 and provider throttling such as S3 `SlowDown`, Azure `ServerBusy`, Cloudinary 420) and `timeout` (an idle-timed-out attempt, previously `network`). Both are retried. Exhaustive `switch` statements over `StorageErrorCode` need the two new cases.
+- **Smaller public surface.** `@fileway/core` no longer exports `isRetryable`, `sleep`, `delayWithJitter`, `withProgress` or `validateUploadId`; check `err.code` instead of `isRetryable`. The new drivers no longer export their error classifiers or `parseConnectionString`.
+
+**Other changes**
+- `S3Meta` and `LocalMeta` are exported names for the drivers' metadata types.
+- `S3Driver` accepts `maxSizeBytes`, like the other drivers.
+- Error messages no longer contain em dashes.
+
+**Migrating from 0.4**
+
+```ts
+// delete: no boolean any more
+const existed = await client.delete(path);     // before
+await client.delete(path);                      // after
+
+// annotations: the type parameter is the driver
+let client: FilewayClient<{ driver: S3Driver }>; // before
+let client: FilewayClient<S3Driver>;             // after
+
+// custom drivers
+async upload(stream, options) { store(options.uploadToken) }                  // before
+async upload(stream, options, context) { store(context?.uploadToken) }        // after
+async delete(path): Promise<boolean>                                          // before
+async delete(path, options?: OperationOptions): Promise<void>                 // after, pass options?.signal to fetch
+
+// retries
+if (isRetryable(err)) { /* ... */ }                                           // before
+if (err instanceof StorageError && ["network", "timeout", "rate-limited", "provider-error"].includes(err.code)) { /* ... */ } // after
+```
 
 **New drivers**
 

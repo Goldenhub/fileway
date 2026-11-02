@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { FilewayClient, StorageError, ValidationError } from "@fileway/core";
-import { SupabaseDriver, classifySupabaseError } from "./index.js";
+import { SupabaseDriver } from "./index.js";
+import { classifySupabaseError } from "./errors.js";
 
 const mockFetch = vi.fn();
 
@@ -75,9 +76,8 @@ describe("upload", () => {
       id: "inv_42",
       mimeType: "application/pdf",
       metadata: { owner: "ada" },
-      uploadToken: "tok-1",
       size: 5,
-    });
+    }, { uploadToken: "tok-1" });
 
     expect(mockFetch).toHaveBeenCalledTimes(1);
     const { url, init, headers } = call(0);
@@ -109,9 +109,8 @@ describe("upload", () => {
     const result = await makeDriver().upload(body(total, 512 * 1024), {
       filename: "video.mp4",
       mimeType: "video/mp4",
-      uploadToken: "tok",
       size: total,
-    });
+    }, { uploadToken: "tok" });
 
     expect(mockFetch).toHaveBeenCalledTimes(4);
     const create = call(0);
@@ -231,15 +230,25 @@ describe("upload", () => {
 });
 
 describe("delete, get, head, getPresignedUrl", () => {
-  it("deletes by prefix, returning false when nothing was removed", async () => {
+  it("deletes by prefix, treating nothing removed as success", async () => {
     mockFetch.mockResolvedValueOnce(json([{ name: "a.txt" }]));
-    await expect(makeDriver().delete("docs/a.txt")).resolves.toBe(true);
+    await expect(makeDriver().delete("docs/a.txt")).resolves.toBeUndefined();
     const { url, init } = call(0);
     expect(url).toBe(`${API}/object/files`);
     expect(init.method).toBe("DELETE");
     expect(JSON.parse(String(init.body))).toEqual({ prefixes: ["docs/a.txt"] });
     mockFetch.mockResolvedValueOnce(json([]));
-    await expect(makeDriver().delete("docs/a.txt")).resolves.toBe(false);
+    await expect(makeDriver().delete("docs/a.txt")).resolves.toBeUndefined();
+  });
+
+  it("passes the signal and classifies throttling", async () => {
+    const controller = new AbortController();
+    mockFetch.mockImplementation(async () => new Response("x"));
+    await makeDriver().get("a", { signal: controller.signal });
+    await makeDriver().head("a", { signal: controller.signal }).catch(() => {});
+    for (const [, init] of mockFetch.mock.calls) expect((init as RequestInit).signal).toBe(controller.signal);
+    mockFetch.mockImplementation(async () => json({ statusCode: "429", error: "too_many_requests", message: "Too Many Requests" }, 429));
+    await expect(makeDriver().get("a")).rejects.toMatchObject({ code: "rate-limited" });
   });
 
   it("downloads through the authenticated route", async () => {

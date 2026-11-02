@@ -54,52 +54,61 @@ const deleted = await client.delete(result.path);
 
 Returns `UploadResult<TMeta>`: `id`, `url`, `path`, `size`, and `meta`. The `meta` shape is inferred from the driver you pass, so results stay fully typed.
 
-### `delete(path)`
+### `delete(path, options?)`
 
-Returns `Promise<boolean>`: `true` when the file is gone, `false` when it did not exist. Other failures throw a `StorageError`.
+Returns `Promise<void>`. Deleting a file that does not exist is not an error; other failures throw a `StorageError`.
 
-### `getUrl(path)`
+### `getUrl(path, options?)`
 
 Returns `Promise<string>`: the public URL for the file.
+
+`get`, `delete`, `getUrl` and `getPresignedUrl` accept `{ signal }` (cancels the request in flight and any retries) plus the driver's own options, if it has any.
 
 ## Middleware
 
 Hook into the upload lifecycle:
 
 ```ts
-const logger = {
-  async afterUpload(result) {
-    console.log(`Uploaded ${result.path} (${result.size} bytes)`);
+const logger: MiddlewareHook = {
+  async afterUpload(result, options) {
+    console.log(`Uploaded ${options.filename} to ${result.path} (${result.size} bytes)`);
   },
 };
 
 const client = new FilewayClient({ driver, middlewares: [logger] });
 ```
 
-`beforeUpload` may transform the stream or options before the driver receives them; `afterUpload` runs after a successful upload.
+`beforeUpload` may transform the stream or options before the driver receives them; `afterUpload` runs after a successful upload, with the result and the options the driver received. Written inline in the client config, `afterUpload` gets the driver's `meta` type.
 
 ## Building a custom driver
 
 Implement `BaseDriver<TMeta>` and the rest of Fileway just works:
 
 ```ts
-import type { BaseDriver, UploadOptions, UploadResult } from "@fileway/core";
+import type { BaseDriver, OperationOptions, UploadContext, UploadOptions, UploadResult } from "@fileway/core";
 
-class MyDriver implements BaseDriver<{ disk: string }> {
+type MyMeta = { disk: string };
+
+class MyDriver implements BaseDriver<MyMeta> {
   readonly name = "my-driver";
 
   async upload(
     stream: ReadableStream<Uint8Array>,
     options: UploadOptions,
-  ): Promise<UploadResult<{ disk: string }>> {
+    context?: UploadContext, // store context.uploadToken with the object if you can
+  ): Promise<UploadResult<MyMeta>> {
     /* ... */
   }
 
-  async delete(path: string): Promise<boolean> {
+  async delete(path: string, options?: OperationOptions): Promise<void> {
+    /* a missing object is not an error; pass options.signal to fetch */
+  }
+
+  async getUrl(path: string, options?: OperationOptions): Promise<string> {
     /* ... */
   }
 
-  async getUrl(path: string): Promise<string> {
+  async get(path: string, options?: OperationOptions): Promise<ReadableStream<Uint8Array>> {
     /* ... */
   }
 }

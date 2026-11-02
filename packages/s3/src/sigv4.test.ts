@@ -156,7 +156,7 @@ describe("createStreamingBody", () => {
     expect(terminal).toBeDefined();
 
     // The terminal chunk is an extra signChunk over an empty payload, chained
-    // from the last data chunk's signature — not a copy of it.
+    // from the last data chunk's signature, not a copy of it.
     const expectedTerminal = (
       await signChunk(new Uint8Array(0), second!, amzDate, scope, signingKey)
     ).chunkSignature;

@@ -73,5 +73,5 @@ const signedRes = await fetch(signedUrl);
 console.log("Presigned fetch status:", signedRes.status);
 if (!signedRes.ok) throw new Error(`Presigned URL fetch failed: ${signedRes.status}`);
 
-const deleted = await client.delete(result.path);
-console.log("Deleted:", deleted);
+await client.delete(result.path);
+console.log("Deleted:", result.path);

@@ -32,8 +32,8 @@ Each driver returns its own typed metadata:
 
 | Driver | `meta` shape |
 |--------|--------------|
-| `LocalDriver` | `{ localPath: string }` |
-| `S3Driver` | `{ bucket: string; etag?: string }` |
+| `LocalDriver` | `LocalMeta`: `{ localPath: string }` |
+| `S3Driver` | `S3Meta`: `{ bucket: string; etag?: string }` |
 | `GCSDriver` | `{ bucket: string; generation?: string; md5Hash?: string; etag?: string }` |
 | `AzureDriver` | `{ container: string; etag?: string }` |
 | `SupabaseDriver` | `{ bucket: string; etag?: string }` |

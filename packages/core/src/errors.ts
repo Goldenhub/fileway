@@ -5,13 +5,15 @@ export type StorageErrorCode =
   | "bucket-not-found"
   | "auth-failed"
   | "size-exceeded"
+  | "rate-limited"
+  | "timeout"
   | "network"
   | "provider-error";
 
 export interface StorageErrorOptions {
   /** HTTP status code when the failure came from an HTTP response. */
   statusCode?: number;
-  /** Which driver produced the error: `"s3"`, `"cloudinary"`, or `"local"`. */
+  /** Which driver produced the error, e.g. `"s3"`, `"gcs"` or `"local"`. */
   provider?: string;
   /** The underlying error when this wraps a lower-level failure (e.g. `fetch`). */
   cause?: unknown;
