@@ -1,4 +1,6 @@
-import type { ErrorContext, Logger } from "./logging.js";
+import type { ErrorContext, Logger, Operation } from "./logging.js";
+import type { StorageErrorCode } from "./errors.js";
+import type { FilewayClient } from "./index.js";
 
 export interface UploadProgress {
   /** Bytes read from the source stream (after `beforeUpload` middleware) so far. */
@@ -272,4 +274,93 @@ export interface FilewayConfig<TDriver extends BaseDriver> {
   onError?: (error: unknown, context: ErrorContext) => void | Promise<void>;
   /** Optional retry behavior for transient failures. See `RetryConfig`. */
   retry?: RetryConfig;
+  /** Plugins: middleware, an event listener and HTTP routes in one object. */
+  plugins?: FilewayPlugin[];
+  /** Path where `client.handler` is mounted. Default `"/api/fileway"`. */
+  basePath?: string;
+}
+
+/**
+ * Who an operation is done for, recorded on its event. Accepted by every
+ * client method; never passed to drivers.
+ */
+export interface TrackOptions {
+  /** The person or system acting, e.g. your app's user id. */
+  actor?: string;
+  /** Free-form labels, e.g. `{ tenant: "acme" }`. */
+  tags?: Record<string, string>;
+}
+
+/** An operation that produces an event: every `Operation` except `"retry"`. */
+export type EventOperation = Exclude<Operation, "retry">;
+
+/** One finished operation, after retries. Delivered to plugins' `onEvent`. */
+export interface FilewayEvent {
+  /** Random, unique per event, for de-duplication. */
+  id: string;
+  /** When the operation finished, ISO 8601. */
+  time: string;
+  operation: EventOperation;
+  outcome: "success" | "error" | "aborted";
+  path?: string;
+  size?: number;
+  mimeType?: string;
+  durationMs: number;
+  /** Attempts made, including retries. */
+  attempts: number;
+  /** The driver's `name`, e.g. `"s3"`. */
+  driver: string;
+  /** Present when `outcome` is `"error"`. `code` is set for `StorageError`s. */
+  error?: { name: string; message: string; code?: StorageErrorCode; statusCode?: number };
+  actor?: string;
+  tags?: Record<string, string>;
+}
+
+/** What a plugin receives in `init` and in its routes. */
+export interface PluginContext {
+  client: FilewayClient<BaseDriver>;
+  /** The configured driver's `name`. */
+  driverName: string;
+  /** The client's logger (silent when none is configured). */
+  log: Logger;
+}
+
+export interface RouteContext extends PluginContext {
+  /** For a `"METHOD /path/*"` route, the rest of the path after `/path/`. */
+  params: { wildcard?: string };
+}
+
+/** Handles one request to a plugin route. */
+export type PluginRoute = (request: Request, ctx: RouteContext) => Promise<Response> | Response;
+
+export interface FilewayPlugin {
+  /** Unique among the client's plugins, e.g. `"audit"`. */
+  id: string;
+  /** Runs once, after the client is created. */
+  init?(ctx: PluginContext): void;
+  /** Added after the client's own `middlewares`. */
+  middlewares?: MiddlewareHook[];
+  /**
+   * Called once per finished operation. Not awaited: it never delays or
+   * fails the operation, and errors it throws are logged.
+   */
+  onEvent?(event: FilewayEvent): void | Promise<void>;
+  /**
+   * Routes served by `client.handler`, keyed `"METHOD /path"` or
+   * `"METHOD /path/*"` (relative to `basePath`), e.g. `"GET /health"`.
+   */
+  routes?: Record<string, PluginRoute>;
+}
+
+/** `client.handler`: one web-standard handler, exposed under every method name
+ * so it can be mounted directly (Next.js route exports, Workers, Bun, Deno). */
+export interface FilewayHandler {
+  fetch(request: Request): Promise<Response>;
+  GET(request: Request): Promise<Response>;
+  POST(request: Request): Promise<Response>;
+  PUT(request: Request): Promise<Response>;
+  PATCH(request: Request): Promise<Response>;
+  DELETE(request: Request): Promise<Response>;
+  HEAD(request: Request): Promise<Response>;
+  OPTIONS(request: Request): Promise<Response>;
 }

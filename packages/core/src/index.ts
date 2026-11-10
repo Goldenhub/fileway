@@ -19,6 +19,12 @@ export const version: string = typeof __FILEWAY_VERSION__ === "string" ? __FILEW
 import type {
   BaseDriver,
   CopyOptions,
+  EventOperation,
+  FilewayEvent,
+  FilewayHandler,
+  FilewayPlugin,
+  PluginContext,
+  TrackOptions,
   DriverMeta,
   FilewayConfig,
   ListedObject,
@@ -45,6 +51,7 @@ import {
 } from "./validation.js";
 import { delayWithJitter, isRetryable, sleep } from "./retry.js";
 import { IdleTimer, linkSignals, raceAbort, timeoutError, withActivity, withTimeLimit } from "./timeout.js";
+import { buildRoutes, createHandler } from "./plugins.js";
 import type { ErrorContext, Logger, LogLevel, Operation } from "./logging.js";
 
 /** The driver's own options type for a `(path, options?)` method, or
@@ -60,10 +67,16 @@ export class FilewayClient<TDriver extends BaseDriver> {
   private logger: Logger | undefined;
   private onError: ((error: unknown, context: ErrorContext) => void | Promise<void>) | undefined;
   private retry: RetryConfig;
+  private plugins: FilewayPlugin[];
+  /**
+   * Serves plugin routes under `basePath` (default `/api/fileway`). Mount it as
+   * a web-standard handler: `export const { GET, POST } = client.handler` in a
+   * Next.js route, or `fetch: client.handler.fetch` on Workers, Bun and Deno.
+   */
+  readonly handler: FilewayHandler;
 
   constructor(config: FilewayConfig<TDriver>) {
     this.driver = config.driver;
-    this.middlewares = config.middlewares ?? [];
     this.logger = config.logger;
     this.onError = config.onError;
     this.retry = config.retry ?? {};
@@ -71,15 +84,37 @@ export class FilewayClient<TDriver extends BaseDriver> {
     if (idle !== undefined && !(Number.isFinite(idle) && idle > 0)) {
       throw new StorageError("config", "retry.idleTimeoutMs must be a positive number of milliseconds");
     }
+
+    this.plugins = config.plugins ?? [];
+    const routes = buildRoutes(this.plugins);
+    // Plugin middleware runs after the app's own, so it sees the final stream and options.
+    const pluginMiddlewares = this.plugins.flatMap((plugin) => plugin.middlewares ?? []);
+    this.middlewares = [
+      ...(config.middlewares ?? []),
+      ...(pluginMiddlewares as NonNullable<FilewayConfig<TDriver>["middlewares"]>),
+    ];
+    const ctx: PluginContext = {
+      client: this as unknown as FilewayClient<BaseDriver>,
+      driverName: this.driver.name,
+      log: {
+        debug: (message, meta) => this.emit("debug", message, meta),
+        info: (message, meta) => this.emit("info", message, meta),
+        warn: (message, meta) => this.emit("warn", message, meta),
+        error: (message, meta) => this.emit("error", message, meta),
+      },
+    };
+    this.handler = createHandler(routes, config.basePath ?? "/api/fileway", ctx, ctx.log);
+    for (const plugin of this.plugins) plugin.init?.(ctx);
   }
 
   async upload(
     stream: ReadableStream<Uint8Array>,
     // Accept the driver's own upload options (e.g. Cloudinary's
     // `deliveryType`) on top of the core ones.
-    options: UploadOptions & Parameters<TDriver["upload"]>[1],
+    options: UploadOptions & Parameters<TDriver["upload"]>[1] & TrackOptions,
   ): Promise<Awaited<ReturnType<TDriver["upload"]>>> {
     const started = Date.now();
+    const track = trackOf(options);
     const maxRetries = this.retry.maxRetries ?? 3;
     const canRetry = options.streamFactory !== undefined && maxRetries > 0;
     const idleMs = this.retry.idleTimeoutMs;
@@ -91,13 +126,14 @@ export class FilewayClient<TDriver extends BaseDriver> {
       try {
         validateUploadId(options.id);
       } catch (error) {
-        await this.reportFailure(error, { operation: "upload", durationMs: 0, filename: options.filename });
+        await this.reportFailure(error, { operation: "upload", durationMs: 0, filename: options.filename }, { attempts: 0, ...track });
         throw error;
       }
     }
     const id = options.id ?? globalThis.crypto.randomUUID();
     const uploadToken = globalThis.crypto.randomUUID();
-    const base = { ...options, id };
+    // Attribution is for events only; drivers and middleware never see it.
+    const base = { ...stripTrack(options), id };
 
     let attempt = 1;
     let activeOptions: typeof options = { ...base };
@@ -168,7 +204,7 @@ export class FilewayClient<TDriver extends BaseDriver> {
         // Don't wait on a driver that ignores its signal once the attempt is cancelled.
         const uploadResult = await (attemptSignal ? raceAbort(pending, attemptSignal) : pending);
         endAttempt();
-        return (await this.finishUpload(uploadResult, activeOptions, started)) as Awaited<ReturnType<TDriver["upload"]>>;
+        return (await this.finishUpload(uploadResult, activeOptions, started, attempt, track)) as Awaited<ReturnType<TDriver["upload"]>>;
       } catch (caught) {
         endAttempt();
         // An attempt we cancelled for inactivity is a retryable timeout;
@@ -182,7 +218,7 @@ export class FilewayClient<TDriver extends BaseDriver> {
           const recovered = await this.recoverLostResponse({ ...activeOptions, id }, uploadToken, options.signal);
           if (recovered) {
             this.emit("info", "upload recovered after lost response", { operation: "upload", id, attempt });
-            return (await this.finishUpload(recovered, activeOptions, started)) as Awaited<ReturnType<TDriver["upload"]>>;
+            return (await this.finishUpload(recovered, activeOptions, started, attempt, track)) as Awaited<ReturnType<TDriver["upload"]>>;
           }
         }
 
@@ -196,7 +232,7 @@ export class FilewayClient<TDriver extends BaseDriver> {
             ...(activeOptions.path !== undefined ? { path: activeOptions.path } : {}),
             ...(activeOptions.mimeType !== undefined ? { mimeType: activeOptions.mimeType } : {}),
             ...(activeOptions.size !== undefined ? { size: activeOptions.size } : {}),
-          });
+          }, { attempts: attempt, ...track });
           throw error;
         }
 
@@ -208,7 +244,12 @@ export class FilewayClient<TDriver extends BaseDriver> {
           error: error instanceof Error ? { name: error.name, message: error.message } : {},
         });
 
-        await sleep(delay, options.signal);
+        try {
+          await sleep(delay, options.signal);
+        } catch (abort) {
+          await this.reportFailure(abort, { operation: "upload", durationMs: Date.now() - started }, { attempts: attempt, ...track });
+          throw abort;
+        }
         attempt += 1;
       }
     }
@@ -219,8 +260,11 @@ export class FilewayClient<TDriver extends BaseDriver> {
    * missing. Pass the same `filename` and `path` the upload used. Works across
    * processes: a job that crashed mid-upload can check before redoing it.
    */
-  async getUploadStatus(id: string, options: UploadStatusOptions): Promise<UploadStatus<DriverMeta<TDriver>>> {
-    const { signal, ...uploadOptions } = options;
+  async getUploadStatus(
+    id: string,
+    options: UploadStatusOptions & TrackOptions,
+  ): Promise<UploadStatus<DriverMeta<TDriver>>> {
+    const { signal, actor: _actor, tags: _tags, ...uploadOptions } = options;
     validateUploadOptions({ ...uploadOptions, id });
     const { pathFor, head, isPending } = this.driver;
     if (!pathFor || !head) return { state: "unsupported" };
@@ -237,6 +281,7 @@ export class FilewayClient<TDriver extends BaseDriver> {
         return { state: "missing" };
       },
       signal,
+      trackOf(options),
     );
   }
 
@@ -245,6 +290,8 @@ export class FilewayClient<TDriver extends BaseDriver> {
     result: UploadResult<Record<string, unknown>>,
     options: UploadOptions,
     started: number,
+    attempts: number,
+    track: TrackOptions,
   ): Promise<UploadResult<Record<string, unknown>>> {
     for (const middleware of this.middlewares) {
       if (middleware.afterUpload) {
@@ -258,6 +305,16 @@ export class FilewayClient<TDriver extends BaseDriver> {
       path: result.path,
       size: result.size,
       durationMs: Date.now() - started,
+    });
+    this.publish({
+      operation: "upload",
+      outcome: "success",
+      path: result.path,
+      size: result.size,
+      ...(options.mimeType !== undefined ? { mimeType: options.mimeType } : {}),
+      durationMs: Date.now() - started,
+      attempts,
+      ...track,
     });
     return result;
   }
@@ -288,40 +345,43 @@ export class FilewayClient<TDriver extends BaseDriver> {
   }
 
   /** Deletes the object at `path`. Deleting a missing object is not an error. */
-  async delete(path: string, options?: OperationOptions & MethodOptions<TDriver["delete"]>): Promise<void> {
+  async delete(path: string, options?: OperationOptions & MethodOptions<TDriver["delete"]> & TrackOptions): Promise<void> {
     return this.runWithRetry(
       "delete",
       path,
       (signal) => this.driver.delete(path, withSignal(options, signal)),
       options?.signal,
+      trackOf(options),
     );
   }
 
-  async getUrl(path: string, options?: OperationOptions & MethodOptions<TDriver["getUrl"]>): Promise<string> {
+  async getUrl(path: string, options?: OperationOptions & MethodOptions<TDriver["getUrl"]> & TrackOptions): Promise<string> {
     return this.runWithRetry(
       "getUrl",
       path,
       (signal) => this.driver.getUrl(path, withSignal(options, signal)),
       options?.signal,
+      trackOf(options),
     );
   }
 
   /** Streams the object back. `options.signal` also cancels reading the body. */
   async get(
     path: string,
-    options?: OperationOptions & MethodOptions<TDriver["get"]>,
+    options?: OperationOptions & MethodOptions<TDriver["get"]> & TrackOptions,
   ): Promise<ReadableStream<Uint8Array>> {
     return this.runWithRetry(
       "get",
       path,
       (signal) => this.driver.get(path, withSignal(options, signal)),
       options?.signal,
+      trackOf(options),
     );
   }
 
   async getPresignedUrl(
     path: string,
-    options?: PresignedUrlOptions & MethodOptions<NonNullable<TDriver["getPresignedUrl"]>>,
+    options?: PresignedUrlOptions & MethodOptions<NonNullable<TDriver["getPresignedUrl"]>> & TrackOptions,
   ): Promise<string> {
     return this.runWithRetry("getPresignedUrl", path, async (signal) => {
       if (!this.driver.getPresignedUrl) {
@@ -332,11 +392,11 @@ export class FilewayClient<TDriver extends BaseDriver> {
         );
       }
       return this.driver.getPresignedUrl(path, withSignal(options, signal));
-    }, options?.signal);
+    }, options?.signal, trackOf(options));
   }
 
   /** One page of the objects under `options.prefix`. Pass `page.cursor` back to get the next one. */
-  async list(options?: ListOptions): Promise<ListPage> {
+  async list(options?: ListOptions & TrackOptions): Promise<ListPage> {
     const prefix = options?.prefix ?? "";
     validatePrefix(prefix);
     const limit = options?.limit;
@@ -347,7 +407,7 @@ export class FilewayClient<TDriver extends BaseDriver> {
       const list = this.driver.list;
       if (!list) throw this.unsupported("listing");
       return list.call(this.driver, withSignal(options, signal));
-    }, options?.signal);
+    }, options?.signal, trackOf(options));
   }
 
   /**
@@ -355,7 +415,7 @@ export class FilewayClient<TDriver extends BaseDriver> {
    * One folder level unless `recursive` is true; folders themselves are not
    * yielded. Stops when the loop breaks or `options.signal` aborts.
    */
-  async *listAll(options?: Omit<ListOptions, "cursor">): AsyncGenerator<ListedObject, void, undefined> {
+  async *listAll(options?: Omit<ListOptions, "cursor"> & TrackOptions): AsyncGenerator<ListedObject, void, undefined> {
     let cursor: string | undefined;
     do {
       const page = await this.list({ ...options, ...(cursor !== undefined ? { cursor } : {}) });
@@ -367,14 +427,14 @@ export class FilewayClient<TDriver extends BaseDriver> {
   /** The stored object at `path`, or `null` when there is none. */
   async stat(
     path: string,
-    options?: OperationOptions & MethodOptions<NonNullable<TDriver["head"]>>,
+    options?: OperationOptions & MethodOptions<NonNullable<TDriver["head"]>> & TrackOptions,
   ): Promise<StoredObject<DriverMeta<TDriver>> | null> {
     validateObjectPath(path);
     return this.runWithRetry("stat", path, async (signal) => {
       const head = this.driver.head;
       if (!head) throw this.unsupported("stat");
       return (await head.call(this.driver, path, withSignal(options, signal))) as StoredObject<DriverMeta<TDriver>> | null;
-    }, options?.signal);
+    }, options?.signal, trackOf(options));
   }
 
   /**
@@ -384,7 +444,7 @@ export class FilewayClient<TDriver extends BaseDriver> {
   async copy(
     from: string,
     to: string,
-    options?: CopyOptions & CopyMethodOptions<NonNullable<TDriver["copy"]>>,
+    options?: CopyOptions & CopyMethodOptions<NonNullable<TDriver["copy"]>> & TrackOptions,
   ): Promise<void> {
     this.validatePair(from, to);
     let attempt = 0;
@@ -399,7 +459,7 @@ export class FilewayClient<TDriver extends BaseDriver> {
         if (attempt > 1 && isCode(error, "conflict") && (await this.sameObject(from, to, signal))) return;
         throw error;
       }
-    }, options?.signal);
+    }, options?.signal, trackOf(options));
   }
 
   /**
@@ -410,18 +470,20 @@ export class FilewayClient<TDriver extends BaseDriver> {
   async move(
     from: string,
     to: string,
-    options?: CopyOptions & CopyMethodOptions<NonNullable<TDriver["move"]>>,
+    options?: CopyOptions & CopyMethodOptions<NonNullable<TDriver["move"]>> & TrackOptions,
   ): Promise<void> {
     this.validatePair(from, to);
     const move = this.driver.move;
     if (!move) {
       if (!this.driver.copy) {
         const error = this.unsupported("move");
-        await this.reportFailure(error, { operation: "move", durationMs: 0, path: from });
+        await this.reportFailure(error, { operation: "move", durationMs: 0, path: from }, { attempts: 0, ...trackOf(options) });
         throw error;
       }
-      await this.copy(from, to, options as CopyOptions & CopyMethodOptions<NonNullable<TDriver["copy"]>>);
-      await this.delete(from, (options?.signal ? { signal: options.signal } : undefined) as Parameters<this["delete"]>[1]);
+      await this.copy(from, to, options as CopyOptions & CopyMethodOptions<NonNullable<TDriver["copy"]>> & TrackOptions);
+      // The fallback reports its own copy and delete events, not a move event.
+      const deleteOptions = { ...(options?.signal ? { signal: options.signal } : {}), ...trackOf(options) };
+      await this.delete(from, (Object.keys(deleteOptions).length > 0 ? deleteOptions : undefined) as Parameters<this["delete"]>[1]);
       return;
     }
     let attempt = 0;
@@ -434,7 +496,7 @@ export class FilewayClient<TDriver extends BaseDriver> {
         if (attempt > 1 && isCode(error, "not-found") && (await this.exists(to, signal))) return;
         throw error;
       }
-    }, options?.signal);
+    }, options?.signal, trackOf(options));
   }
 
   private validatePair(from: string, to: string): void {
@@ -485,7 +547,8 @@ export class FilewayClient<TDriver extends BaseDriver> {
     operation: "delete" | "getUrl" | "get" | "getPresignedUrl" | "getUploadStatus" | "list" | "stat" | "copy" | "move",
     path: string,
     fn: (signal: AbortSignal | undefined) => Promise<T>,
-    signal?: AbortSignal,
+    signal: AbortSignal | undefined,
+    track: TrackOptions,
   ): Promise<T> {
     const started = Date.now();
     const maxRetries = this.retry.maxRetries ?? 3;
@@ -515,12 +578,13 @@ export class FilewayClient<TDriver extends BaseDriver> {
           }
         }
         this.emit("info", `${operation} succeeded`, { operation, path, durationMs: Date.now() - started });
+        this.publish({ operation, outcome: "success", path, durationMs: Date.now() - started, attempts: attempt, ...track });
         return result;
       } catch (error) {
         const delay = delayWithJitter(attempt, this.retry);
         const canRetryNow = isRetryable(error, this.retry) && attempt <= maxRetries;
         if (!canRetryNow) {
-          await this.reportFailure(error, { operation, durationMs: Date.now() - started, path });
+          await this.reportFailure(error, { operation, durationMs: Date.now() - started, path }, { attempts: attempt, ...track });
           throw error;
         }
 
@@ -535,7 +599,7 @@ export class FilewayClient<TDriver extends BaseDriver> {
         try {
           await sleep(delay, signal);
         } catch (abort) {
-          await this.reportFailure(abort, { operation, durationMs: Date.now() - started, path });
+          await this.reportFailure(abort, { operation, durationMs: Date.now() - started, path }, { attempts: attempt, ...track });
           throw abort;
         }
         attempt += 1;
@@ -563,15 +627,82 @@ export class FilewayClient<TDriver extends BaseDriver> {
     }
   }
 
-  private async reportFailure(error: unknown, context: ErrorContext): Promise<void> {
+  private async reportFailure(
+    error: unknown,
+    context: ErrorContext,
+    event: TrackOptions & { attempts: number },
+  ): Promise<void> {
     this.emit("error", `${context.operation} failed`, {
       ...context,
       ...(error instanceof Error ? { error: { name: error.name, message: error.message } } : {}),
     });
-    if (!isAbortError(error)) {
+    const aborted = isAbortError(error);
+    this.publish({
+      operation: context.operation as EventOperation,
+      outcome: aborted ? "aborted" : "error",
+      ...(context.path !== undefined ? { path: context.path } : {}),
+      ...(context.size !== undefined ? { size: context.size } : {}),
+      ...(context.mimeType !== undefined ? { mimeType: context.mimeType } : {}),
+      durationMs: context.durationMs,
+      ...(aborted ? {} : { error: errorInfo(error) }),
+      ...event,
+    });
+    if (!aborted) {
       await this.notifyError(error, context);
     }
   }
+
+  /** Delivers an event to every plugin's `onEvent`, without waiting or failing. */
+  private publish(event: Omit<FilewayEvent, "id" | "time" | "driver">): void {
+    const listeners = this.plugins.filter((plugin) => plugin.onEvent);
+    if (listeners.length === 0) return;
+    const full: FilewayEvent = {
+      id: globalThis.crypto.randomUUID(),
+      time: new Date().toISOString(),
+      driver: this.driver.name,
+      ...event,
+    };
+    for (const plugin of listeners) {
+      const fail = (err: unknown) =>
+        this.emit("warn", "plugin onEvent failed", {
+          plugin: plugin.id,
+          error: err instanceof Error ? { name: err.name, message: err.message } : String(err),
+        });
+      try {
+        const result = plugin.onEvent!(full);
+        if (result && typeof (result as Promise<void>).then === "function") (result as Promise<void>).catch(fail);
+      } catch (err) {
+        fail(err);
+      }
+    }
+  }
+}
+
+/** The `actor` and `tags` of an options object, without anything else. */
+function trackOf(options: TrackOptions | undefined): TrackOptions {
+  return {
+    ...(options?.actor !== undefined ? { actor: options.actor } : {}),
+    ...(options?.tags !== undefined ? { tags: options.tags } : {}),
+  };
+}
+
+/** `options` without `actor` and `tags`, which are for events, not drivers. */
+function stripTrack<T extends object>(options: T): T {
+  const { actor: _actor, tags: _tags, ...rest } = options as T & TrackOptions;
+  return rest as T;
+}
+
+function errorInfo(error: unknown): NonNullable<FilewayEvent["error"]> {
+  if (error instanceof StorageError) {
+    return {
+      name: error.name,
+      message: error.message,
+      code: error.code,
+      ...(error.statusCode !== undefined ? { statusCode: error.statusCode } : {}),
+    };
+  }
+  if (error instanceof Error) return { name: error.name, message: error.message };
+  return { name: "Error", message: String(error) };
 }
 
 function isCode(error: unknown, code: StorageError["code"]): boolean {
@@ -581,8 +712,9 @@ function isCode(error: unknown, code: StorageError["code"]): boolean {
 /** `options` with `signal` replaced by the attempt's signal (or removed). */
 function withSignal<T extends OperationOptions>(options: T | undefined, signal: AbortSignal | undefined): T | undefined {
   if (!options && !signal) return undefined;
-  const { signal: _caller, ...rest } = (options ?? {}) as T;
-  return (signal ? { ...rest, signal } : rest) as T;
+  const { signal: _caller, ...rest } = stripTrack((options ?? {}) as T);
+  const result = signal ? { ...rest, signal } : rest;
+  return Object.keys(result).length > 0 ? (result as T) : undefined;
 }
 
 /** Returns a copy of `options` with `size` set, or removed when undefined. */

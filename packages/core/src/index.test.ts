@@ -1449,3 +1449,190 @@ describe("list, stat, copy, move", () => {
     expect(driver.copy).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("plugins, events and handler", () => {
+  function memDriver() {
+    const store = new Map<string, number>();
+    return {
+      name: "mem",
+      store,
+      upload: vi.fn(async (stream: ReadableStream<Uint8Array>, o: UploadOptions) => {
+        const size = (await new Response(stream).arrayBuffer()).byteLength;
+        const path = `${o.path ? `${o.path}/` : ""}${o.id}-${o.filename}`;
+        store.set(path, size);
+        return { id: o.id!, url: `mem://${path}`, path, size, meta: {} };
+      }),
+      delete: vi.fn(async (p: string, _o?: OperationOptions) => {
+        store.delete(p);
+      }),
+      getUrl: vi.fn(async (p: string) => p),
+      get: vi.fn(async (p: string, _o?: OperationOptions) => {
+        if (!store.has(p)) throw new StorageError("not-found", `missing ${p}`, { statusCode: 404 });
+        return new ReadableStream<Uint8Array>();
+      }),
+      list: vi.fn(async () => ({ objects: [...store].map(([path, size]) => ({ path, size })), folders: [] })),
+      copy: vi.fn(async (from: string, to: string) => {
+        store.set(to, store.get(from)!);
+      }),
+    };
+  }
+  const bytes = (n: number) =>
+    new ReadableStream<Uint8Array>({ start: (c) => { c.enqueue(new Uint8Array(n)); c.close(); } });
+  const collect = () => {
+    const events: import("./types.js").FilewayEvent[] = [];
+    return { events, plugin: { id: "collect", onEvent: (e: import("./types.js").FilewayEvent) => void events.push(e) } };
+  };
+
+  it("emits one event per operation with outcome, attempts, timing and attribution", async () => {
+    const driver = memDriver();
+    const { events, plugin } = collect();
+    const client = new FilewayClient({ driver, plugins: [plugin] });
+
+    const result = await client.upload(bytes(5), { filename: "a.txt", mimeType: "text/plain", actor: "user_42", tags: { tenant: "acme" } });
+    await client.list({ actor: "user_42" });
+    await client.copy(result.path, "b.txt");
+    await client.move("b.txt", "c.txt"); // no native move: copy + delete events
+    await client.delete("c.txt");
+
+    expect(events.map((e) => e.operation)).toEqual(["upload", "list", "copy", "copy", "delete", "delete"]);
+    expect(events[0]).toMatchObject({
+      operation: "upload",
+      outcome: "success",
+      path: result.path,
+      size: 5,
+      mimeType: "text/plain",
+      attempts: 1,
+      driver: "mem",
+      actor: "user_42",
+      tags: { tenant: "acme" },
+    });
+    expect(events[0]!.id).toMatch(/^[0-9a-f-]{36}$/);
+    expect(new Date(events[0]!.time).toString()).not.toBe("Invalid Date");
+    expect(events[0]!.durationMs).toBeGreaterThanOrEqual(0);
+    expect(events[1]).toMatchObject({ operation: "list", actor: "user_42" });
+    expect(events[1]).not.toHaveProperty("tags");
+  });
+
+  it("never passes actor or tags to drivers or middleware", async () => {
+    const driver = memDriver();
+    const seen: UploadOptions[] = [];
+    const client = new FilewayClient({ driver, middlewares: [{ beforeUpload: async (_s, o) => void seen.push(o) }] });
+    await client.upload(bytes(1), { filename: "a.txt", actor: "u1", tags: { t: "x" } });
+    await client.delete("x", { actor: "u1" });
+    expect(seen[0]).not.toHaveProperty("actor");
+    expect(driver.upload.mock.calls[0]![1]).not.toHaveProperty("tags");
+    expect(driver.delete).toHaveBeenCalledWith("x", undefined);
+  });
+
+  it("reports failures with the error code and attempt count, and aborts as aborted", async () => {
+    const driver = memDriver();
+    const { events, plugin } = collect();
+    let calls = 0;
+    driver.get.mockImplementation(async () => {
+      if (++calls < 3) throw new StorageError("network", "flaky");
+      throw new StorageError("not-found", "gone", { statusCode: 404 });
+    });
+    const client = new FilewayClient({ driver, plugins: [plugin], retry: { maxRetries: 3, baseDelayMs: 1, jitter: false } });
+    await expect(client.get("x")).rejects.toMatchObject({ code: "not-found" });
+    expect(events[0]).toMatchObject({
+      operation: "get",
+      outcome: "error",
+      attempts: 3,
+      error: { name: "StorageError", code: "not-found", statusCode: 404, message: "gone" },
+    });
+
+    const controller = new AbortController();
+    controller.abort();
+    await expect(client.delete("x", { signal: controller.signal })).rejects.toMatchObject({ name: "AbortError" });
+    expect(events[1]).toMatchObject({ operation: "delete", outcome: "aborted" });
+    expect(events[1]).not.toHaveProperty("error");
+  });
+
+  it("keeps operations working when a plugin's onEvent throws or rejects", async () => {
+    const warn = vi.fn();
+    const client = new FilewayClient({
+      driver: memDriver(),
+      logger: { warn },
+      plugins: [
+        { id: "throws", onEvent: () => { throw new Error("sync boom"); } },
+        { id: "rejects", onEvent: async () => { throw new Error("async boom"); } },
+      ],
+    });
+    await expect(client.upload(bytes(1), { filename: "a.txt" })).resolves.toBeDefined();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(warn).toHaveBeenCalledWith("plugin onEvent failed", expect.objectContaining({ plugin: "throws" }));
+    expect(warn).toHaveBeenCalledWith("plugin onEvent failed", expect.objectContaining({ plugin: "rejects" }));
+  });
+
+  it("runs init once with the client, and plugin middleware after the app's", async () => {
+    const order: string[] = [];
+    const init = vi.fn();
+    const client = new FilewayClient({
+      driver: memDriver(),
+      middlewares: [{ beforeUpload: async () => void order.push("app") }],
+      plugins: [{ id: "p", init, middlewares: [{ beforeUpload: async () => void order.push("plugin") }] }],
+    });
+    expect(init).toHaveBeenCalledTimes(1);
+    expect(init.mock.calls[0]![0]).toMatchObject({ client, driverName: "mem" });
+    await client.upload(bytes(1), { filename: "a.txt" });
+    expect(order).toEqual(["app", "plugin"]);
+  });
+
+  it("rejects duplicate plugin ids, duplicate routes and malformed route keys", () => {
+    const driver = memDriver();
+    const ok = async () => new Response("ok");
+    expect(() => new FilewayClient({ driver, plugins: [{ id: "a" }, { id: "a" }] })).toThrow(/share the id "a"/);
+    expect(
+      () => new FilewayClient({ driver, plugins: [{ id: "a", routes: { "GET /x": ok } }, { id: "b", routes: { "GET /x": ok } }] }),
+    ).toThrow(/registered twice/);
+    expect(() => new FilewayClient({ driver, plugins: [{ id: "a", routes: { "FETCH /x": ok } }] })).toThrow(StorageError);
+    expect(() => new FilewayClient({ driver, plugins: [{ id: "a", routes: { "GET x": ok } }] })).toThrow(StorageError);
+  });
+
+  it("routes requests under basePath, with wildcards, 404, 405 and 500", async () => {
+    const error = vi.fn();
+    const client = new FilewayClient({
+      driver: memDriver(),
+      logger: { error },
+      plugins: [
+        {
+          id: "files",
+          routes: {
+            "GET /health": async (_req, ctx) => Response.json({ driver: ctx.driverName }),
+            "GET /files/*": async (_req, ctx) => new Response(ctx.params.wildcard ?? ""),
+            "GET /files/special": async () => new Response("exact"),
+            "POST /boom": async () => {
+              throw new Error("route bug");
+            },
+          },
+        },
+      ],
+    });
+    const at = (path: string, method = "GET") => client.handler.fetch(new Request(`https://app.test${path}`, { method }));
+
+    expect(await (await at("/api/fileway/health")).json()).toEqual({ driver: "mem" });
+    expect(await (await at("/api/fileway/files/a/b c.txt")).text()).toBe("a/b%20c.txt");
+    expect(await (await at("/api/fileway/files/special")).text()).toBe("exact");
+    expect((await at("/api/fileway/nope")).status).toBe(404);
+    expect((await at("/elsewhere/health")).status).toBe(404);
+    const wrong = await at("/api/fileway/health", "DELETE");
+    expect(wrong.status).toBe(405);
+    expect(wrong.headers.get("allow")).toBe("GET");
+    const boom = await at("/api/fileway/boom", "POST");
+    expect(boom.status).toBe(500);
+    expect(await boom.json()).toEqual({ error: "internal_error" });
+    expect(error).toHaveBeenCalledWith("plugin route failed", expect.objectContaining({ path: "/boom" }));
+  });
+
+  it("exposes the same handler under every method name and honors a custom basePath", async () => {
+    const client = new FilewayClient({
+      driver: memDriver(),
+      basePath: "/files-api/",
+      plugins: [{ id: "p", routes: { "PUT /x": async () => new Response("put") } }],
+    });
+    const { GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS, fetch } = client.handler;
+    expect(new Set([GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS, fetch]).size).toBe(1);
+    const res = await PUT(new Request("https://app.test/files-api/x", { method: "PUT" }));
+    expect(await res.text()).toBe("put");
+  });
+});
