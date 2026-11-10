@@ -447,7 +447,7 @@ await client.move("uploads/tmp.jpg", "avatars/user-42.jpg", { overwrite: true })
 - ⭐ **Star the repo** to show support; it drives discovery
 - 📦 **npm org**: [`@fileway` on npm](https://www.npmjs.com/org/fileway)
 
-Contributions welcome: fork, branch off `main`, and open a PR. CI runs typecheck, unit tests, and MinIO integration tests on every push.
+Contributions welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, project rules and how pull requests are reviewed. Everyone taking part is expected to follow the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ---
 
