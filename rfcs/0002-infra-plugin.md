@@ -1,6 +1,6 @@
 # RFC 0002: Plugins and the `@fileway/infra` plugin
 
-- **Status:** Draft
+- **Status:** Part 1 (plugin API, events, handler) implemented, unreleased, planned for 0.7.0. Part 2 (`@fileway/infra`) is a draft.
 - **Target:** `@fileway/core` 0.7.0 (plugin API, additive, this repo); `@fileway/infra` 0.1 (private `fileway-infrastructure` repo)
 - **Depends on:** [RFC 0001](./0001-list-copy-move.md) (list, stat, copy, move)
 
@@ -78,7 +78,7 @@ One stable shape, emitted once per operation after retries finish:
 export interface FilewayEvent {
   id: string;                // random, for de-duplication
   time: string;              // ISO 8601
-  operation: "upload" | "get" | "delete" | "getUrl" | "getPresignedUrl" | "list" | "stat" | "copy" | "move";
+  operation: "upload" | "get" | "delete" | "getUrl" | "getPresignedUrl" | "getUploadStatus" | "list" | "stat" | "copy" | "move";
   outcome: "success" | "error" | "aborted";
   path?: string;
   size?: number;
@@ -86,27 +86,27 @@ export interface FilewayEvent {
   durationMs: number;
   attempts: number;
   driver: string;
-  error?: { code: StorageErrorCode; message: string; statusCode?: number };
-  /** Set by the app through `context` on the call, e.g. the signed-in user's id. */
+  error?: { name: string; message: string; code?: StorageErrorCode; statusCode?: number };
+  /** Set by the app through `actor` on the call, e.g. the signed-in user's id. */
   actor?: string;
   /** Free-form tags from the call, e.g. { tenant: "acme" }. */
   tags?: Record<string, string>;
 }
 ```
 
-To attribute events to a user, operations accept an optional `context: { actor?, tags? }` in their options. It is not passed to drivers.
+To attribute events to a user, every client method accepts `actor?: string` and `tags?: Record<string, string>` in its options (`TrackOptions`). They are not passed to drivers or middleware. (An earlier draft nested them under `context`, which clashed with the driver-side `UploadContext`.)
 
 ### Request handler
 
 ```ts
 client.handler: {
   fetch(request: Request): Promise<Response>;
-  GET(request: Request): Promise<Response>;   // same function, for Next.js-style routes
-  POST(request: Request): Promise<Response>;
+  // The same function under every method name, for Next.js-style route exports:
+  GET; POST; PUT; PATCH; DELETE; HEAD; OPTIONS;
 }
 ```
 
-It routes by path suffix to plugin routes and returns 404 for anything else. Mount it at any base path; the plugin learns the base from the first request. Thin adapters (`@fileway/infra/hono`, `/express`) are a few lines each; Workers, Bun, Deno and Next.js use `fetch`/`GET`/`POST` directly.
+It serves plugin routes under `basePath` (a `FilewayConfig` option, default `"/api/fileway"`; an earlier draft guessed it from the first request, which was unpredictable). Route keys are `"METHOD /path"` or `"METHOD /path/*"`; exact routes win over wildcards. Unknown paths return 404, a known path with another method 405 with `Allow`, and a throwing route 500 with a generic body. Workers, Bun, Deno, Next.js and Hono (`c.req.raw`) use it directly; an Express adapter is left to `@fileway/infra`.
 
 ### Rules
 
