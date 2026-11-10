@@ -1,7 +1,7 @@
-import type { BaseDriver, OperationOptions, StoredObject, UploadOptions, UploadResult } from "@fileway/core";
-import { validateUploadOptions, ValidationError, urlEncodePath, abortError, StorageError } from "@fileway/core";
-import { createWriteStream, createReadStream } from "node:fs";
-import { mkdir, unlink, access, lstat, rename, stat, readdir } from "node:fs/promises";
+import type { BaseDriver, CopyOptions, ListedObject, ListOptions, ListPage, OperationOptions, StoredObject, UploadOptions, UploadResult } from "@fileway/core";
+import { validateUploadOptions, ValidationError, urlEncodePath, abortError, StorageError, encodeCursor, decodeCursor } from "@fileway/core";
+import { createWriteStream, createReadStream, constants } from "node:fs";
+import { mkdir, unlink, access, lstat, rename, stat, readdir, copyFile } from "node:fs/promises";
 import { join, dirname, basename, resolve, relative, isAbsolute } from "node:path";
 import { Readable } from "node:stream";
 
@@ -212,6 +212,114 @@ export class LocalDriver implements BaseDriver<LocalMeta> {
     const file = createReadStream(fullPath, options?.signal ? { signal: options.signal } : {});
     return Readable.toWeb(file) as ReadableStream<Uint8Array>;
   }
+
+  /**
+   * One page of the files under `options.prefix`, sorted by path. In-progress
+   * `.partial` files and symbolic links are skipped.
+   */
+  async list(options?: ListOptions): Promise<ListPage> {
+    throwIfAborted(options?.signal);
+    const prefix = options?.prefix ?? "";
+    const limit = options?.limit ?? 100;
+    const after = options?.cursor !== undefined ? decodeCursor<string>(options.cursor) : undefined;
+    // "photos/2026" lists entries of "photos/" whose names start with "2026".
+    const cut = prefix.lastIndexOf("/") + 1;
+    const dirPart = prefix.slice(0, cut);
+    const namePart = prefix.slice(cut);
+    const dir = dirPart ? this.resolveInside(dirPart) : this.resolvedDir;
+    await this.assertSafePath(dir);
+
+    const entries: { path: string; folder: boolean }[] = [];
+    const walk = async (absDir: string, relDir: string, filter: string) => {
+      throwIfAborted(options?.signal);
+      const dirents = await readdir(absDir, { withFileTypes: true }).catch((err: NodeJS.ErrnoException) => {
+        if (err.code === "ENOENT" || err.code === "ENOTDIR") return [];
+        throw fsError("list", relDir || ".", err);
+      });
+      for (const d of dirents) {
+        if (!d.name.startsWith(filter) || d.isSymbolicLink() || d.name.endsWith(PARTIAL_SUFFIX)) continue;
+        const rel = `${relDir}${d.name}`;
+        if (d.isDirectory()) {
+          if (options?.recursive) await walk(join(absDir, d.name), `${rel}/`, "");
+          else entries.push({ path: `${rel}/`, folder: true });
+        } else if (d.isFile()) {
+          entries.push({ path: rel, folder: false });
+        }
+      }
+    };
+    await walk(dir, dirPart, namePart);
+
+    entries.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+    const start = after === undefined ? 0 : entries.findIndex((e) => e.path > after);
+    const page = start === -1 ? [] : entries.slice(start, start + limit);
+    const objects: ListedObject[] = [];
+    const folders: string[] = [];
+    for (const entry of page) {
+      if (entry.folder) {
+        folders.push(entry.path);
+        continue;
+      }
+      const info = await stat(join(this.resolvedDir, entry.path)).catch(() => null);
+      if (info) objects.push({ path: entry.path, size: info.size, lastModified: info.mtime });
+    }
+    const last = page.at(-1);
+    const more = start !== -1 && start + limit < entries.length;
+    return { objects, folders, ...(more && last ? { cursor: encodeCursor(last.path) } : {}) };
+  }
+
+  /** Copies a file, creating the destination folder. */
+  async copy(from: string, to: string, options?: CopyOptions): Promise<void> {
+    throwIfAborted(options?.signal);
+    const [src, dst] = await this.resolvePair(from, to);
+    try {
+      await copyFile(src, dst, options?.overwrite ? 0 : constants.COPYFILE_EXCL);
+    } catch (err) {
+      throw fsError("copy", (err as NodeJS.ErrnoException).code === "EEXIST" ? to : from, err);
+    }
+  }
+
+  /**
+   * Renames a file, creating the destination folder. With `overwrite: false`
+   * the destination is checked first, which is not atomic: a file created at
+   * `to` in between is replaced. Across disks (`EXDEV`) it copies, then deletes.
+   */
+  async move(from: string, to: string, options?: CopyOptions): Promise<void> {
+    throwIfAborted(options?.signal);
+    const [src, dst] = await this.resolvePair(from, to);
+    if (!options?.overwrite && (await stat(dst).catch(() => null))) {
+      throw new StorageError("conflict", `destination already exists: ${to}`, { provider: "local" });
+    }
+    try {
+      await rename(src, dst);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "EXDEV") throw fsError("move", from, err);
+      await this.copy(from, to, options ?? {});
+      await unlink(src).catch((e: unknown) => {
+        throw fsError("delete", from, e);
+      });
+    }
+  }
+
+  /** Resolves and checks both paths, requires `from` to be a file, and creates `to`'s folder. */
+  private async resolvePair(from: string, to: string): Promise<[string, string]> {
+    const src = this.resolveInside(from);
+    const dst = this.resolveInside(to);
+    await this.assertSafePath(src);
+    const info = await stat(src).catch(() => null);
+    if (!info?.isFile()) throw new StorageError("not-found", `file not found: ${from}`, { provider: "local" });
+    await mkdir(dirname(dst), { recursive: true });
+    await this.assertSafePath(dst);
+    return [src, dst];
+  }
+}
+
+/** A filesystem failure as a typed error: missing source, existing destination, or other. */
+function fsError(op: string, path: string, err: unknown): StorageError {
+  const code = (err as NodeJS.ErrnoException).code;
+  const message = `failed to ${op} ${path}: ${(err as Error).message}`;
+  if (code === "ENOENT") return new StorageError("not-found", `file not found: ${path}`, { provider: "local", cause: err });
+  if (code === "EEXIST") return new StorageError("conflict", `destination already exists: ${path}`, { provider: "local", cause: err });
+  return new StorageError("provider-error", message, { provider: "local", cause: err });
 }
 
 function throwIfAborted(signal: AbortSignal | undefined): void {

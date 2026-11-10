@@ -418,3 +418,83 @@ describe("LocalDriver stable ids and upload status", () => {
     await expect(client.getUploadStatus("s2", { filename: "r.pdf", path: "x" })).resolves.toEqual({ state: "missing" });
   });
 });
+
+describe("LocalDriver list, copy, move", () => {
+  let dir: string;
+  let driver: LocalDriver;
+  const put = (rel: string, content = "x") => {
+    mkdirSync(join(dir, rel, ".."), { recursive: true });
+    writeFileSync(join(dir, rel), content);
+  };
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "fileway-local-list-"));
+    driver = new LocalDriver({ directory: dir });
+    put("a.txt", "aa");
+    put("photos/1.jpg", "111");
+    put("photos/2.jpg");
+    put("photos/2026/3.jpg");
+    put("photos/4.jpg.abc.partial");
+  });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  it("lists one level with folders, skipping partial files", async () => {
+    const root = await driver.list();
+    expect(root.objects.map((o) => o.path)).toEqual(["a.txt"]);
+    expect(root.folders).toEqual(["photos/"]);
+    expect(root.objects[0]).toMatchObject({ size: 2 });
+    const photos = await driver.list({ prefix: "photos/" });
+    expect(photos.objects.map((o) => o.path)).toEqual(["photos/1.jpg", "photos/2.jpg"]);
+    expect(photos.folders).toEqual(["photos/2026/"]);
+  });
+
+  it("lists recursively and filters by a name prefix", async () => {
+    const all = await driver.list({ prefix: "photos/", recursive: true });
+    expect(all.objects.map((o) => o.path)).toEqual(["photos/1.jpg", "photos/2.jpg", "photos/2026/3.jpg"]);
+    expect(all.folders).toEqual([]);
+    const some = await driver.list({ prefix: "photos/2" });
+    expect(some.objects.map((o) => o.path)).toEqual(["photos/2.jpg"]);
+    expect(some.folders).toEqual(["photos/2026/"]);
+  });
+
+  it("pages with a cursor, and lists a missing folder as empty", async () => {
+    const first = await driver.list({ recursive: true, limit: 2 });
+    expect(first.objects.map((o) => o.path)).toEqual(["a.txt", "photos/1.jpg"]);
+    const second = await driver.list({ recursive: true, limit: 2, cursor: first.cursor! });
+    expect(second.objects.map((o) => o.path)).toEqual(["photos/2.jpg", "photos/2026/3.jpg"]);
+    expect(second.cursor).toBeUndefined();
+    await expect(driver.list({ prefix: "nope/" })).resolves.toEqual({ objects: [], folders: [] });
+  });
+
+  it("copies into a new folder and refuses to overwrite by default", async () => {
+    await driver.copy("a.txt", "backup/a.txt");
+    expect(readFileSync(join(dir, "backup/a.txt"), "utf8")).toBe("aa");
+    await expect(driver.copy("photos/1.jpg", "backup/a.txt")).rejects.toMatchObject({ code: "conflict" });
+    await driver.copy("photos/1.jpg", "backup/a.txt", { overwrite: true });
+    expect(readFileSync(join(dir, "backup/a.txt"), "utf8")).toBe("111");
+    await expect(driver.copy("missing.txt", "b.txt")).rejects.toMatchObject({ code: "not-found" });
+  });
+
+  it("moves files, with conflict checks", async () => {
+    await driver.move("a.txt", "docs/renamed.txt");
+    expect(existsSync(join(dir, "a.txt"))).toBe(false);
+    expect(readFileSync(join(dir, "docs/renamed.txt"), "utf8")).toBe("aa");
+    await expect(driver.move("photos/1.jpg", "docs/renamed.txt")).rejects.toMatchObject({ code: "conflict" });
+    await driver.move("photos/1.jpg", "docs/renamed.txt", { overwrite: true });
+    expect(readFileSync(join(dir, "docs/renamed.txt"), "utf8")).toBe("111");
+  });
+
+  it("refuses paths outside the directory", async () => {
+    await expect(driver.copy("a.txt", "../escape.txt")).rejects.toMatchObject({ code: "validation" });
+    await expect(driver.list({ prefix: "../" })).rejects.toMatchObject({ code: "validation" });
+  });
+
+  it("works through FilewayClient, including listAll", async () => {
+    const client = new FilewayClient({ driver });
+    const paths: string[] = [];
+    for await (const o of client.listAll({ recursive: true, limit: 1 })) paths.push(o.path);
+    expect(paths).toEqual(["a.txt", "photos/1.jpg", "photos/2.jpg", "photos/2026/3.jpg"]);
+    await client.move("a.txt", "b.txt");
+    await expect(client.stat("b.txt")).resolves.toMatchObject({ size: 2 });
+  });
+});

@@ -1,6 +1,6 @@
-import type { BaseDriver, OperationOptions, PresignedUrlOptions, StoredObject, UploadContext, UploadOptions, UploadResult } from "@fileway/core";
+import type { BaseDriver, CopyOptions, ListedObject, ListOptions, ListPage, OperationOptions, PresignedUrlOptions, StoredObject, UploadContext, UploadOptions, UploadResult } from "@fileway/core";
 import { classifySupabaseError } from "./errors.js";
-import { validateUploadOptions, ValidationError, urlEncodePath, abortError, isAbortError, StorageError } from "@fileway/core";
+import { validateUploadOptions, ValidationError, urlEncodePath, abortError, isAbortError, StorageError, encodeCursor, decodeCursor } from "@fileway/core";
 
 const randomUUID = () => globalThis.crypto.randomUUID();
 const PROVIDER = "supabase";
@@ -36,6 +36,20 @@ export type SupabaseMeta = {
   bucket: string;
   etag?: string;
 };
+
+/** Where a paged listing stands: folders left to read and the offset in the first one. */
+interface ListState {
+  queue: string[];
+  offset: number;
+}
+
+/** One entry of `POST /object/list`; folders have `id: null`. */
+interface ListItem {
+  name: string;
+  id: string | null;
+  updated_at?: string | null;
+  metadata?: { size?: number; mimetype?: string; eTag?: string; lastModified?: string } | null;
+}
 
 /** The `GET /object/info` response (fields this driver reads). */
 interface ObjectInfo {
@@ -386,6 +400,113 @@ export class SupabaseDriver implements BaseDriver<SupabaseMeta> {
       ...(info.last_modified ? { lastModified: new Date(info.last_modified) } : {}),
       ...(info.content_type ? { contentType: info.content_type } : {}),
     };
+  }
+
+  /**
+   * One page of the objects under `options.prefix`. Supabase lists one folder
+   * at a time, so `recursive: true` walks folders in turn: results come folder
+   * by folder rather than in one global sort order.
+   */
+  async list(options?: ListOptions): Promise<ListPage> {
+    const prefix = options?.prefix ?? "";
+    const limit = options?.limit ?? 100;
+    const cut = prefix.lastIndexOf("/") + 1;
+    const top = prefix.slice(0, cut);
+    const namePart = prefix.slice(cut);
+    const state: ListState = options?.cursor !== undefined
+      ? decodeCursor<ListState>(options.cursor)
+      : { queue: [top], offset: 0 };
+
+    const objects: ListedObject[] = [];
+    const folders: string[] = [];
+    while (state.queue.length > 0 && objects.length + folders.length < limit) {
+      const folder = state.queue[0]!;
+      const want = limit - objects.length - folders.length;
+      // The name filter applies to the folder the caller asked for, not to subfolders.
+      const search = folder === top ? namePart : "";
+      const items = await this.listFolder(folder, state.offset, want, search, options?.signal);
+      for (const item of items) {
+        if (!item.name.startsWith(search)) continue;
+        if (item.id === null) {
+          if (options?.recursive) state.queue.push(`${folder}${item.name}/`);
+          else folders.push(`${folder}${item.name}/`);
+          continue;
+        }
+        const modified = item.metadata?.lastModified ?? item.updated_at;
+        const etag = item.metadata?.eTag;
+        const type = item.metadata?.mimetype;
+        objects.push({
+          path: `${folder}${item.name}`,
+          size: Number(item.metadata?.size ?? 0),
+          ...(modified ? { lastModified: new Date(modified) } : {}),
+          ...(etag ? { etag } : {}),
+          ...(type ? { contentType: type } : {}),
+        });
+      }
+      if (items.length < want) {
+        state.queue.shift();
+        state.offset = 0;
+        if (!options?.recursive) break;
+      } else {
+        state.offset += items.length;
+      }
+    }
+    return { objects, folders, ...(state.queue.length > 0 ? { cursor: encodeCursor(state) } : {}) };
+  }
+
+  /**
+   * Copies an object in this bucket. With `overwrite: false` the destination is
+   * checked first, which is not atomic; with `overwrite: true` an existing
+   * destination is replaced.
+   */
+  async copy(from: string, to: string, options?: CopyOptions): Promise<void> {
+    await this.transfer("copy", from, to, options);
+  }
+
+  /** Moves (renames) an object in this bucket, with the same overwrite rules as `copy`. */
+  async move(from: string, to: string, options?: CopyOptions): Promise<void> {
+    await this.transfer("move", from, to, options);
+  }
+
+  private async transfer(op: "copy" | "move", from: string, to: string, options?: CopyOptions): Promise<void> {
+    if (from === to) throw new ValidationError("from and to must be different paths");
+    const signal = options?.signal;
+    const exists = await this.head(to, signal ? { signal } : undefined);
+    if (exists && !options?.overwrite) {
+      throw new StorageError("conflict", `Supabase ${op} failed: ${to} already exists`, { provider: PROVIDER });
+    }
+    // Supabase will not copy or move onto an existing object, so replace it first.
+    if (exists) await this.delete(to, signal ? { signal } : undefined);
+    const res = await fetchWithAbort(`${this.api}/object/${op}`, {
+      method: "POST",
+      headers: { ...this.headers, "content-type": "application/json" },
+      body: JSON.stringify({ bucketId: this.bucket, sourceKey: from, destinationKey: to }),
+      signal: signal ?? null,
+    });
+    if (!res.ok) throw await supabaseError(`Supabase ${op} failed`, res);
+  }
+
+  private async listFolder(
+    folder: string,
+    offset: number,
+    limit: number,
+    search: string,
+    signal: AbortSignal | undefined,
+  ): Promise<ListItem[]> {
+    const res = await fetchWithAbort(`${this.api}/object/list/${encodeURIComponent(this.bucket)}`, {
+      method: "POST",
+      headers: { ...this.headers, "content-type": "application/json" },
+      body: JSON.stringify({
+        prefix: folder.replace(/\/$/, ""),
+        limit,
+        offset,
+        sortBy: { column: "name", order: "asc" },
+        ...(search ? { search } : {}),
+      }),
+      signal: signal ?? null,
+    });
+    if (!res.ok) throw await supabaseError("Supabase list failed", res);
+    return (await res.json()) as ListItem[];
   }
 
   private objectUrl(route: string, path: string): string {

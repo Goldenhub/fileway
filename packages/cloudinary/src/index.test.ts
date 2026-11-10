@@ -1038,3 +1038,78 @@ describe("CloudinaryDriver stable ids and upload status", () => {
     await expect(driver.head("docs/x")).rejects.toMatchObject({ code: "auth-failed", statusCode: 401 });
   });
 });
+
+describe("CloudinaryDriver list and move", () => {
+  const make = () => new CloudinaryDriver({ cloudName: "demo", apiKey: "key123", apiSecret: "secret456" });
+  const urlOf = (i: number) => new URL(String(mockFetch.mock.calls[i]![0]));
+
+  it("lists one level: subfolders, then direct children across resource types", async () => {
+    mockFetch.mockImplementation(async (input: string | URL) => {
+      const url = String(input);
+      if (url.includes("/folders/")) return mockResponse({ folders: [{ name: "2026", path: "photos/2026" }] });
+      if (url.includes("/resources/image/")) {
+        return mockResponse({
+          resources: [
+            { public_id: "photos/a", bytes: 3, created_at: "2026-11-10T10:00:00Z" },
+            { public_id: "photos/2026/deep", bytes: 9 },
+          ],
+        });
+      }
+      if (url.includes("/resources/video/")) return mockResponse({ resources: [{ public_id: "photos/clip", bytes: 7 }] });
+      return mockResponse({ resources: [] });
+    });
+    const page = await make().list({ prefix: "photos/" });
+    expect(urlOf(0).pathname).toBe("/v1_1/demo/folders/photos");
+    expect(urlOf(1).pathname).toBe("/v1_1/demo/resources/image/upload");
+    expect(urlOf(1).searchParams.get("prefix")).toBe("photos/");
+    expect(page.folders).toEqual(["photos/2026/"]);
+    expect(page.objects).toEqual([
+      { path: "photos/a", size: 3, lastModified: new Date("2026-11-10T10:00:00Z") },
+      { path: "photos/clip", size: 7 },
+    ]);
+    expect(page.cursor).toBeUndefined();
+    expect((mockFetch.mock.calls[1]![1] as RequestInit).headers).toMatchObject({ authorization: expect.stringMatching(/^Basic /) });
+  });
+
+  it("pages with Cloudinary's next_cursor and keeps the resource type in the cursor", async () => {
+    mockFetch.mockImplementationOnce(() => mockResponse({ resources: [{ public_id: "a", bytes: 1 }], next_cursor: "nc1" }));
+    const first = await make().list({ recursive: true, limit: 1 });
+    expect(first.cursor).toBeDefined();
+    mockFetch.mockImplementation((input: string | URL) =>
+      String(input).includes("/image/") ? mockResponse({ resources: [{ public_id: "b", bytes: 2 }] }) : mockResponse({ resources: [] }),
+    );
+    const second = await make().list({ recursive: true, limit: 1, cursor: first.cursor! });
+    expect(urlOf(1).searchParams.get("next_cursor")).toBe("nc1");
+    expect(second.objects.map((o) => o.path)).toEqual(["b"]);
+  });
+
+  it("moves with a signed rename and maps an existing destination to conflict", async () => {
+    mockFetch.mockImplementation(async (input: string | URL) => {
+      const url = String(input);
+      if (url.includes("/rename")) {
+        return mockResponse({ public_id: "new", version: 2, format: "png", resource_type: "image", bytes: 5, secure_url: "https://x/new" });
+      }
+      return mockResponse({});
+    });
+    await make().move("old", "new", { resourceType: "image" });
+    const [url, init] = mockFetch.mock.calls[0]!;
+    expect(String(url)).toBe("https://api.cloudinary.com/v1_1/demo/image/rename");
+    const body = new URLSearchParams(String((init as RequestInit).body));
+    expect(body.get("from_public_id")).toBe("old");
+    expect(body.get("to_public_id")).toBe("new");
+    expect(body.get("overwrite")).toBe("false");
+    expect(body.get("signature")).toMatch(/^[0-9a-f]{40}$/);
+
+    mockFetch.mockImplementation(async () => ({
+      ok: false,
+      status: 400,
+      text: () => Promise.resolve('{"error":{"message":"to_public_id (new) already exists"}}'),
+    }) as Response);
+    await expect(make().move("old", "new", { resourceType: "image" })).rejects.toMatchObject({ code: "conflict" });
+  });
+
+  it("has no copy, so the client reports it as unsupported", async () => {
+    const client = new FilewayClient({ driver: make() });
+    await expect(client.copy("a", "b")).rejects.toMatchObject({ code: "config" });
+  });
+});

@@ -425,3 +425,79 @@ describe("with FilewayClient", () => {
     expect(call(0).url.pathname).toBe("/files/docs/inv_42.pdf");
   });
 });
+
+describe("list, copy, move", () => {
+  it("lists one level with List Blobs", async () => {
+    mockFetch.mockResolvedValueOnce(
+      new Response(
+        `<?xml version="1.0" encoding="utf-8"?><EnumerationResults><Blobs>` +
+          `<Blob><Name>photos/a &amp; b.jpg</Name><Properties><Last-Modified>Tue, 10 Nov 2026 10:00:00 GMT</Last-Modified><Etag>0x1</Etag><Content-Length>3</Content-Length><Content-Type>image/jpeg</Content-Type></Properties></Blob>` +
+          `<BlobPrefix><Name>photos/2026/</Name></BlobPrefix></Blobs><NextMarker>m2</NextMarker></EnumerationResults>`,
+      ),
+    );
+    const page = await makeDriver().list({ prefix: "photos/", limit: 2 });
+    const { url, headers } = call(0);
+    expect(url.pathname).toBe("/files");
+    expect(url.searchParams.get("comp")).toBe("list");
+    expect(url.searchParams.get("delimiter")).toBe("/");
+    expect(url.searchParams.get("maxresults")).toBe("2");
+    expect(headers.authorization).toMatch(/^SharedKey acct:/);
+    expect(page).toEqual({
+      objects: [{ path: "photos/a & b.jpg", size: 3, lastModified: new Date("2026-11-10T10:00:00Z"), etag: "0x1", contentType: "image/jpeg" }],
+      folders: ["photos/2026/"],
+      cursor: expect.any(String),
+    });
+
+    mockFetch.mockResolvedValueOnce(new Response("<EnumerationResults><Blobs></Blobs><NextMarker /></EnumerationResults>"));
+    await expect(makeDriver().list({ recursive: true, cursor: page.cursor! })).resolves.toEqual({ objects: [], folders: [] });
+    expect(call(1).url.searchParams.get("marker")).toBe("m2");
+    expect(call(1).url.searchParams.has("delimiter")).toBe(false);
+  });
+
+  it("copies with x-ms-copy-source and If-None-Match, waiting for pending copies", async () => {
+    mockFetch
+      .mockResolvedValueOnce(new Response(null, { status: 202, headers: { "x-ms-copy-status": "pending" } }))
+      .mockResolvedValueOnce(new Response(null, { status: 200, headers: { "x-ms-copy-status": "success" } }));
+    await makeDriver().copy("docs/a b.txt", "docs/c.txt");
+    const { url, headers, init } = call(0);
+    expect(init.method).toBe("PUT");
+    expect(url.pathname).toBe("/files/docs/c.txt");
+    expect(headers["x-ms-copy-source"]).toBe("https://acct.blob.core.windows.net/files/docs/a%20b.txt");
+    expect(headers["if-none-match"]).toBe("*");
+    expect(call(1).init.method).toBe("HEAD");
+  });
+
+  it("maps an existing destination to conflict and a missing source to not-found", async () => {
+    mockFetch.mockResolvedValueOnce(failure(409, "BlobAlreadyExists"));
+    await expect(makeDriver().copy("a", "b")).rejects.toMatchObject({ code: "conflict" });
+    mockFetch.mockResolvedValueOnce(failure(404, "CannotVerifyCopySource"));
+    await expect(makeDriver().copy("a", "b", { overwrite: true })).rejects.toMatchObject({ code: "not-found" });
+    expect(call(1).headers["if-none-match"]).toBeUndefined();
+  });
+
+  it("reports a failed background copy", async () => {
+    mockFetch
+      .mockResolvedValueOnce(new Response(null, { status: 202, headers: { "x-ms-copy-status": "pending" } }))
+      .mockResolvedValueOnce(
+        new Response(null, { status: 200, headers: { "x-ms-copy-status": "failed", "x-ms-copy-status-description": "500 InternalError" } }),
+      );
+    await expect(makeDriver().copy("a", "b")).rejects.toThrow(/copy failed: 500 InternalError/);
+  });
+
+  it("appends the SAS token to the copy source with SAS auth", async () => {
+    mockFetch.mockResolvedValueOnce(new Response(null, { status: 202, headers: { "x-ms-copy-status": "success" } }));
+    const driver = new AzureDriver({ container: "files", accountName: "acct", sasToken: "sv=2023&sig=abc" });
+    await driver.copy("a.txt", "b.txt");
+    const source = new URL(call(0).headers["x-ms-copy-source"]!);
+    expect(source.searchParams.get("sig")).toBe("abc");
+  });
+
+  it("moves by copying, then deleting", async () => {
+    mockFetch
+      .mockResolvedValueOnce(new Response(null, { status: 202, headers: { "x-ms-copy-status": "success" } }))
+      .mockResolvedValueOnce(new Response(null, { status: 202 }));
+    await makeDriver().move("a.txt", "b.txt");
+    expect(call(1).init.method).toBe("DELETE");
+    expect(call(1).url.pathname).toBe("/files/a.txt");
+  });
+});

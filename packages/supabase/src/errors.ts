@@ -18,6 +18,7 @@ export function classifySupabaseError(status: number, body: string): StorageErro
   const code = Number(parsed.statusCode ?? status);
 
   if (text.includes("bucket not found")) return "bucket-not-found";
+  if (code === 409 || text.includes("already exists") || text.includes("duplicate")) return "conflict";
   if (text.includes("not found") || text.includes("not_found") || text.includes("no such")) return "not-found";
   if (text.includes("exceeded the maximum allowed size") || text.includes("payload too large") || code === 413) {
     return "size-exceeded";

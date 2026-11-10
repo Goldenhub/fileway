@@ -334,3 +334,71 @@ describe("with FilewayClient", () => {
     expect(call(0).url).toBe(`${API}/object/info/files/docs/inv_42.pdf`);
   });
 });
+
+describe("list, copy, move", () => {
+  const file = (name: string, size = 3) => ({
+    name,
+    id: `id-${name}`,
+    updated_at: "2026-11-10T10:00:00.000Z",
+    metadata: { size, mimetype: "image/jpeg", eTag: `"e${size}"`, lastModified: "2026-11-10T10:00:00.000Z" },
+  });
+  const folder = (name: string) => ({ name, id: null, metadata: null });
+
+  it("lists one folder level", async () => {
+    mockFetch.mockResolvedValueOnce(json([folder("2026"), file("a.jpg")]));
+    const page = await makeDriver().list({ prefix: "photos/" });
+    const { url, init } = call(0);
+    expect(url).toBe(`${API}/object/list/files`);
+    expect(JSON.parse(String(init.body))).toEqual({ prefix: "photos", limit: 100, offset: 0, sortBy: { column: "name", order: "asc" } });
+    expect(page).toEqual({
+      objects: [{ path: "photos/a.jpg", size: 3, lastModified: new Date("2026-11-10T10:00:00Z"), etag: '"e3"', contentType: "image/jpeg" }],
+      folders: ["photos/2026/"],
+    });
+  });
+
+  it("filters by a name prefix and pages by offset", async () => {
+    mockFetch.mockResolvedValueOnce(json([file("2026-a.jpg"), file("2026-b.jpg")]));
+    const first = await makeDriver().list({ prefix: "photos/2026-", limit: 2 });
+    expect(JSON.parse(String(call(0).init.body))).toMatchObject({ prefix: "photos", search: "2026-", limit: 2 });
+    expect(first.cursor).toBeDefined();
+    mockFetch.mockResolvedValueOnce(json([file("2026-c.jpg")]));
+    const second = await makeDriver().list({ prefix: "photos/2026-", limit: 2, cursor: first.cursor! });
+    expect(JSON.parse(String(call(1).init.body))).toMatchObject({ offset: 2 });
+    expect(second.objects.map((o) => o.path)).toEqual(["photos/2026-c.jpg"]);
+    expect(second.cursor).toBeUndefined();
+  });
+
+  it("walks folders when recursive", async () => {
+    mockFetch
+      .mockResolvedValueOnce(json([folder("sub"), file("a.txt")]))
+      .mockResolvedValueOnce(json([file("b.txt")]));
+    const page = await makeDriver().list({ prefix: "docs/", recursive: true });
+    expect(page.objects.map((o) => o.path)).toEqual(["docs/a.txt", "docs/sub/b.txt"]);
+    expect(page.folders).toEqual([]);
+    expect(JSON.parse(String(call(1).init.body))).toMatchObject({ prefix: "docs/sub", offset: 0 });
+    expect(page.cursor).toBeUndefined();
+  });
+
+  it("copies and moves, refusing an existing destination unless overwriting", async () => {
+    const missing = () => json({ statusCode: "404", error: "not_found", message: "Object not found" }, 400);
+    mockFetch.mockResolvedValueOnce(missing()).mockResolvedValueOnce(json({ Key: "files/b.txt" }));
+    await makeDriver().copy("a.txt", "b.txt");
+    expect(call(1).url).toBe(`${API}/object/copy`);
+    expect(JSON.parse(String(call(1).init.body))).toEqual({ bucketId: "files", sourceKey: "a.txt", destinationKey: "b.txt" });
+
+    mockFetch.mockResolvedValueOnce(json({ size: 1, metadata: {} }));
+    await expect(makeDriver().move("a.txt", "b.txt")).rejects.toMatchObject({ code: "conflict" });
+
+    mockFetch
+      .mockResolvedValueOnce(json({ size: 1, metadata: {} }))
+      .mockResolvedValueOnce(json([{ name: "b.txt" }]))
+      .mockResolvedValueOnce(json({ message: "Successfully moved" }));
+    await makeDriver().move("a.txt", "b.txt", { overwrite: true });
+    expect(call(4).init.method).toBe("DELETE");
+    expect(call(5).url).toBe(`${API}/object/move`);
+  });
+
+  it("classifies an existing-destination error as conflict", () => {
+    expect(classifySupabaseError(400, '{"statusCode":"409","error":"Duplicate","message":"The resource already exists"}')).toBe("conflict");
+  });
+});

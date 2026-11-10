@@ -1,5 +1,5 @@
-import type { BaseDriver, OperationOptions, PresignedUrlOptions, StorageErrorCode, StoredObject, UploadContext, UploadOptions, UploadResult } from "@fileway/core";
-import { validateUploadOptions, ValidationError, isAbortError, abortError, StorageError } from "@fileway/core";
+import type { BaseDriver, CopyOptions, ListedObject, ListOptions, ListPage, OperationOptions, PresignedUrlOptions, StorageErrorCode, StoredObject, UploadContext, UploadOptions, UploadResult } from "@fileway/core";
+import { validateUploadOptions, ValidationError, isAbortError, abortError, StorageError, encodeCursor, decodeCursor } from "@fileway/core";
 
 const randomUUID = () => globalThis.crypto.randomUUID();
 const PRESIGN_DEFAULT_EXPIRY = 3600;
@@ -73,6 +73,13 @@ export interface CloudinaryLookupOptions extends OperationOptions {
 }
 
 export interface CloudinaryPresignOptions extends PresignedUrlOptions, CloudinaryLookupOptions {}
+
+export interface CloudinaryListOptions extends ListOptions {
+  /** Delivery type to list. Default: the driver's `deliveryType`. */
+  deliveryType?: CloudinaryDeliveryType;
+}
+
+export interface CloudinaryMoveOptions extends CopyOptions, CloudinaryLookupOptions {}
 
 interface CachedAsset {
   resourceType: "image" | "video" | "raw";
@@ -524,6 +531,115 @@ export class CloudinaryDriver implements BaseDriver<CloudinaryMeta> {
       const oldest = this.cache.keys().next().value;
       if (oldest !== undefined) this.cache.delete(oldest);
     }
+  }
+
+  /**
+   * One page of the assets whose public ID starts with `options.prefix`, using
+   * the Admin API (rate limited per hour). Images come first, then videos,
+   * then raw files. On accounts with dynamic folders, public IDs may not
+   * contain the folder, so folder listings reflect public IDs only.
+   */
+  async list(options?: CloudinaryListOptions): Promise<ListPage> {
+    const prefix = options?.prefix ?? "";
+    const limit = Math.min(options?.limit ?? 100, 500);
+    const deliveryType = options?.deliveryType ?? this.deliveryType;
+    const cut = prefix.lastIndexOf("/") + 1;
+    const dirPart = prefix.slice(0, cut);
+    const namePart = prefix.slice(cut);
+    const state = options?.cursor !== undefined ? decodeCursor<{ t: number; c?: string }>(options.cursor) : { t: 0 };
+    const admin = `https://api.cloudinary.com/v1_1/${this.cloudName}`;
+    const init = { headers: { authorization: this.adminAuth() }, signal: options?.signal ?? null };
+
+    const folders: string[] = [];
+    if (!options?.recursive && options?.cursor === undefined) {
+      const path = dirPart.replace(/\/$/, "");
+      const res = await fetchWithAbort(`${admin}/folders${path ? `/${urlEncodePublicId(path)}` : ""}`, init, "cloudinary");
+      if (res.ok) {
+        const data = (await res.json()) as { folders?: { name: string }[] };
+        for (const f of data.folders ?? []) if (f.name.startsWith(namePart)) folders.push(`${dirPart}${f.name}/`);
+      } else if (res.status !== 404) {
+        throw new StorageError(classifyCloudinaryStatus(res.status, "get"), `Cloudinary folder list failed (${res.status})`, {
+          statusCode: res.status,
+          provider: "cloudinary",
+        });
+      }
+    }
+
+    const objects: ListedObject[] = [];
+    while (state.t < RESOURCE_TYPES.length && objects.length < limit) {
+      const query = new URLSearchParams({
+        max_results: String(limit - objects.length),
+        ...(prefix ? { prefix } : {}),
+        ...(state.c ? { next_cursor: state.c } : {}),
+      });
+      const res = await fetchWithAbort(`${admin}/resources/${RESOURCE_TYPES[state.t]}/${deliveryType}?${query}`, init, "cloudinary");
+      if (!res.ok) {
+        throw new StorageError(classifyCloudinaryStatus(res.status, "get"), `Cloudinary list failed (${res.status})`, {
+          statusCode: res.status,
+          provider: "cloudinary",
+        });
+      }
+      const data = (await res.json()) as {
+        resources?: { public_id: string; bytes: number; created_at?: string; format?: string; resource_type?: string }[];
+        next_cursor?: string;
+      };
+      for (const r of data.resources ?? []) {
+        // Prefix matches go any depth; one level keeps direct children only.
+        if (!options?.recursive && r.public_id.slice(dirPart.length).includes("/")) continue;
+        objects.push({
+          path: r.public_id,
+          size: r.bytes,
+          ...(r.created_at ? { lastModified: new Date(r.created_at) } : {}),
+        });
+      }
+      if (data.next_cursor) {
+        state.c = data.next_cursor;
+      } else {
+        state.t++;
+        delete state.c;
+      }
+    }
+    return { objects, folders, ...(state.t < RESOURCE_TYPES.length ? { cursor: encodeCursor(state) } : {}) };
+  }
+
+  /**
+   * Renames an asset with the Upload API's `rename`. With `overwrite: false`,
+   * Cloudinary refuses an existing destination atomically. Cloudinary has no
+   * copy, so `copy` is not available on this driver.
+   */
+  async move(from: string, to: string, options?: CloudinaryMoveOptions): Promise<void> {
+    const asset = await this.resolveAsset(from, options);
+    if (!asset.found) {
+      throw new StorageError("not-found", `Cloudinary move failed: ${from} does not exist`, { provider: "cloudinary", statusCode: 404 });
+    }
+    const params: Record<string, string> = {
+      from_public_id: from,
+      to_public_id: to,
+      overwrite: options?.overwrite ? "true" : "false",
+      type: asset.deliveryType,
+      timestamp: String(Math.floor(Date.now() / 1000)),
+    };
+    const signature = await this.generateSignature(params);
+    const res = await fetchWithAbort(
+      `https://api.cloudinary.com/v1_1/${this.cloudName}/${asset.resourceType}/rename`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ ...params, signature, api_key: this.apiKey }).toString(),
+        signal: options?.signal ?? null,
+      },
+      "cloudinary",
+    );
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      const code = /already exists/i.test(body) ? "conflict" : classifyCloudinaryStatus(res.status, "get");
+      throw new StorageError(code, `Cloudinary move failed (${res.status})${body ? `: ${body}` : ""}`, {
+        statusCode: res.status,
+        provider: "cloudinary",
+      });
+    }
+    this.cache.delete(from);
+    this.toResult((await res.json()) as UploadResponse, asset.deliveryType);
   }
 
   private adminAuth(): string {

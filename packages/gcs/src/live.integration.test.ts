@@ -44,6 +44,18 @@ describeEnv("GCSDriver against Google Cloud Storage", () => {
     await expect(driver.head(small.path)).resolves.toBeNull();
   }, 60_000);
 
+  it("lists, copies and moves objects", async () => {
+    const a = await driver.upload(bytes(10), { filename: "a.txt", path: `${prefix}/lcm`, id: "a" });
+    const page = await driver.list({ prefix: `${prefix}/lcm/` });
+    expect(page.objects.map((o) => o.path)).toEqual([a.path]);
+    await driver.copy(a.path, `${prefix}/lcm/b.txt`);
+    await expect(driver.copy(a.path, `${prefix}/lcm/b.txt`)).rejects.toMatchObject({ code: "conflict" });
+    await driver.move(`${prefix}/lcm/b.txt`, `${prefix}/lcm/c.txt`);
+    expect((await driver.head(`${prefix}/lcm/c.txt`))?.size).toBe(10);
+    await expect(driver.head(`${prefix}/lcm/b.txt`)).resolves.toBeNull();
+    for (const p of [a.path, `${prefix}/lcm/c.txt`]) await driver.delete(p);
+  }, 60_000);
+
   it("reports upload status through FilewayClient", async () => {
     const client = new FilewayClient({ driver });
     const result = await client.upload(bytes(5), { filename: "s.txt", path: prefix, id: "inv_42" });

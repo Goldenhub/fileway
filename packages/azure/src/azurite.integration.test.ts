@@ -98,6 +98,29 @@ describeEnv("AzureDriver against Azurite", () => {
     expect(missing.state).toBe("missing");
   });
 
+  it("lists, copies and moves blobs", async () => {
+    for (const name of ["lcm/a.txt", "lcm/b.txt", "lcm/sub/c.txt"]) {
+      await driver.upload(bytes(4), { filename: name.split("/").pop()!, path: name.split("/").slice(0, -1).join("/"), id: name.split("/").pop()!.replace(".txt", "") });
+    }
+    const top = await driver.list({ prefix: "lcm/" });
+    expect(top.objects.map((o) => o.path)).toEqual(["lcm/a.txt", "lcm/b.txt"]);
+    expect(top.folders).toEqual(["lcm/sub/"]);
+
+    const first = await driver.list({ prefix: "lcm/", recursive: true, limit: 2 });
+    const second = await driver.list({ prefix: "lcm/", recursive: true, limit: 2, cursor: first.cursor! });
+    expect([...first.objects, ...second.objects].map((o) => o.path)).toEqual(["lcm/a.txt", "lcm/b.txt", "lcm/sub/c.txt"]);
+
+    await driver.copy("lcm/a.txt", "lcm/copy.txt");
+    expect((await driver.head("lcm/copy.txt"))?.size).toBe(4);
+    await expect(driver.copy("lcm/b.txt", "lcm/copy.txt")).rejects.toMatchObject({ code: "conflict" });
+    await driver.copy("lcm/b.txt", "lcm/copy.txt", { overwrite: true });
+
+    await driver.move("lcm/copy.txt", "lcm/moved.txt");
+    await expect(driver.head("lcm/copy.txt")).resolves.toBeNull();
+    expect((await driver.head("lcm/moved.txt"))?.size).toBe(4);
+    await expect(driver.copy("lcm/missing.txt", "lcm/x.txt")).rejects.toMatchObject({ code: "not-found" });
+  });
+
   it("classifies a missing container", async () => {
     const other = new AzureDriver({ container: "does-not-exist", accountName: ACCOUNT, accountKey: KEY, endpoint: ENDPOINT });
     await expect(other.upload(bytes(1), { filename: "a.txt" })).rejects.toMatchObject({ code: "bucket-not-found" });

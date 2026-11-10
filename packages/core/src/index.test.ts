@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import * as core from "./index.js";
-import { FilewayClient, version, abortError, isAbortError, StorageError, ValidationError } from "./index.js";
+import { FilewayClient, version, abortError, isAbortError, StorageError, ValidationError, encodeCursor, decodeCursor } from "./index.js";
 import { isRetryable } from "./retry.js";
 import type { BaseDriver, OperationOptions, StoredObject, UploadContext, UploadOptions, UploadResult } from "./types.js";
 
@@ -1228,6 +1228,8 @@ describe("1.0 API surface", () => {
         "StorageError",
         "ValidationError",
         "abortError",
+        "decodeCursor",
+        "encodeCursor",
         "isAbortError",
         "urlEncodePath",
         "validateUploadOptions",
@@ -1303,5 +1305,147 @@ describe("1.0 API surface", () => {
     });
     await client.upload(new ReadableStream(), { filename: "a.txt", id: "abc" });
     expect(seen).toEqual(["b", "a.txt", "abc"]);
+  });
+});
+
+describe("list, stat, copy, move", () => {
+  function storage(files: Record<string, number>, { withMove = true, withCopy = true } = {}) {
+    const store = new Map(Object.entries(files));
+    const driver = {
+      name: "mem",
+      upload: vi.fn(async () => ({ id: "x", url: "u", path: "p", size: 0, meta: {} })),
+      delete: vi.fn(async (p: string) => {
+        store.delete(p);
+      }),
+      getUrl: vi.fn(async (p: string) => p),
+      get: vi.fn(async () => new ReadableStream<Uint8Array>()),
+      head: vi.fn(async (p: string) => {
+        const size = store.get(p);
+        return size === undefined ? null : { id: p, url: p, path: p, size, meta: { etag: `e${size}` } };
+      }),
+      list: vi.fn(async (o?: import("./types.js").ListOptions) => {
+        const all = [...store.keys()].filter((k) => k.startsWith(o?.prefix ?? "")).sort();
+        const start = o?.cursor ? decodeCursor<number>(o.cursor) : 0;
+        const limit = o?.limit ?? 100;
+        const slice = all.slice(start, start + limit);
+        return {
+          objects: slice.map((path) => ({ path, size: store.get(path)! })),
+          folders: [],
+          ...(start + limit < all.length ? { cursor: encodeCursor(start + limit) } : {}),
+        };
+      }),
+      ...(withCopy
+        ? {
+            copy: vi.fn(async (from: string, to: string, o?: import("./types.js").CopyOptions) => {
+              if (!store.has(from)) throw new StorageError("not-found", "no source");
+              if (store.has(to) && !o?.overwrite) throw new StorageError("conflict", "exists");
+              store.set(to, store.get(from)!);
+            }),
+          }
+        : {}),
+      ...(withMove
+        ? {
+            move: vi.fn(async (from: string, to: string) => {
+              if (!store.has(from)) throw new StorageError("not-found", "no source");
+              store.set(to, store.get(from)!);
+              store.delete(from);
+            }),
+          }
+        : {}),
+    };
+    return { driver, store };
+  }
+  const fast = { maxRetries: 2, baseDelayMs: 1, jitter: false };
+
+  it("round-trips cursors and rejects garbage", () => {
+    expect(decodeCursor(encodeCursor({ a: "é/ü", n: 3 }))).toEqual({ a: "é/ü", n: 3 });
+    expect(() => decodeCursor("not a cursor!")).toThrow(ValidationError);
+  });
+
+  it("lists one page and walks every page with listAll", async () => {
+    const { driver } = storage({ "a/1": 1, "a/2": 2, "a/3": 3, "b/1": 4 });
+    const client = new FilewayClient({ driver });
+    const page = await client.list({ prefix: "a/", limit: 2 });
+    expect(page.objects.map((o) => o.path)).toEqual(["a/1", "a/2"]);
+    expect(page.cursor).toBeDefined();
+    const all: string[] = [];
+    for await (const o of client.listAll({ prefix: "a/", limit: 2 })) all.push(o.path);
+    expect(all).toEqual(["a/1", "a/2", "a/3"]);
+  });
+
+  it("validates list options", async () => {
+    const { driver } = storage({});
+    const client = new FilewayClient({ driver });
+    await expect(client.list({ limit: 0 })).rejects.toThrow(ValidationError);
+    await expect(client.list({ prefix: "../etc" })).rejects.toThrow(ValidationError);
+  });
+
+  it("stats a file, returning null when missing", async () => {
+    const { driver } = storage({ "a.txt": 5 });
+    const client = new FilewayClient({ driver });
+    await expect(client.stat("a.txt")).resolves.toMatchObject({ size: 5 });
+    await expect(client.stat("b.txt")).resolves.toBeNull();
+  });
+
+  it("copies and reports conflicts", async () => {
+    const { driver, store } = storage({ "a.txt": 5, "b.txt": 9 });
+    const client = new FilewayClient({ driver });
+    await client.copy("a.txt", "c.txt");
+    expect(store.get("c.txt")).toBe(5);
+    await expect(client.copy("a.txt", "b.txt")).rejects.toMatchObject({ code: "conflict" });
+    await client.copy("a.txt", "b.txt", { overwrite: true });
+    expect(store.get("b.txt")).toBe(5);
+    await expect(client.copy("a.txt", "a.txt")).rejects.toThrow(ValidationError);
+  });
+
+  it("treats a conflict on a retried copy as success when the copy already landed", async () => {
+    const { driver, store } = storage({ "a.txt": 5 });
+    const copy = driver.copy!;
+    let calls = 0;
+    driver.copy = vi.fn(async (from: string, to: string, o?: import("./types.js").CopyOptions) => {
+      await copy(from, to, o);
+      if (++calls === 1) throw new StorageError("network", "response lost");
+    }) as typeof copy;
+    const client = new FilewayClient({ driver, retry: fast });
+    await expect(client.copy("a.txt", "b.txt")).resolves.toBeUndefined();
+    expect(store.get("b.txt")).toBe(5);
+  });
+
+  it("moves natively, and recovers a lost move response", async () => {
+    const { driver, store } = storage({ "a.txt": 5 });
+    const move = driver.move!;
+    let calls = 0;
+    driver.move = vi.fn(async (from: string, to: string) => {
+      await move(from, to);
+      if (++calls === 1) throw new StorageError("network", "response lost");
+    }) as typeof move;
+    const client = new FilewayClient({ driver, retry: fast });
+    await client.move("a.txt", "b.txt");
+    expect([...store.keys()]).toEqual(["b.txt"]);
+  });
+
+  it("falls back to copy and delete when the driver cannot move", async () => {
+    const { driver, store } = storage({ "a.txt": 5 }, { withMove: false });
+    const client = new FilewayClient({ driver });
+    await client.move("a.txt", "b.txt");
+    expect([...store.keys()]).toEqual(["b.txt"]);
+    expect(driver.delete).toHaveBeenCalledWith("a.txt", undefined);
+  });
+
+  it("reports unsupported operations as config errors", async () => {
+    const { driver } = storage({}, { withMove: false, withCopy: false });
+    const { list: _list, head: _head, ...bare } = driver;
+    const client = new FilewayClient({ driver: bare });
+    await expect(client.list()).rejects.toMatchObject({ code: "config" });
+    await expect(client.stat("a")).rejects.toMatchObject({ code: "config" });
+    await expect(client.copy("a", "b")).rejects.toMatchObject({ code: "config" });
+    await expect(client.move("a", "b")).rejects.toMatchObject({ code: "config" });
+  });
+
+  it("does not retry conflicts", async () => {
+    const { driver } = storage({ "a.txt": 5, "b.txt": 1 });
+    const client = new FilewayClient({ driver, retry: fast });
+    await expect(client.copy("a.txt", "b.txt")).rejects.toMatchObject({ code: "conflict" });
+    expect(driver.copy).toHaveBeenCalledTimes(1);
   });
 });

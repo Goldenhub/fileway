@@ -1,5 +1,5 @@
-import type { BaseDriver, OperationOptions, PresignedUrlOptions, StoredObject, UploadContext, UploadOptions, UploadResult } from "@fileway/core";
-import { validateUploadOptions, ValidationError, urlEncodePath, abortError, isAbortError, StorageError } from "@fileway/core";
+import type { BaseDriver, CopyOptions, ListedObject, ListOptions, ListPage, OperationOptions, PresignedUrlOptions, StoredObject, UploadContext, UploadOptions, UploadResult } from "@fileway/core";
+import { validateUploadOptions, ValidationError, urlEncodePath, abortError, isAbortError, StorageError, encodeCursor, decodeCursor } from "@fileway/core";
 import { blobReadSas, bytesToBase64, signRequest, SERVICE_VERSION } from "./sharedkey.js";
 import { classifyAzureError, parseConnectionString } from "./internal.js";
 
@@ -304,6 +304,77 @@ export class AzureDriver implements BaseDriver<AzureMeta> {
     return uncommitted.includes("<Block>");
   }
 
+  /** One page of the blobs under `options.prefix` (List Blobs). */
+  async list(options?: ListOptions): Promise<ListPage> {
+    const res = await this.request("GET", "", {
+      query: {
+        restype: "container",
+        comp: "list",
+        prefix: options?.prefix ?? "",
+        maxresults: String(options?.limit ?? 100),
+        ...(options?.recursive ? {} : { delimiter: "/" }),
+        ...(options?.cursor !== undefined ? { marker: decodeCursor<string>(options.cursor) } : {}),
+      },
+      ...withSignal(options),
+    });
+    const body = await res.text().catch(() => "");
+    if (!res.ok) throw azureErrorFrom("Azure list failed", res, body);
+
+    const objects: ListedObject[] = xmlBlocks(body, "Blob").map((blob) => {
+      const modified = xmlValue(blob, "Last-Modified");
+      const etag = xmlValue(blob, "Etag");
+      const type = xmlValue(blob, "Content-Type");
+      return {
+        path: unescapeXml(xmlValue(blob, "Name") ?? ""),
+        size: Number(xmlValue(blob, "Content-Length") ?? 0),
+        ...(modified ? { lastModified: new Date(modified) } : {}),
+        ...(etag ? { etag } : {}),
+        ...(type ? { contentType: unescapeXml(type) } : {}),
+      };
+    });
+    const folders = xmlBlocks(body, "BlobPrefix").map((p) => unescapeXml(xmlValue(p, "Name") ?? ""));
+    const next = xmlValue(body, "NextMarker");
+    return { objects, folders, ...(next ? { cursor: encodeCursor(next) } : {}) };
+  }
+
+  /**
+   * Copies a blob in this container (Copy Blob), waiting for it to finish when
+   * the service copies in the background. With `overwrite: false` the copy is
+   * made only if `to` does not exist (`If-None-Match: *`), atomically.
+   */
+  async copy(from: string, to: string, options?: CopyOptions): Promise<void> {
+    const source = new URL(this.blobUrl(from));
+    if (this.auth.sasToken && !this.auth.accountKey) {
+      for (const [k, v] of new URLSearchParams(this.auth.sasToken)) source.searchParams.set(k, v);
+    }
+    const res = await this.request("PUT", to, {
+      headers: { "x-ms-copy-source": source.href, ...(options?.overwrite ? {} : { "if-none-match": "*" }) },
+      ...withSignal(options),
+    });
+    if (!res.ok) throw await azureError("Azure copy failed", res);
+
+    let status = res.headers.get("x-ms-copy-status");
+    for (let wait = 200; status === "pending"; wait = Math.min(wait * 2, 2000)) {
+      await delay(wait, options?.signal);
+      const head = await this.request("HEAD", to, withSignal(options));
+      if (!head.ok) throw await azureError("Azure copy status check failed", head);
+      status = head.headers.get("x-ms-copy-status");
+      if (status === "failed" || status === "aborted") {
+        throw new StorageError(
+          "provider-error",
+          `Azure copy ${status}: ${head.headers.get("x-ms-copy-status-description") ?? "no details"}`,
+          { provider: PROVIDER },
+        );
+      }
+    }
+  }
+
+  /** Copies, then deletes the source. Blob Storage has no rename. */
+  async move(from: string, to: string, options?: CopyOptions): Promise<void> {
+    await this.copy(from, to, options);
+    await this.delete(from, options);
+  }
+
   private blobUrl(path: string): string {
     return `${this.endpoint}/${this.container}/${path.split("/").map(encodeURIComponent).join("/")}`;
   }
@@ -319,7 +390,8 @@ export class AzureDriver implements BaseDriver<AzureMeta> {
       signal?: AbortSignal;
     } = {},
   ): Promise<Response> {
-    const url = new URL(this.blobUrl(path));
+    // An empty path addresses the container itself (e.g. List Blobs).
+    const url = new URL(path === "" ? `${this.endpoint}/${this.container}` : this.blobUrl(path));
     for (const [k, v] of Object.entries(init.query ?? {})) url.searchParams.set(k, v);
 
     let headers: Record<string, string>;
@@ -342,6 +414,42 @@ export class AzureDriver implements BaseDriver<AzureMeta> {
       signal: init.signal ?? null,
     });
   }
+}
+
+/** The inner XML of every `<tag>...</tag>` block. */
+function xmlBlocks(xml: string, tag: string): string[] {
+  return [...xml.matchAll(new RegExp(`<${tag}>(.*?)</${tag}>`, "gs"))].map((m) => m[1] ?? "");
+}
+
+function xmlValue(xml: string, tag: string): string | undefined {
+  return xml.match(new RegExp(`<${tag}>(.*?)</${tag}>`, "s"))?.[1] || undefined;
+}
+
+function unescapeXml(value: string): string {
+  return value
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&#(\d+);/g, (_, n: string) => String.fromCodePoint(Number(n)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, n: string) => String.fromCodePoint(parseInt(n, 16)))
+    .replace(/&amp;/g, "&");
+}
+
+/** Waits `ms`, or rejects with an `AbortError` when `signal` aborts first. */
+function delay(ms: number, signal: AbortSignal | undefined): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) return reject(abortError("copy aborted"));
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(abortError("copy aborted"));
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
 function withSignal(options: OperationOptions | undefined): { signal?: AbortSignal } {

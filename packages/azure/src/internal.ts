@@ -45,6 +45,7 @@ export function classifyAzureError(status: number, code: string | undefined): St
     case "ContainerBeingDeleted":
       return "bucket-not-found";
     case "BlobNotFound":
+    case "CannotVerifyCopySource":
     case "ResourceNotFound":
       return "not-found";
     case "AuthenticationFailed":
@@ -57,6 +58,8 @@ export function classifyAzureError(status: number, code: string | undefined): St
     case "RequestBodyTooLarge":
     case "BlockCountExceedsLimit":
       return "size-exceeded";
+    case "BlobAlreadyExists":
+      return "conflict";
     case "ServerBusy":
     case "TooManyRequests":
       return "rate-limited";

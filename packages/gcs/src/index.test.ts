@@ -408,3 +408,58 @@ describe("with FilewayClient", () => {
     expect(call(0).url.pathname).toBe("/storage/v1/b/bkt/o/docs%2Finv_42.pdf");
   });
 });
+
+describe("list, copy, move", () => {
+  it("lists one level and pages with the page token", async () => {
+    mockFetch.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          items: [{ name: "photos/a.jpg", size: "3", updated: "2026-11-10T10:00:00.000Z", etag: "CAE=", contentType: "image/jpeg" }],
+          prefixes: ["photos/2026/"],
+          nextPageToken: "next-1",
+        }),
+      ),
+    );
+    const page = await tokenDriver().list({ prefix: "photos/", limit: 5 });
+    const url = call(0).url;
+    expect(url.pathname).toBe("/storage/v1/b/bkt/o");
+    expect(url.searchParams.get("delimiter")).toBe("/");
+    expect(url.searchParams.get("maxResults")).toBe("5");
+    expect(page.objects).toEqual([
+      { path: "photos/a.jpg", size: 3, lastModified: new Date("2026-11-10T10:00:00Z"), etag: "CAE=", contentType: "image/jpeg" },
+    ]);
+    expect(page.folders).toEqual(["photos/2026/"]);
+
+    mockFetch.mockResolvedValueOnce(new Response(JSON.stringify({})));
+    await expect(tokenDriver().list({ recursive: true, cursor: page.cursor! })).resolves.toEqual({ objects: [], folders: [] });
+    expect(call(1).url.searchParams.get("pageToken")).toBe("next-1");
+    expect(call(1).url.searchParams.has("delimiter")).toBe(false);
+  });
+
+  it("copies with rewrite, looping until done, guarded by ifGenerationMatch=0", async () => {
+    mockFetch
+      .mockResolvedValueOnce(new Response(JSON.stringify({ done: false, rewriteToken: "rt1" })))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ done: true })));
+    await tokenDriver().copy("docs/a.pdf", "docs/b.pdf");
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+    expect(call(0).url.pathname).toBe("/storage/v1/b/bkt/o/docs%2Fa.pdf/rewriteTo/b/bkt/o/docs%2Fb.pdf");
+    expect(call(0).url.searchParams.get("ifGenerationMatch")).toBe("0");
+    expect(call(1).url.searchParams.get("rewriteToken")).toBe("rt1");
+
+    mockFetch.mockResolvedValueOnce(gcsFailure(412, "At least one of the pre-conditions you specified did not hold."));
+    await expect(tokenDriver().copy("a", "b")).rejects.toMatchObject({ code: "conflict" });
+
+    mockFetch.mockResolvedValueOnce(new Response(JSON.stringify({ done: true })));
+    await tokenDriver().copy("a", "b", { overwrite: true });
+    expect(call(3).url.searchParams.has("ifGenerationMatch")).toBe(false);
+  });
+
+  it("moves by copying, then deleting", async () => {
+    mockFetch
+      .mockResolvedValueOnce(new Response(JSON.stringify({ done: true })))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    await tokenDriver().move("a.txt", "b.txt");
+    expect(call(1).init.method).toBe("DELETE");
+    expect(call(1).url.pathname).toBe("/storage/v1/b/bkt/o/a.txt");
+  });
+});

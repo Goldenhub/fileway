@@ -1071,3 +1071,96 @@ describe("S3Driver with retry.idleTimeoutMs", () => {
     expect(partPuts).toBe(2);
   });
 });
+
+describe("S3Driver list, copy, move", () => {
+  const make = () => new S3Driver({ bucket: "b", credentials: { accessKeyId: "AKID", secretAccessKey: "secret" } });
+  const listXml = (opts: { keys: [string, number][]; prefixes?: string[]; next?: string }) =>
+    `<ListBucketResult><IsTruncated>${opts.next ? "true" : "false"}</IsTruncated>` +
+    opts.keys
+      .map(([k, n]) => `<Contents><Key>${k}</Key><LastModified>2026-11-10T10:00:00.000Z</LastModified><ETag>&quot;e${n}&quot;</ETag><Size>${n}</Size></Contents>`)
+      .join("") +
+    (opts.prefixes ?? []).map((p) => `<CommonPrefixes><Prefix>${p}</Prefix></CommonPrefixes>`).join("") +
+    (opts.next ? `<NextContinuationToken>${opts.next}</NextContinuationToken>` : "") +
+    `</ListBucketResult>`;
+  const headOk = (size: number) =>
+    new Response(null, { status: 200, headers: { "content-length": String(size), "content-type": "image/jpeg" } });
+
+  it("lists one level with ListObjectsV2", async () => {
+    mockFetch.mockResolvedValueOnce(
+      new Response(listXml({ keys: [["photos/a &amp; b.jpg", 3]], prefixes: ["photos/2026/"], next: "tok+1" })),
+    );
+    const page = await make().list({ prefix: "photos/", limit: 10 });
+    const url = new URL(String(mockFetch.mock.calls[0]![0]));
+    expect(url.searchParams.get("list-type")).toBe("2");
+    expect(url.searchParams.get("prefix")).toBe("photos/");
+    expect(url.searchParams.get("delimiter")).toBe("/");
+    expect(url.searchParams.get("max-keys")).toBe("10");
+    expect(page.objects).toEqual([
+      { path: "photos/a & b.jpg", size: 3, lastModified: new Date("2026-11-10T10:00:00Z"), etag: '"e3"' },
+    ]);
+    expect(page.folders).toEqual(["photos/2026/"]);
+
+    mockFetch.mockResolvedValueOnce(new Response(listXml({ keys: [] })));
+    await make().list({ recursive: true, cursor: page.cursor! });
+    const next = new URL(String(mockFetch.mock.calls[1]![0]));
+    expect(next.searchParams.get("continuation-token")).toBe("tok+1");
+    expect(next.searchParams.has("delimiter")).toBe(false);
+  });
+
+  it("copies with a signed x-amz-copy-source and refuses an existing destination", async () => {
+    mockFetch
+      .mockResolvedValueOnce(headOk(5))
+      .mockResolvedValueOnce(new Response(null, { status: 404 }))
+      .mockResolvedValueOnce(new Response("<CopyObjectResult><ETag>x</ETag></CopyObjectResult>"));
+    await make().copy("docs/a b.txt", "docs/c.txt");
+    const [url, init] = mockFetch.mock.calls[2]!;
+    expect(String(url)).toBe("https://b.s3.us-east-1.amazonaws.com/docs/c.txt");
+    const headers = (init as RequestInit).headers as Record<string, string>;
+    expect(headers["x-amz-copy-source"]).toBe("/b/docs/a%20b.txt");
+    expect(headers.authorization).toMatch(/SignedHeaders=[^,]*x-amz-copy-source/);
+
+    mockFetch.mockReset();
+    mockFetch.mockResolvedValueOnce(headOk(5)).mockResolvedValueOnce(headOk(1));
+    await expect(make().copy("a.txt", "b.txt")).rejects.toMatchObject({ code: "conflict" });
+
+    mockFetch.mockReset();
+    mockFetch.mockResolvedValueOnce(new Response(null, { status: 404 }));
+    await expect(make().copy("missing.txt", "b.txt")).rejects.toMatchObject({ code: "not-found" });
+  });
+
+  it("treats a 200 CopyObject response with an Error body as a failure", async () => {
+    mockFetch
+      .mockResolvedValueOnce(headOk(5))
+      .mockResolvedValueOnce(new Response("<Error><Code>InternalError</Code></Error>", { status: 200 }));
+    await expect(make().copy("a.txt", "b.txt", { overwrite: true })).rejects.toMatchObject({ code: "provider-error" });
+  });
+
+  it("copies objects over 5 GiB in parts", async () => {
+    const size = 6 * 1024 ** 3;
+    mockFetch.mockImplementation(async (input: string | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (init?.method === "HEAD") return headOk(size);
+      if (url.includes("uploads=")) return new Response("<InitiateMultipartUploadResult><UploadId>U</UploadId></InitiateMultipartUploadResult>");
+      if (url.includes("partNumber=")) return new Response("<CopyPartResult><ETag>&quot;p&quot;</ETag></CopyPartResult>");
+      return new Response("<CompleteMultipartUploadResult><ETag>f</ETag></CompleteMultipartUploadResult>");
+    });
+    await make().copy("big.bin", "copy.bin", { overwrite: true });
+    const partCalls = mockFetch.mock.calls.filter(([u]) => String(u).includes("partNumber="));
+    expect(partCalls).toHaveLength(12);
+    const lastRange = ((partCalls[11]![1] as RequestInit).headers as Record<string, string>)["x-amz-copy-source-range"];
+    expect(lastRange).toBe(`bytes=${11 * 512 * 1024 ** 2}-${size - 1}`);
+    const complete = mockFetch.mock.calls.at(-1)!;
+    expect(new TextDecoder().decode((complete[1] as RequestInit).body as Uint8Array)).toContain("<PartNumber>12</PartNumber>");
+  });
+
+  it("moves by copying, then deleting the source", async () => {
+    mockFetch
+      .mockResolvedValueOnce(headOk(5))
+      .mockResolvedValueOnce(new Response(null, { status: 404 }))
+      .mockResolvedValueOnce(new Response("<CopyObjectResult/>"))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    await make().move("a.txt", "b.txt");
+    expect((mockFetch.mock.calls[3]![1] as RequestInit).method).toBe("DELETE");
+    expect(String(mockFetch.mock.calls[3]![0])).toContain("/a.txt");
+  });
+});

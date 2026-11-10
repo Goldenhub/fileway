@@ -9,6 +9,10 @@ export type Operation =
   | "getUrl"
   | "getPresignedUrl"
   | "getUploadStatus"
+  | "list"
+  | "stat"
+  | "copy"
+  | "move"
   | "retry";
 
 /**

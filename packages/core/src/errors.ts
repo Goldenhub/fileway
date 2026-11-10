@@ -5,6 +5,7 @@ export type StorageErrorCode =
   | "bucket-not-found"
   | "auth-failed"
   | "size-exceeded"
+  | "conflict"
   | "rate-limited"
   | "timeout"
   | "network"

@@ -13,6 +13,7 @@ export function classifyGcsError(status: number, body: string): StorageErrorCode
   }
   if (status === 404) return message.includes("bucket") && !message.includes("no such object") ? "bucket-not-found" : "not-found";
   if (status === 401 || status === 403) return "auth-failed";
+  if (status === 412) return "conflict";
   if (status === 413) return "size-exceeded";
   if (status === 429) return "rate-limited";
   return "provider-error";

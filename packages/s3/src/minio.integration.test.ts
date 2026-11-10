@@ -351,6 +351,32 @@ describeEnv("S3Driver integration against MinIO", () => {
 
     await client.delete(result.path);
   });
+
+  it("lists, copies and moves objects", async () => {
+    const bytes = (n: number) =>
+      new ReadableStream<Uint8Array>({ start: (c) => { c.enqueue(new Uint8Array(n).fill(1)); c.close(); } });
+    for (const [path, id] of [["lcm", "a"], ["lcm", "b"], ["lcm/sub", "c"]] as const) {
+      await client.upload(bytes(4), { filename: `${id}.txt`, path, id, size: 4 });
+    }
+    const top = await client.list({ prefix: "lcm/" });
+    expect(top.objects.map((o) => o.path)).toEqual(["lcm/a.txt", "lcm/b.txt"]);
+    expect(top.folders).toEqual(["lcm/sub/"]);
+
+    const paths: string[] = [];
+    for await (const o of client.listAll({ prefix: "lcm/", recursive: true, limit: 2 })) paths.push(o.path);
+    expect(paths).toEqual(["lcm/a.txt", "lcm/b.txt", "lcm/sub/c.txt"]);
+
+    await client.copy("lcm/a.txt", "lcm/copy.txt");
+    expect((await client.stat("lcm/copy.txt"))?.size).toBe(4);
+    await expect(client.copy("lcm/b.txt", "lcm/copy.txt")).rejects.toMatchObject({ code: "conflict" });
+    await client.copy("lcm/b.txt", "lcm/copy.txt", { overwrite: true });
+
+    await client.move("lcm/copy.txt", "lcm/moved.txt");
+    await expect(client.stat("lcm/copy.txt")).resolves.toBeNull();
+    expect((await client.stat("lcm/moved.txt"))?.size).toBe(4);
+
+    for (const path of ["lcm/a.txt", "lcm/b.txt", "lcm/sub/c.txt", "lcm/moved.txt"]) await client.delete(path);
+  });
 });
 
 async function sha256Hex(data: Uint8Array): Promise<string> {

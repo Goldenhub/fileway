@@ -1,5 +1,5 @@
-import type { BaseDriver, OperationOptions, PresignedUrlOptions, StoredObject, UploadContext, UploadOptions, UploadResult } from "@fileway/core";
-import { validateUploadOptions, ValidationError, urlEncodePath, abortError, isAbortError, StorageError } from "@fileway/core";
+import type { BaseDriver, CopyOptions, ListOptions, ListPage, OperationOptions, PresignedUrlOptions, StoredObject, UploadContext, UploadOptions, UploadResult } from "@fileway/core";
+import { validateUploadOptions, ValidationError, urlEncodePath, abortError, isAbortError, StorageError, encodeCursor, decodeCursor } from "@fileway/core";
 import { signedReadUrl, TokenSource } from "./auth.js";
 import { classifyGcsError } from "./errors.js";
 import type { ServiceAccountKey } from "./auth.js";
@@ -378,6 +378,65 @@ export class GCSDriver implements BaseDriver<GCSMeta> {
         ...(object.etag ? { etag: object.etag } : {}),
       },
     };
+  }
+
+  /** One page of the objects under `options.prefix` (`objects.list`). */
+  async list(options?: ListOptions): Promise<ListPage> {
+    const query = new URLSearchParams({
+      prefix: options?.prefix ?? "",
+      maxResults: String(options?.limit ?? 100),
+      ...(options?.recursive ? {} : { delimiter: "/" }),
+      ...(options?.cursor !== undefined ? { pageToken: decodeCursor<string>(options.cursor) } : {}),
+    });
+    const res = await fetchWithAbort(`${this.endpoint}/storage/v1/b/${encodeURIComponent(this.bucket)}/o?${query}`, {
+      headers: await this.authHeaders(),
+      signal: options?.signal ?? null,
+    });
+    if (!res.ok) throw await gcsError("GCS list failed", res);
+    const data = (await res.json()) as { items?: GcsObject[]; prefixes?: string[]; nextPageToken?: string };
+    return {
+      objects: (data.items ?? []).map((o) => ({
+        path: o.name,
+        size: Number(o.size ?? 0),
+        ...(o.updated ? { lastModified: new Date(o.updated) } : {}),
+        ...(o.etag ? { etag: o.etag } : {}),
+        ...(o.contentType ? { contentType: o.contentType } : {}),
+      })),
+      folders: data.prefixes ?? [],
+      ...(data.nextPageToken ? { cursor: encodeCursor(data.nextPageToken) } : {}),
+    };
+  }
+
+  /**
+   * Copies an object in this bucket with `objects.rewrite`, repeating the call
+   * until large objects finish. With `overwrite: false` the copy is made only
+   * if `to` does not exist (`ifGenerationMatch=0`), atomically.
+   */
+  async copy(from: string, to: string, options?: CopyOptions): Promise<void> {
+    const base = `${this.objectUrl(from)}/rewriteTo/b/${encodeURIComponent(this.bucket)}/o/${encodeURIComponent(to)}`;
+    let rewriteToken: string | undefined;
+    do {
+      const query = new URLSearchParams({
+        ...(options?.overwrite ? {} : { ifGenerationMatch: "0" }),
+        ...(rewriteToken ? { rewriteToken } : {}),
+      });
+      const qs = query.toString();
+      const res = await fetchWithAbort(qs ? `${base}?${qs}` : base, {
+        method: "POST",
+        headers: { ...(await this.authHeaders()), "content-type": "application/json" },
+        body: "{}",
+        signal: options?.signal ?? null,
+      });
+      if (!res.ok) throw await gcsError("GCS copy failed", res);
+      const data = (await res.json()) as { done?: boolean; rewriteToken?: string };
+      rewriteToken = data.done ? undefined : data.rewriteToken;
+    } while (rewriteToken);
+  }
+
+  /** Copies, then deletes the source. GCS has no rename. */
+  async move(from: string, to: string, options?: CopyOptions): Promise<void> {
+    await this.copy(from, to, options);
+    await this.delete(from, options?.signal ? { signal: options.signal } : undefined);
   }
 
   private objectUrl(path: string): string {

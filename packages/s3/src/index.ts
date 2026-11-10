@@ -1,5 +1,5 @@
-import type { BaseDriver, OperationOptions, PresignedUrlOptions, StorageErrorCode, StoredObject, UploadContext, UploadOptions, UploadResult } from "@fileway/core";
-import { validateUploadOptions, ValidationError, urlEncodePath, abortError, isAbortError, StorageError } from "@fileway/core";
+import type { BaseDriver, CopyOptions, ListedObject, ListOptions, ListPage, OperationOptions, PresignedUrlOptions, StorageErrorCode, StoredObject, UploadContext, UploadOptions, UploadResult } from "@fileway/core";
+import { validateUploadOptions, ValidationError, urlEncodePath, abortError, isAbortError, StorageError, encodeCursor, decodeCursor } from "@fileway/core";
 import { buildCanonicalQueryString, createStreamingBody, presignUrl, sign, signStreamingRequest, sha256 } from "./sigv4.js";
 import type { SigV4Credentials } from "./sigv4.js";
 
@@ -12,6 +12,8 @@ const SINGLE_PUT_MAX = 5 * 1024 ** 3;
 const DEFAULT_PART_SIZE = 8 * 1024 * 1024;
 const MIN_PART_SIZE = 5 * 1024 * 1024;
 const PRESIGN_DEFAULT_EXPIRY = 3600;
+// Part size for multipart copies of objects over 5 GiB.
+const MULTIPART_COPY_PART = 512 * 1024 * 1024;
 // AWS caps presigned URLs at 7 days.
 const PRESIGN_MIN_EXPIRY = 1;
 const PRESIGN_MAX_EXPIRY = 604800;
@@ -594,6 +596,162 @@ export class S3Driver implements BaseDriver<S3Meta> {
 
     return response.body;
   }
+
+  /** One page of the objects under `options.prefix` (`ListObjectsV2`). */
+  async list(options?: ListOptions): Promise<ListPage> {
+    const query: Record<string, string> = {
+      "list-type": "2",
+      prefix: options?.prefix ?? "",
+      "max-keys": String(options?.limit ?? 100),
+      ...(options?.recursive ? {} : { delimiter: "/" }),
+      ...(options?.cursor !== undefined ? { "continuation-token": decodeCursor<string>(options.cursor) } : {}),
+    };
+    const res = await this.request("GET", "", { query, ...(options?.signal ? { signal: options.signal } : {}) });
+    const body = await res.text().catch(() => "");
+    if (!res.ok) throw s3Error(`S3 list failed: ${res.status} ${res.statusText}`, res.status, body);
+
+    const objects: ListedObject[] = blocks(body, "Contents").map((block) => {
+      const modified = extractXml(block, "LastModified");
+      const etag = extractXml(block, "ETag");
+      return {
+        path: unescapeXml(extractXml(block, "Key") ?? ""),
+        size: Number(extractXml(block, "Size") ?? 0),
+        ...(modified ? { lastModified: new Date(modified) } : {}),
+        ...(etag ? { etag: unescapeXml(etag) } : {}),
+      };
+    });
+    const folders = blocks(body, "CommonPrefixes").map((block) => unescapeXml(extractXml(block, "Prefix") ?? ""));
+    const next = extractXml(body, "IsTruncated") === "true" ? extractXml(body, "NextContinuationToken") : undefined;
+    return { objects, folders, ...(next ? { cursor: encodeCursor(unescapeXml(next)) } : {}) };
+  }
+
+  /**
+   * Copies an object in this bucket. Up to 5 GiB it is one `CopyObject`;
+   * larger objects are copied in parts (`UploadPartCopy`), which keeps the
+   * content type but not custom metadata. With `overwrite: false` the
+   * destination is checked first, which is not atomic.
+   */
+  async copy(from: string, to: string, options?: CopyOptions): Promise<void> {
+    const signal = options?.signal;
+    const source = await this.head(from, signal ? { signal } : undefined);
+    if (!source) throw new StorageError("not-found", `S3 copy failed: ${from} does not exist`, { provider: "s3", statusCode: 404 });
+    if (!options?.overwrite && (await this.head(to, signal ? { signal } : undefined))) {
+      throw new StorageError("conflict", `S3 copy failed: ${to} already exists`, { provider: "s3" });
+    }
+    const copySource = `/${this.config.bucket}/${from.split("/").map(encodeURIComponent).join("/")}`;
+
+    if (source.size <= SINGLE_PUT_MAX) {
+      const res = await this.request("PUT", to, {
+        headers: { "x-amz-copy-source": copySource },
+        ...(signal ? { signal } : {}),
+      });
+      const body = await res.text().catch(() => "");
+      // CopyObject can fail after answering 200, with an <Error> body.
+      if (!res.ok || body.includes("<Error>")) {
+        throw s3Error(`S3 copy failed: ${res.status} ${res.statusText}`, res.ok ? 500 : res.status, body);
+      }
+      return;
+    }
+    await this.multipartCopy(copySource, to, source.size, source.contentType, signal);
+  }
+
+  /** Copies, then deletes the source. S3 has no rename. */
+  async move(from: string, to: string, options?: CopyOptions): Promise<void> {
+    await this.copy(from, to, options);
+    await this.delete(from, options?.signal ? { signal: options.signal } : undefined);
+  }
+
+  private async multipartCopy(
+    copySource: string,
+    to: string,
+    size: number,
+    contentType: string | undefined,
+    signal: AbortSignal | undefined,
+  ): Promise<void> {
+    const cred = { ...getCredentials(this.config), region: this.config.region!, service: SERVICE };
+    const create = await this.request("POST", to, {
+      query: { uploads: "" },
+      headers: { "content-type": contentType ?? "application/octet-stream" },
+      ...(signal ? { signal } : {}),
+    });
+    const createBody = await create.text().catch(() => "");
+    if (!create.ok) throw s3Error(`S3 multipart copy create failed: ${create.status}`, create.status, createBody);
+    const uploadId = extractXml(createBody, "UploadId");
+    if (!uploadId) throw new StorageError("provider-error", "S3 multipart copy returned no UploadId", { provider: "s3" });
+
+    // At most 10,000 parts, each at most 5 GiB.
+    const partSize = Math.max(MULTIPART_COPY_PART, Math.ceil(size / 10_000));
+    const parts: { partNumber: number; etag: string }[] = [];
+    try {
+      for (let start = 0, partNumber = 1; start < size; start += partSize, partNumber++) {
+        const end = Math.min(start + partSize, size) - 1;
+        const res = await this.request("PUT", to, {
+          query: { partNumber: String(partNumber), uploadId },
+          headers: { "x-amz-copy-source": copySource, "x-amz-copy-source-range": `bytes=${start}-${end}` },
+          ...(signal ? { signal } : {}),
+        });
+        const body = await res.text().catch(() => "");
+        const etag = extractXml(body, "ETag");
+        if (!res.ok || !etag) throw s3Error(`S3 copy part ${partNumber} failed: ${res.status}`, res.ok ? 500 : res.status, body);
+        parts.push({ partNumber, etag: unescapeXml(etag) });
+      }
+      const complete = await this.request("POST", to, {
+        query: { uploadId },
+        headers: { "content-type": "application/xml" },
+        body: new TextEncoder().encode(buildCompleteXml(parts)),
+        ...(signal ? { signal } : {}),
+      });
+      const body = await complete.text().catch(() => "");
+      if (!complete.ok || body.includes("<Error>")) {
+        throw s3Error(`S3 multipart copy complete failed: ${complete.status}`, complete.ok ? 500 : complete.status, body);
+      }
+    } catch (err) {
+      await this.abortMultipart(to, uploadId, cred);
+      throw err;
+    }
+  }
+
+  /** A SigV4-signed request for `key` (or the bucket, with key ""). */
+  private async request(
+    method: string,
+    key: string,
+    init: { query?: Record<string, string>; headers?: Record<string, string>; body?: Uint8Array; signal?: AbortSignal } = {},
+  ): Promise<Response> {
+    const cred = getCredentials(this.config);
+    const { url, canonicalPath, host } = buildEndpoint(this.config, key, init.query);
+    const headers = init.headers ?? {};
+    const sigHeaders = await sign(
+      method,
+      canonicalPath,
+      { host, ...headers },
+      init.body ? await sha256(init.body) : SHA256_EMPTY,
+      { ...cred, region: this.config.region!, service: SERVICE },
+      new Date(),
+      init.query,
+    );
+    return fetchWithAbort(url, {
+      method,
+      headers: { ...sigHeaders, ...headers },
+      ...(init.body ? { body: init.body as BodyInit } : {}),
+      signal: init.signal ?? null,
+    }, "s3");
+  }
+}
+
+/** The inner XML of every `<tag>...</tag>` block. */
+function blocks(xml: string, tag: string): string[] {
+  return [...xml.matchAll(new RegExp(`<${tag}>(.*?)</${tag}>`, "gs"))].map((m) => m[1] ?? "");
+}
+
+function unescapeXml(value: string): string {
+  return value
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&#(\d+);/g, (_, n: string) => String.fromCodePoint(Number(n)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, n: string) => String.fromCodePoint(parseInt(n, 16)))
+    .replace(/&amp;/g, "&");
 }
 
 function getCredentials(config: S3DriverConfig): S3Credentials {

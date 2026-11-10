@@ -156,6 +156,51 @@ export interface BaseDriver<TMeta extends Record<string, unknown> = Record<strin
   head?(path: string, options?: OperationOptions): Promise<StoredObject<TMeta> | null>;
   /** Whether an upload to `path` has started but not finished (e.g. an open multipart upload). */
   isPending?(path: string, options?: OperationOptions): Promise<boolean>;
+  /** One page of the objects under `options.prefix`. */
+  list?(options?: ListOptions): Promise<ListPage>;
+  /** Copies `from` to `to` on the same storage. */
+  copy?(from: string, to: string, options?: CopyOptions): Promise<void>;
+  /** Moves (renames) `from` to `to`. Without it, the client copies then deletes. */
+  move?(from: string, to: string, options?: CopyOptions): Promise<void>;
+}
+
+export interface ListOptions extends OperationOptions {
+  /** Only objects whose path starts with this. Omitted or "" lists the root;
+   * use a trailing "/" to list a folder ("photos/"). */
+  prefix?: string;
+  /**
+   * `false` (default): one folder level. Objects directly under `prefix` go in
+   * `objects`; deeper paths are rolled up into `folders`.
+   * `true`: every object under `prefix`, at any depth; `folders` is empty.
+   */
+  recursive?: boolean;
+  /** Page size, 1 to 1000. Default 100. A page may hold fewer. */
+  limit?: number;
+  /** The `cursor` from the previous page. */
+  cursor?: string;
+}
+
+/** An object as returned by `list`. Listing returns less than `head`. */
+export interface ListedObject {
+  path: string;
+  size: number;
+  lastModified?: Date;
+  etag?: string;
+  contentType?: string;
+}
+
+export interface ListPage {
+  objects: ListedObject[];
+  /** Folder prefixes one level below `prefix`, each ending in "/". */
+  folders: string[];
+  /** Present when there are more results. Opaque: pass it back unchanged. */
+  cursor?: string;
+}
+
+export interface CopyOptions extends OperationOptions {
+  /** Replace an existing destination. Default false: an existing destination
+   * fails with a `conflict` error. */
+  overwrite?: boolean;
 }
 
 /** The `result.meta` shape of a driver's uploads. */

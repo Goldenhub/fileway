@@ -3,7 +3,14 @@ export * from "./errors.js";
 export * from "./logging.js";
 // Driver-author helpers. The client's own plumbing (retry timing, progress,
 // timeouts, ID checks) stays internal.
-export { ValidationError, abortError, validateUploadOptions, urlEncodePath } from "./validation.js";
+export {
+  ValidationError,
+  abortError,
+  validateUploadOptions,
+  urlEncodePath,
+  encodeCursor,
+  decodeCursor,
+} from "./validation.js";
 
 // Replaced with the package.json version at build time (see tsup.config.ts).
 declare const __FILEWAY_VERSION__: string | undefined;
@@ -11,8 +18,12 @@ export const version: string = typeof __FILEWAY_VERSION__ === "string" ? __FILEW
 
 import type {
   BaseDriver,
+  CopyOptions,
   DriverMeta,
   FilewayConfig,
+  ListedObject,
+  ListOptions,
+  ListPage,
   OperationOptions,
   PresignedUrlOptions,
   RetryConfig,
@@ -24,7 +35,14 @@ import type {
 } from "./types.js";
 import { withProgress } from "./progress.js";
 import { StorageError, isAbortError } from "./errors.js";
-import { abortError, validateUploadId, validateUploadOptions } from "./validation.js";
+import {
+  ValidationError,
+  abortError,
+  validateObjectPath,
+  validatePrefix,
+  validateUploadId,
+  validateUploadOptions,
+} from "./validation.js";
 import { delayWithJitter, isRetryable, sleep } from "./retry.js";
 import { IdleTimer, linkSignals, raceAbort, timeoutError, withActivity, withTimeLimit } from "./timeout.js";
 import type { ErrorContext, Logger, LogLevel, Operation } from "./logging.js";
@@ -33,6 +51,8 @@ import type { ErrorContext, Logger, LogLevel, Operation } from "./logging.js";
  * `unknown` when it takes none, so driver-specific options (e.g. Cloudinary's
  * `deliveryType`) pass through the client. */
 type MethodOptions<F> = F extends (path: string, options?: infer O) => unknown ? NonNullable<O> : unknown;
+/** Same as `MethodOptions`, for `(from, to, options?)` methods. */
+type CopyMethodOptions<F> = F extends (from: string, to: string, options?: infer O) => unknown ? NonNullable<O> : unknown;
 
 export class FilewayClient<TDriver extends BaseDriver> {
   private driver: TDriver;
@@ -315,13 +335,154 @@ export class FilewayClient<TDriver extends BaseDriver> {
     }, options?.signal);
   }
 
+  /** One page of the objects under `options.prefix`. Pass `page.cursor` back to get the next one. */
+  async list(options?: ListOptions): Promise<ListPage> {
+    const prefix = options?.prefix ?? "";
+    validatePrefix(prefix);
+    const limit = options?.limit;
+    if (limit !== undefined && !(Number.isInteger(limit) && limit >= 1 && limit <= 1000)) {
+      throw new ValidationError("limit must be an integer from 1 to 1000");
+    }
+    return this.runWithRetry("list", prefix, (signal) => {
+      const list = this.driver.list;
+      if (!list) throw this.unsupported("listing");
+      return list.call(this.driver, withSignal(options, signal));
+    }, options?.signal);
+  }
+
+  /**
+   * Every object under `options.prefix`, following cursors page by page.
+   * One folder level unless `recursive` is true; folders themselves are not
+   * yielded. Stops when the loop breaks or `options.signal` aborts.
+   */
+  async *listAll(options?: Omit<ListOptions, "cursor">): AsyncGenerator<ListedObject, void, undefined> {
+    let cursor: string | undefined;
+    do {
+      const page = await this.list({ ...options, ...(cursor !== undefined ? { cursor } : {}) });
+      yield* page.objects;
+      cursor = page.cursor;
+    } while (cursor !== undefined);
+  }
+
+  /** The stored object at `path`, or `null` when there is none. */
+  async stat(
+    path: string,
+    options?: OperationOptions & MethodOptions<NonNullable<TDriver["head"]>>,
+  ): Promise<StoredObject<DriverMeta<TDriver>> | null> {
+    validateObjectPath(path);
+    return this.runWithRetry("stat", path, async (signal) => {
+      const head = this.driver.head;
+      if (!head) throw this.unsupported("stat");
+      return (await head.call(this.driver, path, withSignal(options, signal))) as StoredObject<DriverMeta<TDriver>> | null;
+    }, options?.signal);
+  }
+
+  /**
+   * Copies `from` to `to` on the same storage. An existing `to` fails with a
+   * `conflict` error unless `options.overwrite` is true.
+   */
+  async copy(
+    from: string,
+    to: string,
+    options?: CopyOptions & CopyMethodOptions<NonNullable<TDriver["copy"]>>,
+  ): Promise<void> {
+    this.validatePair(from, to);
+    let attempt = 0;
+    await this.runWithRetry("copy", from, async (signal) => {
+      const copy = this.driver.copy;
+      if (!copy) throw this.unsupported("copy");
+      attempt++;
+      try {
+        await copy.call(this.driver, from, to, withSignal(options, signal));
+      } catch (error) {
+        // A retry after a lost response finds the copy it already made.
+        if (attempt > 1 && isCode(error, "conflict") && (await this.sameObject(from, to, signal))) return;
+        throw error;
+      }
+    }, options?.signal);
+  }
+
+  /**
+   * Moves (renames) `from` to `to`. Drivers without a native move get a copy
+   * followed by a delete, which is not atomic: if the delete fails, both
+   * paths exist and the error is thrown.
+   */
+  async move(
+    from: string,
+    to: string,
+    options?: CopyOptions & CopyMethodOptions<NonNullable<TDriver["move"]>>,
+  ): Promise<void> {
+    this.validatePair(from, to);
+    const move = this.driver.move;
+    if (!move) {
+      if (!this.driver.copy) {
+        const error = this.unsupported("move");
+        await this.reportFailure(error, { operation: "move", durationMs: 0, path: from });
+        throw error;
+      }
+      await this.copy(from, to, options as CopyOptions & CopyMethodOptions<NonNullable<TDriver["copy"]>>);
+      await this.delete(from, (options?.signal ? { signal: options.signal } : undefined) as Parameters<this["delete"]>[1]);
+      return;
+    }
+    let attempt = 0;
+    await this.runWithRetry("move", from, async (signal) => {
+      attempt++;
+      try {
+        await move.call(this.driver, from, to, withSignal(options, signal));
+      } catch (error) {
+        // A retry after a lost response finds the source already gone.
+        if (attempt > 1 && isCode(error, "not-found") && (await this.exists(to, signal))) return;
+        throw error;
+      }
+    }, options?.signal);
+  }
+
+  private validatePair(from: string, to: string): void {
+    validateObjectPath(from, "from");
+    validateObjectPath(to, "to");
+    if (from === to) throw new ValidationError("from and to must be different paths");
+  }
+
+  private unsupported(what: string): StorageError {
+    return new StorageError("config", `driver ${this.driver.name} does not support ${what}`, {
+      provider: this.driver.name,
+    });
+  }
+
+  /** Whether `path` exists, best effort (false when the driver cannot tell). */
+  private async exists(path: string, signal: AbortSignal | undefined): Promise<boolean> {
+    const head = this.driver.head;
+    if (!head) return false;
+    try {
+      return (await head.call(this.driver, path, signal ? { signal } : undefined)) !== null;
+    } catch {
+      return false;
+    }
+  }
+
+  /** Whether `to` looks like a copy of `from`: same size, and same ETag when both have one. */
+  private async sameObject(from: string, to: string, signal: AbortSignal | undefined): Promise<boolean> {
+    const head = this.driver.head;
+    if (!head) return false;
+    try {
+      const opts = signal ? { signal } : undefined;
+      const [a, b] = await Promise.all([head.call(this.driver, from, opts), head.call(this.driver, to, opts)]);
+      if (!a || !b || a.size !== b.size) return false;
+      const etagA = (a.meta as { etag?: unknown }).etag;
+      const etagB = (b.meta as { etag?: unknown }).etag;
+      return etagA === undefined || etagB === undefined || etagA === etagB;
+    } catch {
+      return false;
+    }
+  }
+
   /**
    * Runs `fn` with retries. Each attempt receives the signal to hand to the
    * driver: the caller's, linked with a per-attempt one when `idleTimeoutMs`
    * is set, so a timed-out attempt's request is actually cancelled.
    */
   private async runWithRetry<T>(
-    operation: "delete" | "getUrl" | "get" | "getPresignedUrl" | "getUploadStatus",
+    operation: "delete" | "getUrl" | "get" | "getPresignedUrl" | "getUploadStatus" | "list" | "stat" | "copy" | "move",
     path: string,
     fn: (signal: AbortSignal | undefined) => Promise<T>,
     signal?: AbortSignal,
@@ -411,6 +572,10 @@ export class FilewayClient<TDriver extends BaseDriver> {
       await this.notifyError(error, context);
     }
   }
+}
+
+function isCode(error: unknown, code: StorageError["code"]): boolean {
+  return error instanceof StorageError && error.code === code;
 }
 
 /** `options` with `signal` replaced by the attempt's signal (or removed). */
