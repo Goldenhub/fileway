@@ -1,0 +1,141 @@
+---
+title: Plugins and Events
+description: Record every file operation, add reusable behavior with plugins, and serve routes from your app with client.handler
+---
+
+A plugin is one object you add to `FilewayClient` that can do three things: react to every finished operation (an **event**), add upload **middleware**, and serve HTTP **routes** from your app. You use plugins to build audit trails, usage metering, metrics, webhooks and your own file APIs, without wrapping every call yourself.
+
+```ts
+const client = new FilewayClient({
+  driver,
+  plugins: [auditLog, quotas],
+});
+```
+
+Fileway does not store, send or display events on its own. What happens with them is up to your plugins.
+
+## Events
+
+Every operation (`upload`, `get`, `delete`, `getUrl`, `getPresignedUrl`, `getUploadStatus`, `list`, `stat`, `copy`, `move`) produces **one event when it finishes**, after any retries:
+
+```ts
+interface FilewayEvent {
+  id: string;          // unique, for de-duplication
+  time: string;        // ISO 8601, when it finished
+  operation: "upload" | "get" | "delete" | "list" | "copy" | "move" | ...;
+  outcome: "success" | "error" | "aborted";
+  path?: string;
+  size?: number;       // uploads
+  mimeType?: string;   // uploads
+  durationMs: number;
+  attempts: number;    // including retries
+  driver: string;      // e.g. "s3"
+  error?: { name: string; message: string; code?: StorageErrorCode; statusCode?: number };
+  actor?: string;
+  tags?: Record<string, string>;
+}
+```
+
+- `error` is present only when `outcome` is `"error"`; a cancelled operation is `"aborted"`.
+- `listAll()` produces one `list` event per page it fetches.
+- A `move` on a driver without a native move produces the underlying `copy` and `delete` events.
+- For a failed upload, `path` is the `path` option you passed (the folder), since the object was never stored.
+
+### Who did it: `actor` and `tags`
+
+Every client method accepts `actor` and `tags`. They are copied onto the event and never passed to the driver or your middleware:
+
+```ts
+await client.upload(stream, { filename: "contract.pdf", actor: user.id, tags: { tenant: org.slug } });
+await client.delete("contracts/old.pdf", { actor: user.id });
+```
+
+## Writing a plugin
+
+```ts
+import type { FilewayPlugin } from "@fileway/core";
+
+export const auditLog: FilewayPlugin = {
+  id: "audit-log",
+  onEvent: (event) =>
+    db.insert("file_audit", {
+      at: event.time,
+      actor: event.actor,
+      operation: event.operation,
+      path: event.path,
+      ok: event.outcome === "success",
+      error: event.error?.code,
+    }),
+};
+```
+
+- `onEvent` is **not awaited**: it never slows down or fails an operation. If it throws or its promise rejects, the error is logged with your `logger`'s `warn` and the operation carries on. If you need delivery guarantees (webhooks, billing), queue the event and send it from a background job.
+- `middlewares` are added after the client's own `middlewares`, so they see the final stream and options. See [Middleware](/docs/guide/middleware).
+- `init(ctx)` runs once, after the client is created, with `ctx.client`, `ctx.driverName` and `ctx.log`.
+- Plugin ids must be unique; duplicates are a `config` error when the client is created.
+
+### More examples
+
+Usage metering per customer:
+
+```ts
+const usage: FilewayPlugin = {
+  id: "usage",
+  onEvent: (e) => {
+    if (e.operation === "upload" && e.outcome === "success" && e.tags?.tenant) {
+      metrics.increment("storage.bytes", e.size ?? 0, { tenant: e.tags.tenant });
+    }
+  },
+};
+```
+
+A webhook when invoices arrive:
+
+```ts
+const invoiceHook: FilewayPlugin = {
+  id: "invoice-webhook",
+  onEvent: (e) => {
+    if (e.operation === "upload" && e.outcome === "success" && e.path?.startsWith("invoices/")) {
+      queue.add("notify-accounting", { path: e.path });
+    }
+  },
+};
+```
+
+## Routes and `client.handler`
+
+Plugins can serve HTTP routes from your app. Routes are keyed `"METHOD /path"`, or `"METHOD /path/*"` to match everything below a path:
+
+```ts
+const files: FilewayPlugin = {
+  id: "files",
+  routes: {
+    "GET /health": (_req, ctx) => Response.json({ ok: true, driver: ctx.driverName }),
+    "GET /list/*": async (_req, ctx) => Response.json(await ctx.client.list({ prefix: ctx.params.wildcard })),
+  },
+};
+```
+
+`client.handler` serves them under `basePath` (default `/api/fileway`). It takes a standard `Request` and returns a `Response`, so you mount it the same way everywhere:
+
+```ts
+// Next.js: app/api/fileway/[...all]/route.ts
+export const { GET, POST, PUT, DELETE } = client.handler;
+
+// Cloudflare Workers, Bun, Deno
+export default { fetch: client.handler.fetch };
+
+// Hono
+app.all("/api/fileway/*", (c) => client.handler.fetch(c.req.raw));
+```
+
+- An unknown path returns `404`, a known path with another method `405` (with an `Allow` header), and a route that throws `500` with a generic body; the error is logged with your `logger`'s `error`.
+- Exact routes win over wildcard ones. `ctx.params.wildcard` is the rest of the path, still percent-encoded.
+- Two plugins registering the same route is a `config` error when the client is created.
+- Protect your routes: the handler does no authentication itself. Check the user's session (or a signature) inside each route before acting.
+
+## Events, `logger` and `onError`
+
+- `logger` gets human-readable log lines, including retries.
+- `onError` is called on failures, so you can report them.
+- Plugins' `onEvent` gets one structured record per operation, success or failure, which is what audit trails, metering and dashboards need.

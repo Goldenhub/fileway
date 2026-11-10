@@ -19,6 +19,8 @@ The type parameter is the driver, inferred from `config.driver`. To annotate a c
 | `middlewares` | `MiddlewareHook<TMeta>[]` | Optional. Middleware run around uploads; inline hooks get the driver's metadata type. See [Middleware](/docs/guide/middleware). |
 | `logger` | `Logger` | Optional. Structured logger; receives `info` per operation and `error` on failure. See [Observability](/docs/guide/observability#logger). |
 | `onError` | `(error, context) => void \| Promise<void>` | Optional. Called (and awaited) before an error is re-thrown. Aborts are skipped. See [Observability](/docs/guide/observability#onerror). |
+| `plugins` | `FilewayPlugin[]` | Optional. Event listeners, middleware and routes. See [Plugins and Events](/docs/guide/plugins). |
+| `basePath` | `string` | Optional. Where `client.handler` is mounted. Default `"/api/fileway"`. |
 | `retry` | `RetryConfig` | Optional. Retries transient failures (`network`, `timeout`, `rate-limited`, `provider-error`, HTTP 429/5xx). See [Observability](/docs/guide/observability#retries). |
 
 ## `upload(stream, options)`
@@ -70,6 +72,14 @@ Deletes a stored file. Returns `Promise<void>`. Deleting a file that does not ex
 ## `getUrl(path, options?)`
 
 Returns the public URL for a stored file (see [Downloads](/docs/guide/downloads#geturlpath)).
+
+## `client.handler`
+
+A web-standard request handler that serves plugin routes under `basePath`: `{ fetch, GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS }`, all the same function. Mount it with `export const { GET, POST } = client.handler` in Next.js, or `fetch: client.handler.fetch` on Workers, Bun and Deno. See [Plugins and Events](/docs/guide/plugins#routes-and-clienthandler).
+
+## `actor` and `tags`
+
+Every method accepts `actor?: string` and `tags?: Record<string, string>`. They are recorded on the operation's event and never passed to the driver.
 
 ## `getUploadStatus(id, options)`
 

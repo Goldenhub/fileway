@@ -64,6 +64,10 @@ try {
 
 Abort signals are never wrapped: cancelling an upload rejects with a plain `DOMException` named `AbortError` (see [Cancelling uploads](/docs/guide/uploads#cancelling-uploads)), which `isAbortError()` recognizes. This is the same error `fetch` itself throws on abort, so your cancellation handling works uniformly.
 
+## Events
+
+For a structured record of every operation (success or failure, with timing, retries and who did it), use a plugin's `onEvent`. It suits audit trails, usage metering and dashboards better than log lines. See [Plugins and Events](/docs/guide/plugins).
+
 ## Retries
 
 Fileway retries **transient failures** automatically at the client layer: no driver changes, no manual loops. What is worth retrying:

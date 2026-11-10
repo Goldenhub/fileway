@@ -15,6 +15,14 @@ The first stable release. Target scope, tracked on the [roadmap](README.md#roadm
 
 Expected: once the public API is frozen and has gone through real-world feedback via [GitHub Discussions](https://github.com/Goldenhub/fileway/discussions).
 
+## Unreleased
+
+**Features**
+- **Plugins** ([RFC 0002](rfcs/0002-infra-plugin.md), part 1). `plugins: [...]` on `FilewayClient`: one object that can listen to events, add upload middleware and serve HTTP routes. Use it for audit trails, usage metering, metrics, webhooks or your own file API.
+- **Events.** Every operation produces one `FilewayEvent` when it finishes, after retries: operation, outcome (`success`, `error`, `aborted`), path, size, duration, attempts, driver and error code. `onEvent` is never awaited and never fails an operation.
+- **`actor` and `tags`** on every client method record who an operation was for. They are copied onto the event and never passed to drivers.
+- **`client.handler`**: a web-standard request handler that serves plugin routes under `basePath` (default `/api/fileway`). Mount it in Next.js (`export const { GET, POST } = client.handler`), Workers, Bun, Deno or Hono.
+
 ## v0.6.0 (2026-11-10)
 
 **Features**

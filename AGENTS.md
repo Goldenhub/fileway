@@ -138,7 +138,7 @@ export class FilewayClient<const TConfig extends FilewayConfig> {
 - [x] **Remove edge duplicates**: `driver-cloudinary-edge` and `driver-s3-edge` deleted; their functionality is now in the universal `cloudinary` and `s3`.
 - [x] **Conditional exports**: All packages declare `worker`, `deno`, `bun`, `import`, `require` in `exports` map.
 - [x] **Edge-runtime tests**: `@fileway/core` and `@fileway/cloudinary` run vitest with `environment: "edge-runtime"` via `@edge-runtime/vm`.
-- [x] **All builds & tests pass**: 331 unit tests across 7 packages, plus 10 S3 integration tests against MinIO and 7 Azure integration tests against Azurite.
+- [x] **All builds & tests pass**: 339 unit tests across 7 packages, plus 10 S3 integration tests against MinIO and 7 Azure integration tests against Azurite.
 
 ## Typed Error Taxonomy (Complete)
 
@@ -165,11 +165,19 @@ export class FilewayClient<const TConfig extends FilewayConfig> {
 - [x] **Drivers**: Local (readdir walk, copyFile, rename with EXDEV fallback), S3 (ListObjectsV2, CopyObject, UploadPartCopy over 5 GiB), GCS (objects.list, objects.rewrite loop, ifGenerationMatch=0), Azure (List Blobs, Copy Blob with If-None-Match and pending polling), Supabase (object/list with a folder walk for recursive, native copy and move), Cloudinary (Admin API list across resource types plus folders, signed rename; no copy).
 - [x] **Docs**: `guide/managing-files.mdx`; RFCs live in `rfcs/` (0001 implemented; 0002 plugin API, 0003 WebDAV, 0004 app-signed links are drafts).
 
+## Plugins, Events and Handler (Complete, unreleased; RFC 0002 part 1)
+
+- [x] **Plugins**: `FilewayConfig.plugins` (`id`, `init`, `middlewares` appended after the app's, `onEvent`, `routes`); duplicate ids or routes are `config` errors (`packages/core/src/plugins.ts`).
+- [x] **Events**: one `FilewayEvent` per operation after retries, published from `runWithRetry` / `finishUpload` on success and `reportFailure` on failure (`aborted` for `AbortError`); `onEvent` is never awaited and failures are logged with `warn`.
+- [x] **`actor` / `tags`** (`TrackOptions`) on every client method, stripped before drivers and middleware.
+- [x] **`client.handler`**: web-standard handler under `basePath` (default `/api/fileway`), `"METHOD /path"` and `/*` routes, 404/405/500.
+- [x] **Docs**: `guide/plugins.mdx`. `@fileway/infra` (part 2) will live in the private `fileway-infrastructure` repo.
+
 ## Current Packages
 
 | Package | Node deps | Runtime | Tests |
 |---|---|---|---|
-| `@fileway/core` | None | Universal | 82 |
+| `@fileway/core` | None | Universal | 90 |
 | `@fileway/local` | `node:fs`, `node:path`, `node:stream` | Node.js, Bun | 36 |
 | `@fileway/s3` | None (pure fetch + Web Crypto SigV4) | Universal | 66 unit + 10 MinIO |
 | `@fileway/gcs` | None (pure fetch + Web Crypto RS256 / V4 signing) | Universal | 25 (+ opt-in live) |

@@ -184,6 +184,49 @@ interface FilewayConfig<TDriver extends BaseDriver> {
 }
 ```
 
+## `FilewayPlugin`, `FilewayEvent`, `TrackOptions`
+
+```ts
+interface FilewayPlugin {
+  id: string;
+  init?(ctx: PluginContext): void;
+  middlewares?: MiddlewareHook[];
+  onEvent?(event: FilewayEvent): void | Promise<void>; // not awaited
+  routes?: Record<string, PluginRoute>;              // "GET /path" or "GET /path/*"
+}
+
+interface PluginContext {
+  client: FilewayClient<BaseDriver>;
+  driverName: string;
+  log: Logger;
+}
+
+type PluginRoute = (request: Request, ctx: PluginContext & { params: { wildcard?: string } }) => Promise<Response> | Response;
+
+interface FilewayEvent {
+  id: string;
+  time: string;
+  operation: EventOperation; // every Operation except "retry"
+  outcome: "success" | "error" | "aborted";
+  path?: string;
+  size?: number;
+  mimeType?: string;
+  durationMs: number;
+  attempts: number;
+  driver: string;
+  error?: { name: string; message: string; code?: StorageErrorCode; statusCode?: number };
+  actor?: string;
+  tags?: Record<string, string>;
+}
+
+interface TrackOptions {
+  actor?: string;
+  tags?: Record<string, string>;
+}
+```
+
+`FilewayConfig` also takes `plugins?: FilewayPlugin[]` and `basePath?: string`, and `client.handler` is a `FilewayHandler`. See [Plugins and Events](/docs/guide/plugins).
+
 ## `Logger`
 
 ```ts
