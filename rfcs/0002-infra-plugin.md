@@ -1,7 +1,7 @@
 # RFC 0002: Plugins and the `@fileway/infra` plugin
 
 - **Status:** Draft
-- **Target:** `@fileway/core` 1.1 (plugin API, additive), `@fileway/infra` 0.1
+- **Target:** `@fileway/core` 0.7.0 (plugin API, additive, this repo); `@fileway/infra` 0.1 (private `fileway-infrastructure` repo)
 - **Depends on:** [RFC 0001](./0001-list-copy-move.md) (list, stat, copy, move)
 
 ## Summary
@@ -185,9 +185,20 @@ On `init`, the plugin calls `POST {endpoint}/v1/connect` with its version, drive
 | Clock skew over 60 seconds | Admin requests rejected with a clear `fileway-error: clock-skew` header |
 | Handler not mounted | Dashboard shows setup instructions; events still work |
 
-## Licensing
+## Repositories and licensing
 
-`@fileway/core` plugin API and `@fileway/infra` are MIT, like the rest of the Framework. The plugin is useless without an API key; the paid part is the hosted service. This keeps the "free framework, paid infrastructure" line simple and public.
+The code splits across two repositories, the same way Better Auth splits `better-auth` and its infrastructure:
+
+- **Public `fileway` repo (MIT):** Part 1 of this RFC, the plugin API, events and `client.handler` in `@fileway/core`. Anyone can use it to write their own plugins.
+- **Private `fileway-infrastructure` repo:** a monorepo with the `@fileway/infra` plugin (`packages/infra`), the shared protocol types, the hosted dashboard and the backend service. Plugin and service change together in one pull request.
+
+`@fileway/infra` is still published to the public npm registry under MIT, so customers can install it without credentials and read exactly what runs in their app. It is useless without an API key; the paid part is the hosted service. To keep the published plugin easy to audit:
+
+- ship readable, unminified JavaScript with source maps;
+- point the package's `repository` and `bugs` fields at the public `fileway` repo (or the docs), since the private repo would return 404;
+- publish a security page describing what the plugin sends, which routes it exposes and how requests are signed.
+
+npm provenance may not be available for a package built from a private repository; confirm before release, and note it in the security page if it is missing.
 
 ## Testing
 
