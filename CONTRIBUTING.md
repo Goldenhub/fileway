@@ -96,7 +96,7 @@ Maintainers handle version bumps and releases; please don't change package versi
 
 ## Reporting security issues
 
-Please don't report security problems in public issues. Use GitHub's [private vulnerability reporting](https://github.com/Goldenhub/fileway/security/advisories/new) for this repository instead. We'll acknowledge the report and keep you updated while it's fixed.
+Please don't report security problems in public issues. Use GitHub's [private vulnerability reporting](https://github.com/Goldenhub/fileway/security/advisories/new), or email security@usefileway.dev if you can't use GitHub. See the [Security Policy](SECURITY.md) for supported versions, what's in scope and how quickly we respond.
 
 ## License
 

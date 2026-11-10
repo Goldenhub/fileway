@@ -444,6 +444,7 @@ await client.move("uploads/tmp.jpg", "avatars/user-42.jpg", { overwrite: true })
 
 - 💬 **Ask questions & share ideas**: [GitHub Discussions](https://github.com/Goldenhub/fileway/discussions)
 - 🐛 **Report a bug**: open an [issue](https://github.com/Goldenhub/fileway/issues)
+- 🔒 **Report a vulnerability**: privately, as described in the [Security Policy](SECURITY.md)
 - ⭐ **Star the repo** to show support; it drives discovery
 - 📦 **npm org**: [`@fileway` on npm](https://www.npmjs.com/org/fileway)
 
