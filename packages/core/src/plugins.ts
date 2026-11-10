@@ -14,12 +14,17 @@ interface RouteEntry {
   handler: PluginRoute;
 }
 
-/** Checks plugin ids and builds the route table; throws `config` errors on clashes. */
-export function buildRoutes(plugins: FilewayPlugin[]): RouteEntry[] {
+/**
+ * Checks plugin ids and builds the route table; throws `config` errors on
+ * clashes. `builtins` are Fileway's own routes (app-signed links), registered
+ * first so a plugin cannot take them over.
+ */
+export function buildRoutes(plugins: FilewayPlugin[], builtins: Record<string, PluginRoute> = {}): RouteEntry[] {
   const ids = new Set<string>();
   const routes: RouteEntry[] = [];
   const seen = new Set<string>();
-  for (const plugin of plugins) {
+  const all: FilewayPlugin[] = Object.keys(builtins).length > 0 ? [{ id: "fileway:links", routes: builtins }, ...plugins] : plugins;
+  for (const plugin of all) {
     if (!plugin.id || typeof plugin.id !== "string") {
       throw new StorageError("config", "every plugin needs a non-empty string id");
     }

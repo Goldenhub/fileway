@@ -121,6 +121,12 @@ describeEnv("AzureDriver against Azurite", () => {
     await expect(driver.copy("lcm/missing.txt", "lcm/x.txt")).rejects.toMatchObject({ code: "not-found" });
   });
 
+  it("reads a byte range with a signed Range header", async () => {
+    const result = await driver.upload(bytes(1000), { filename: "range.bin" });
+    const part = new Uint8Array(await new Response(await driver.get(result.path, { range: { start: 10, end: 14 } })).arrayBuffer());
+    expect([...part]).toEqual([10, 11, 12, 13, 14]);
+  });
+
   it("classifies a missing container", async () => {
     const other = new AzureDriver({ container: "does-not-exist", accountName: ACCOUNT, accountKey: KEY, endpoint: ENDPOINT });
     await expect(other.upload(bytes(1), { filename: "a.txt" })).rejects.toMatchObject({ code: "bucket-not-found" });

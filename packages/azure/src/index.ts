@@ -1,4 +1,4 @@
-import type { BaseDriver, CopyOptions, ListedObject, ListOptions, ListPage, OperationOptions, PresignedUrlOptions, StoredObject, UploadContext, UploadOptions, UploadResult } from "@fileway/core";
+import type { BaseDriver, DriverCapabilities, GetOptions, CopyOptions, ListedObject, ListOptions, ListPage, OperationOptions, PresignedUrlOptions, StoredObject, UploadContext, UploadOptions, UploadResult } from "@fileway/core";
 import { validateUploadOptions, ValidationError, urlEncodePath, abortError, isAbortError, StorageError, encodeCursor, decodeCursor } from "@fileway/core";
 import { blobReadSas, bytesToBase64, signRequest, SERVICE_VERSION } from "./sharedkey.js";
 import { classifyAzureError, parseConnectionString } from "./internal.js";
@@ -233,8 +233,13 @@ export class AzureDriver implements BaseDriver<AzureMeta> {
   }
 
   /** Streams the blob. `options.signal` also cancels reading the body. */
-  async get(path: string, options?: OperationOptions): Promise<ReadableStream<Uint8Array>> {
-    const res = await this.request("GET", path, withSignal(options));
+  /** Range reads, and the upload size limit used by upload links. */
+  get capabilities(): DriverCapabilities {
+    return { range: true, ...(this.maxSizeBytes !== undefined ? { maxUploadBytes: this.maxSizeBytes } : {}) };
+  }
+
+  async get(path: string, options?: GetOptions): Promise<ReadableStream<Uint8Array>> {
+    const res = await this.request("GET", path, { headers: (options?.range ? { range: `bytes=${options.range.start}-${options.range.end ?? ""}` } : {}), ...withSignal(options) });
     if (!res.ok) throw await azureError("Azure get failed", res);
     if (!res.body) {
       throw new StorageError("provider-error", "Azure get returned no response body", { provider: PROVIDER });

@@ -1164,3 +1164,13 @@ describe("S3Driver list, copy, move", () => {
     expect(String(mockFetch.mock.calls[3]![0])).toContain("/a.txt");
   });
 });
+
+describe("S3Driver range reads", () => {
+  it("sends a Range header and declares range support", async () => {
+    const driver = new S3Driver({ bucket: "b", credentials: { accessKeyId: "AKID", secretAccessKey: "secret" }, maxSizeBytes: 50 });
+    expect(driver.capabilities).toEqual({ range: true, maxUploadBytes: 50 });
+    mockFetch.mockResolvedValueOnce(new Response("abc", { status: 206 }));
+    await driver.get("a.bin", { range: { start: 2, end: 4 } });
+    expect(((mockFetch.mock.calls[0]![1] as RequestInit).headers as Record<string, string>).range).toBe("bytes=2-4");
+  });
+});

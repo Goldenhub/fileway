@@ -1113,3 +1113,13 @@ describe("CloudinaryDriver list and move", () => {
     await expect(client.copy("a", "b")).rejects.toMatchObject({ code: "config" });
   });
 });
+
+describe("CloudinaryDriver range reads", () => {
+  it("sends a Range header to the CDN", async () => {
+    const driver = new CloudinaryDriver({ cloudName: "demo", apiKey: "k", apiSecret: "s" });
+    expect(driver.capabilities).toEqual({ range: true });
+    mockFetch.mockResolvedValueOnce({ ok: true, status: 206, body: new ReadableStream() } as Response);
+    await driver.get("abc", { resourceType: "image", range: { start: 0, end: 9 } });
+    expect((mockFetch.mock.calls[0]![1] as RequestInit).headers).toEqual({ range: "bytes=0-9" });
+  });
+});

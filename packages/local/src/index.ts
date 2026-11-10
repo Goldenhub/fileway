@@ -1,4 +1,4 @@
-import type { BaseDriver, CopyOptions, ListedObject, ListOptions, ListPage, OperationOptions, StoredObject, UploadOptions, UploadResult } from "@fileway/core";
+import type { BaseDriver, DriverCapabilities, GetOptions, CopyOptions, ListedObject, ListOptions, ListPage, OperationOptions, StoredObject, UploadOptions, UploadResult } from "@fileway/core";
 import { validateUploadOptions, ValidationError, urlEncodePath, abortError, StorageError, encodeCursor, decodeCursor } from "@fileway/core";
 import { createWriteStream, createReadStream, constants } from "node:fs";
 import { mkdir, unlink, access, lstat, rename, stat, readdir, copyFile } from "node:fs/promises";
@@ -198,7 +198,12 @@ export class LocalDriver implements BaseDriver<LocalMeta> {
   }
 
   /** Streams the file. `options.signal` also stops reading it mid-stream. */
-  async get(path: string, options?: OperationOptions): Promise<ReadableStream<Uint8Array>> {
+  /** Range reads, and the upload size limit used by upload links. */
+  get capabilities(): DriverCapabilities {
+    return { range: true, ...(this.maxSizeBytes !== undefined ? { maxUploadBytes: this.maxSizeBytes } : {}) };
+  }
+
+  async get(path: string, options?: GetOptions): Promise<ReadableStream<Uint8Array>> {
     throwIfAborted(options?.signal);
     const fullPath = this.resolveInside(path);
     await this.assertSafePath(fullPath);
@@ -209,7 +214,10 @@ export class LocalDriver implements BaseDriver<LocalMeta> {
       throw new StorageError("not-found", `file not found: ${path}`, { provider: "local" });
     }
 
-    const file = createReadStream(fullPath, options?.signal ? { signal: options.signal } : {});
+    const file = createReadStream(fullPath, {
+      ...(options?.signal ? { signal: options.signal } : {}),
+      ...(options?.range ? { start: options.range.start, ...(options.range.end !== undefined ? { end: options.range.end } : {}) } : {}),
+    });
     return Readable.toWeb(file) as ReadableStream<Uint8Array>;
   }
 

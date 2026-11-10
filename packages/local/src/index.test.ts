@@ -498,3 +498,20 @@ describe("LocalDriver list, copy, move", () => {
     await expect(client.stat("b.txt")).resolves.toMatchObject({ size: 2 });
   });
 });
+
+describe("LocalDriver range reads", () => {
+  it("reads only the requested bytes and declares range support", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "fileway-local-range-"));
+    try {
+      writeFileSync(join(dir, "n.bin"), Uint8Array.from({ length: 10 }, (_, i) => i));
+      const driver = new LocalDriver({ directory: dir, maxSizeBytes: 1000 });
+      expect(driver.capabilities).toEqual({ range: true, maxUploadBytes: 1000 });
+      const part = new Uint8Array(await new Response(await driver.get("n.bin", { range: { start: 3, end: 5 } })).arrayBuffer());
+      expect([...part]).toEqual([3, 4, 5]);
+      const tail = new Uint8Array(await new Response(await driver.get("n.bin", { range: { start: 8 } })).arrayBuffer());
+      expect([...tail]).toEqual([8, 9]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

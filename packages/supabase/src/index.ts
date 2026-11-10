@@ -1,4 +1,4 @@
-import type { BaseDriver, CopyOptions, ListedObject, ListOptions, ListPage, OperationOptions, PresignedUrlOptions, StoredObject, UploadContext, UploadOptions, UploadResult } from "@fileway/core";
+import type { BaseDriver, DriverCapabilities, GetOptions, CopyOptions, ListedObject, ListOptions, ListPage, OperationOptions, PresignedUrlOptions, StoredObject, UploadContext, UploadOptions, UploadResult } from "@fileway/core";
 import { classifySupabaseError } from "./errors.js";
 import { validateUploadOptions, ValidationError, urlEncodePath, abortError, isAbortError, StorageError, encodeCursor, decodeCursor } from "@fileway/core";
 
@@ -337,9 +337,14 @@ export class SupabaseDriver implements BaseDriver<SupabaseMeta> {
   }
 
   /** Streams the object. `options.signal` also cancels reading the body. */
-  async get(path: string, options?: OperationOptions): Promise<ReadableStream<Uint8Array>> {
+  /** Range reads, and the upload size limit used by upload links. */
+  get capabilities(): DriverCapabilities {
+    return { range: true, ...(this.maxSizeBytes !== undefined ? { maxUploadBytes: this.maxSizeBytes } : {}) };
+  }
+
+  async get(path: string, options?: GetOptions): Promise<ReadableStream<Uint8Array>> {
     const res = await fetchWithAbort(this.objectUrl("object/authenticated", path), {
-      headers: this.headers,
+      headers: { ...this.headers, ...(options?.range ? { range: `bytes=${options.range.start}-${options.range.end ?? ""}` } : {}) },
       signal: options?.signal ?? null,
     });
     if (!res.ok) throw await supabaseError("Supabase get failed", res);

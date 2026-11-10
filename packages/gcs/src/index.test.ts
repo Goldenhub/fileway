@@ -463,3 +463,12 @@ describe("list, copy, move", () => {
     expect(call(1).url.pathname).toBe("/storage/v1/b/bkt/o/a.txt");
   });
 });
+
+describe("range reads", () => {
+  it("sends a Range header and declares range support", async () => {
+    expect(tokenDriver().capabilities).toEqual({ range: true });
+    mockFetch.mockResolvedValueOnce(new Response("abc", { status: 206 }));
+    await tokenDriver().get("a.bin", { range: { start: 5 } });
+    expect(call(0).headers.range).toBe("bytes=5-");
+  });
+});

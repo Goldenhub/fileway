@@ -1,4 +1,4 @@
-import type { BaseDriver, CopyOptions, ListOptions, ListPage, OperationOptions, PresignedUrlOptions, StoredObject, UploadContext, UploadOptions, UploadResult } from "@fileway/core";
+import type { BaseDriver, DriverCapabilities, GetOptions, CopyOptions, ListOptions, ListPage, OperationOptions, PresignedUrlOptions, StoredObject, UploadContext, UploadOptions, UploadResult } from "@fileway/core";
 import { validateUploadOptions, ValidationError, urlEncodePath, abortError, isAbortError, StorageError, encodeCursor, decodeCursor } from "@fileway/core";
 import { signedReadUrl, TokenSource } from "./auth.js";
 import { classifyGcsError } from "./errors.js";
@@ -295,9 +295,14 @@ export class GCSDriver implements BaseDriver<GCSMeta> {
   }
 
   /** Streams the object. `options.signal` also cancels reading the body. */
-  async get(path: string, options?: OperationOptions): Promise<ReadableStream<Uint8Array>> {
+  /** Range reads, and the upload size limit used by upload links. */
+  get capabilities(): DriverCapabilities {
+    return { range: true, ...(this.maxSizeBytes !== undefined ? { maxUploadBytes: this.maxSizeBytes } : {}) };
+  }
+
+  async get(path: string, options?: GetOptions): Promise<ReadableStream<Uint8Array>> {
     const res = await fetchWithAbort(`${this.objectUrl(path)}?alt=media`, {
-      headers: await this.authHeaders(),
+      headers: { ...(await this.authHeaders()), ...(options?.range ? { range: `bytes=${options.range.start}-${options.range.end ?? ""}` } : {}) },
       signal: options?.signal ?? null,
     });
     if (!res.ok) throw await gcsError("GCS get failed", res);

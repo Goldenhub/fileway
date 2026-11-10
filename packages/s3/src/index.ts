@@ -1,4 +1,4 @@
-import type { BaseDriver, CopyOptions, ListedObject, ListOptions, ListPage, OperationOptions, PresignedUrlOptions, StorageErrorCode, StoredObject, UploadContext, UploadOptions, UploadResult } from "@fileway/core";
+import type { BaseDriver, DriverCapabilities, GetOptions, CopyOptions, ListedObject, ListOptions, ListPage, OperationOptions, PresignedUrlOptions, StorageErrorCode, StoredObject, UploadContext, UploadOptions, UploadResult } from "@fileway/core";
 import { validateUploadOptions, ValidationError, urlEncodePath, abortError, isAbortError, StorageError, encodeCursor, decodeCursor } from "@fileway/core";
 import { buildCanonicalQueryString, createStreamingBody, presignUrl, sign, signStreamingRequest, sha256 } from "./sigv4.js";
 import type { SigV4Credentials } from "./sigv4.js";
@@ -570,7 +570,12 @@ export class S3Driver implements BaseDriver<S3Meta> {
   }
 
   /** Streams the object. `options.signal` also cancels reading the body. */
-  async get(path: string, options?: OperationOptions): Promise<ReadableStream<Uint8Array>> {
+  /** Range reads, and the upload size limit used by upload links. */
+  get capabilities(): DriverCapabilities {
+    return { range: true, ...(this.config.maxSizeBytes !== undefined ? { maxUploadBytes: this.config.maxSizeBytes } : {}) };
+  }
+
+  async get(path: string, options?: GetOptions): Promise<ReadableStream<Uint8Array>> {
     const cred = getCredentials(this.config);
     const { url, canonicalPath, host } = buildEndpoint(this.config, path);
     const now = new Date();
@@ -584,7 +589,11 @@ export class S3Driver implements BaseDriver<S3Meta> {
       now,
     );
 
-    const response = await fetchWithAbort(url, { method: "GET", headers: sigHeaders, signal: options?.signal ?? null }, "s3");
+    const response = await fetchWithAbort(url, {
+      method: "GET",
+      headers: { ...sigHeaders, ...(options?.range ? { range: `bytes=${options.range.start}-${options.range.end ?? ""}` } : {}) },
+      signal: options?.signal ?? null,
+    }, "s3");
     if (!response.ok) {
       const body = await response.text().catch(() => "");
       throw s3Error(`S3 get failed: ${response.status} ${response.statusText}${body ? `: ${body}` : ""}`, response.status, body);

@@ -19,6 +19,9 @@ export const version: string = typeof __FILEWAY_VERSION__ === "string" ? __FILEW
 import type {
   BaseDriver,
   CopyOptions,
+  LinksConfig,
+  PresignedUpload,
+  PresignedUploadOptions,
   EventOperation,
   FilewayEvent,
   FilewayHandler,
@@ -52,6 +55,17 @@ import {
 import { delayWithJitter, isRetryable, sleep } from "./retry.js";
 import { IdleTimer, linkSignals, raceAbort, timeoutError, withActivity, withTimeLimit } from "./timeout.js";
 import { buildRoutes, createHandler } from "./plugins.js";
+import {
+  DEFAULT_MAX_EXPIRES_IN,
+  checkExpiresIn,
+  checkSecrets,
+  deriveKeys,
+  isSafeInline,
+  linkRoutes,
+  mimeFromPath,
+  signDownload,
+  signUpload,
+} from "./links.js";
 import type { ErrorContext, Logger, LogLevel, Operation } from "./logging.js";
 
 /** The driver's own options type for a `(path, options?)` method, or
@@ -68,6 +82,9 @@ export class FilewayClient<TDriver extends BaseDriver> {
   private onError: ((error: unknown, context: ErrorContext) => void | Promise<void>) | undefined;
   private retry: RetryConfig;
   private plugins: FilewayPlugin[];
+  private basePath: string;
+  private links: LinksConfig | undefined;
+  private linkKeys: (() => Promise<CryptoKey[]>) | undefined;
   /**
    * Serves plugin routes under `basePath` (default `/api/fileway`). Mount it as
    * a web-standard handler: `export const { GET, POST } = client.handler` in a
@@ -86,7 +103,27 @@ export class FilewayClient<TDriver extends BaseDriver> {
     }
 
     this.plugins = config.plugins ?? [];
-    const routes = buildRoutes(this.plugins);
+    this.basePath = (config.basePath ?? "/api/fileway").replace(/\/+$/, "");
+    this.links = config.links;
+    let builtins = {};
+    if (config.links) {
+      const secrets = checkSecrets(config.links.secret);
+      try {
+        new URL(config.links.origin);
+      } catch {
+        throw new StorageError("config", "links.origin must be an absolute URL, e.g. https://files.example.com");
+      }
+      let keys: Promise<CryptoKey[]> | undefined;
+      this.linkKeys = () => (keys ??= deriveKeys(secrets));
+      builtins = linkRoutes({
+        driver: this.driver,
+        config: config.links,
+        keys: this.linkKeys,
+        get: (path, options) => this.get(path, options as never),
+        upload: (stream, options) => this.upload(stream, options as never),
+      });
+    }
+    const routes = buildRoutes(this.plugins, builtins);
     // Plugin middleware runs after the app's own, so it sees the final stream and options.
     const pluginMiddlewares = this.plugins.flatMap((plugin) => plugin.middlewares ?? []);
     this.middlewares = [
@@ -103,7 +140,7 @@ export class FilewayClient<TDriver extends BaseDriver> {
         error: (message, meta) => this.emit("error", message, meta),
       },
     };
-    this.handler = createHandler(routes, config.basePath ?? "/api/fileway", ctx, ctx.log);
+    this.handler = createHandler(routes, this.basePath, ctx, ctx.log);
     for (const plugin of this.plugins) plugin.init?.(ctx);
   }
 
@@ -383,16 +420,83 @@ export class FilewayClient<TDriver extends BaseDriver> {
     path: string,
     options?: PresignedUrlOptions & MethodOptions<NonNullable<TDriver["getPresignedUrl"]>> & TrackOptions,
   ): Promise<string> {
+    const native = this.driver.getPresignedUrl;
+    const appSigned = this.links !== undefined && (this.links.mode === "always" || !native);
     return this.runWithRetry("getPresignedUrl", path, async (signal) => {
-      if (!this.driver.getPresignedUrl) {
+      if (appSigned) return this.signDownloadLink(path, options);
+      if (!native) {
         throw new StorageError(
           "config",
-          `driver ${this.driver.name} does not support presigned URLs`,
+          `driver ${this.driver.name} does not support presigned URLs; configure links to use app-signed links`,
           { provider: this.driver.name },
         );
       }
-      return this.driver.getPresignedUrl(path, withSignal(options, signal));
+      return native.call(this.driver, path, withSignal(options, signal));
     }, options?.signal, trackOf(options));
+  }
+
+  /**
+   * A signed link a browser can upload one file to with `PUT`, served by
+   * `client.handler`. The link fixes the filename, folder, id, content type
+   * and size limit. Needs `links` in the client config.
+   */
+  async getPresignedUploadUrl(options: PresignedUploadOptions & TrackOptions): Promise<PresignedUpload> {
+    const links = this.links;
+    if (!links || !this.linkKeys) {
+      throw new StorageError("config", "getPresignedUploadUrl needs links in the client config");
+    }
+    validateUploadOptions(options);
+    const id = options.id ?? globalThis.crypto.randomUUID();
+    validateUploadId(id);
+    const maxSize = options.maxSize ?? this.driver.capabilities?.maxUploadBytes;
+    if (maxSize === undefined) {
+      throw new ValidationError("maxSize is required: the driver has no upload size limit of its own");
+    }
+    if (!Number.isInteger(maxSize) || maxSize < 1) throw new ValidationError("maxSize must be a positive integer");
+    const expiresIn = options.expiresIn ?? 900;
+    checkExpiresIn(expiresIn, links.maxExpiresIn ?? DEFAULT_MAX_EXPIRES_IN);
+    return this.runWithRetry("getPresignedUrl", options.path ?? "", async () => {
+      const [key] = await this.linkKeys!();
+      const url = await signUpload({
+        key: key!,
+        base: this.linkBase(links),
+        filename: options.filename,
+        id,
+        maxSize,
+        expires: Math.floor(Date.now() / 1000) + expiresIn,
+        ...(options.path ? { path: options.path } : {}),
+        ...(options.mimeType ? { mimeType: options.mimeType } : {}),
+      });
+      return { url, method: "PUT" as const, headers: options.mimeType ? { "content-type": options.mimeType } : {}, id };
+    }, options.signal, trackOf(options));
+  }
+
+  private linkBase(links: LinksConfig): string {
+    return `${links.origin.replace(/\/+$/, "")}${this.basePath}`;
+  }
+
+  private async signDownloadLink(path: string, options?: PresignedUrlOptions): Promise<string> {
+    const links = this.links!;
+    validateObjectPath(path);
+    const expiresIn = options?.expiresIn ?? 3600;
+    checkExpiresIn(expiresIn, links.maxExpiresIn ?? DEFAULT_MAX_EXPIRES_IN);
+    if (options?.id !== undefined) validateUploadId(options.id);
+    const type = mimeFromPath(path) ?? "application/octet-stream";
+    const safe = isSafeInline(type, links.inlineTypes);
+    const disposition = options?.disposition ?? (safe ? "inline" : "attachment");
+    if (disposition === "inline" && !safe) {
+      throw new ValidationError(`${type} files cannot open inline; add the type to links.inlineTypes to allow it`);
+    }
+    const [key] = await this.linkKeys!();
+    return signDownload({
+      key: key!,
+      base: this.linkBase(links),
+      path,
+      expires: Math.floor(Date.now() / 1000) + expiresIn,
+      disposition,
+      ...(options?.filename ? { filename: options.filename } : {}),
+      ...(options?.id ? { id: options.id } : {}),
+    });
   }
 
   /** One page of the objects under `options.prefix`. Pass `page.cursor` back to get the next one. */

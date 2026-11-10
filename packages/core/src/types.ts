@@ -124,6 +124,92 @@ export interface PresignedUrlOptions extends OperationOptions {
    * provider-specific: S3, GCS and Azure allow at most 604800 (7 days);
    * Cloudinary and Supabase accept any positive integer. */
   expiresIn?: number;
+  /**
+   * App-signed links only: open in the browser (`"inline"`) or download
+   * (`"attachment"`). Default: inline for images, PDF, audio and video,
+   * download for everything else.
+   */
+  disposition?: "inline" | "attachment";
+  /** App-signed links only: the download name. Default: the last path segment. */
+  filename?: string;
+  /** App-signed links only: an id passed to `links.check`, e.g. a share id. */
+  id?: string;
+}
+
+/** A byte range: `start` and `end` are inclusive offsets; omit `end` to read to the end. */
+export interface ByteRange {
+  start: number;
+  end?: number;
+}
+
+/** Options for `get`. */
+export interface GetOptions extends OperationOptions {
+  /** Read only these bytes, when the driver supports ranges (`capabilities.range`). */
+  range?: ByteRange;
+}
+
+/** What a driver can do beyond the required methods. */
+export interface DriverCapabilities {
+  /** `get` honors `options.range`. */
+  range?: boolean;
+  /** The largest upload the driver accepts (its `maxSizeBytes`), used as the
+   * default limit for upload links. */
+  maxUploadBytes?: number;
+}
+
+/** Options for `getPresignedUploadUrl`. */
+export interface PresignedUploadOptions extends OperationOptions {
+  filename: string;
+  path?: string;
+  /** The upload id; default a new UUID, returned so it can be tracked. */
+  id?: string;
+  mimeType?: string;
+  /** Largest allowed body in bytes. Default: the driver's limit; required when
+   * the driver has none. */
+  maxSize?: number;
+  /** Seconds until the link expires. Default 900. */
+  expiresIn?: number;
+}
+
+export interface PresignedUpload {
+  url: string;
+  method: "PUT";
+  /** Headers the uploader should send (the content type, when set). */
+  headers: Record<string, string>;
+  id: string;
+}
+
+/** A link that passed signature and expiry checks, as given to `links.check`. */
+export interface VerifiedLink {
+  method: "GET" | "PUT";
+  path: string;
+  expires: Date;
+  id?: string;
+  disposition?: "inline" | "attachment";
+  filename?: string;
+}
+
+/** App-signed links: download and upload links served by `client.handler`. */
+export interface LinksConfig {
+  /**
+   * Signing secret(s), each at least 32 bytes, base64 or base64url encoded.
+   * The first signs new links; all of them verify, so secrets can be rotated.
+   */
+  secret: string | string[];
+  /** Public origin where `client.handler` is reachable, e.g.
+   * `"https://files.myapp.com"`. Links are `{origin}{basePath}/...`. */
+  origin: string;
+  /** `"fallback"` (default): app-signed links only for drivers that cannot
+   * presign. `"always"`: for every driver. */
+  mode?: "fallback" | "always";
+  /** Longest allowed `expiresIn`, in seconds. Default 604800 (7 days). */
+  maxExpiresIn?: number;
+  /** Origins allowed to use links from a browser on another origin (CORS). */
+  cors?: string[];
+  /** Extra content types allowed to open inline, e.g. `["text/plain"]`. */
+  inlineTypes?: string[];
+  /** Runs before serving a link that has an `id`; return false to refuse it. */
+  check?(link: VerifiedLink, request: Request): boolean | Promise<boolean>;
 }
 
 export interface BaseDriver<TMeta extends Record<string, unknown> = Record<string, unknown>> {
@@ -142,7 +228,9 @@ export interface BaseDriver<TMeta extends Record<string, unknown> = Record<strin
    * Streams the stored file back as a WHATWG `ReadableStream<Uint8Array>`.
    * Throws when `path` does not exist.
    */
-  get(path: string, options?: OperationOptions): Promise<ReadableStream<Uint8Array>>;
+  get(path: string, options?: GetOptions): Promise<ReadableStream<Uint8Array>>;
+  /** Optional abilities, e.g. range reads. */
+  readonly capabilities?: DriverCapabilities;
   /**
    * Returns a time-limited, signed URL granting read access to `path`.
    * Optional: drivers that cannot presign (e.g. LocalDriver) omit it.
@@ -278,6 +366,8 @@ export interface FilewayConfig<TDriver extends BaseDriver> {
   plugins?: FilewayPlugin[];
   /** Path where `client.handler` is mounted. Default `"/api/fileway"`. */
   basePath?: string;
+  /** App-signed download and upload links, served by `client.handler`. */
+  links?: LinksConfig;
 }
 
 /**

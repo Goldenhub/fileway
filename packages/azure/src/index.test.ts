@@ -501,3 +501,13 @@ describe("list, copy, move", () => {
     expect(call(1).url.pathname).toBe("/files/a.txt");
   });
 });
+
+describe("range reads", () => {
+  it("sends a signed Range header and declares range support", async () => {
+    expect(makeDriver({ maxSizeBytes: 9 }).capabilities).toEqual({ range: true, maxUploadBytes: 9 });
+    mockFetch.mockResolvedValueOnce(new Response("abc", { status: 206 }));
+    await makeDriver().get("a.bin", { range: { start: 0, end: 2 } });
+    expect(call(0).headers.range).toBe("bytes=0-2");
+    expect(call(0).headers.authorization).toMatch(/^SharedKey /);
+  });
+});

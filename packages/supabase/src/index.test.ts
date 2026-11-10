@@ -402,3 +402,12 @@ describe("list, copy, move", () => {
     expect(classifySupabaseError(400, '{"statusCode":"409","error":"Duplicate","message":"The resource already exists"}')).toBe("conflict");
   });
 });
+
+describe("range reads", () => {
+  it("sends a Range header and declares range support", async () => {
+    expect(makeDriver().capabilities).toEqual({ range: true });
+    mockFetch.mockResolvedValueOnce(new Response("abc", { status: 206 }));
+    await makeDriver().get("a.bin", { range: { start: 1, end: 3 } });
+    expect(call(0).headers.range).toBe("bytes=1-3");
+  });
+});

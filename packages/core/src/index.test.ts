@@ -1636,3 +1636,228 @@ describe("plugins, events and handler", () => {
     expect(await res.text()).toBe("put");
   });
 });
+
+describe("app-signed links", () => {
+  const SECRET = btoa(String.fromCharCode(...new Uint8Array(32).map((_, i) => i + 1)));
+  const SECRET2 = btoa(String.fromCharCode(...new Uint8Array(32).map((_, i) => 200 - i)));
+  const ORIGIN = "https://files.example.com";
+
+  function disk({ range = true, limit, native = false }: { range?: boolean; limit?: number; native?: boolean } = {}) {
+    const store = new Map<string, { bytes: Uint8Array; type?: string }>();
+    store.set("photos/cat.png", { bytes: Uint8Array.from({ length: 10 }, (_, i) => i) });
+    store.set("docs/report.pdf", { bytes: new Uint8Array(3) });
+    store.set("pages/x.html", { bytes: new Uint8Array(3) });
+    store.set("sneaky.png", { bytes: new Uint8Array(3), type: "text/html" });
+    const driver = {
+      name: "disk",
+      store,
+      capabilities: { range, ...(limit !== undefined ? { maxUploadBytes: limit } : {}) },
+      upload: vi.fn(async (stream: ReadableStream<Uint8Array>, o: UploadOptions) => {
+        const bytes = new Uint8Array(await new Response(stream).arrayBuffer());
+        const ext = o.filename.includes(".") ? `.${o.filename.split(".").pop()}` : "";
+        const path = `${o.path ? `${o.path}/` : ""}${o.id}${ext}`;
+        store.set(path, { bytes });
+        return { id: o.id!, url: path, path, size: bytes.byteLength, meta: {} };
+      }),
+      delete: vi.fn(async () => {}),
+      getUrl: vi.fn(async (p: string) => p),
+      head: vi.fn(async (p: string) => {
+        const o = store.get(p);
+        if (!o) return null;
+        return { id: p, url: p, path: p, size: o.bytes.byteLength, meta: { etag: '"e1"' }, ...(o.type ? { contentType: o.type } : {}) };
+      }),
+      get: vi.fn(async (p: string, opts?: import("./types.js").GetOptions) => {
+        const o = store.get(p);
+        if (!o) throw new StorageError("not-found", "missing");
+        const bytes = opts?.range ? o.bytes.slice(opts.range.start, (opts.range.end ?? o.bytes.length - 1) + 1) : o.bytes;
+        return new Response(bytes as BodyInit).body!;
+      }),
+      ...(native ? { getPresignedUrl: vi.fn(async (p: string) => `https://native/${p}`) } : {}),
+    };
+    return driver;
+  }
+  const make = (extra: Partial<import("./types.js").LinksConfig> = {}, driverOpts = {}) => {
+    const driver = disk(driverOpts);
+    const events: import("./types.js").FilewayEvent[] = [];
+    const client = new FilewayClient({
+      driver,
+      plugins: [{ id: "events", onEvent: (e) => void events.push(e) }],
+      links: { secret: SECRET, origin: ORIGIN, ...extra },
+    });
+    return { client, driver, events };
+  };
+  const call = (client: { handler: { fetch(r: Request): Promise<Response> } }, url: string, init?: RequestInit) =>
+    client.handler.fetch(new Request(url, init));
+
+  it("rejects short secrets and relative origins", () => {
+    expect(() => make({ secret: btoa("too short") })).toThrow(/at least 32 bytes/);
+    expect(() => make({ origin: "files.example.com" })).toThrow(/absolute URL/);
+  });
+
+  it("signs a download link and serves the file with safe headers", async () => {
+    const { client, events } = make();
+    const url = await client.getPresignedUrl("photos/cat.png", { expiresIn: 600 });
+    expect(url.startsWith(`${ORIGIN}/api/fileway/files/photos/cat.png?`)).toBe(true);
+    const res = await call(client, url);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("image/png");
+    expect(res.headers.get("content-disposition")).toBe(`inline; filename="cat.png"; filename*=UTF-8''cat.png`);
+    expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(res.headers.get("content-security-policy")).toBe("sandbox; default-src 'none'");
+    expect(res.headers.get("cache-control")).toBe("private, max-age=300");
+    expect(res.headers.get("etag")).toBe('"e1"');
+    expect(res.headers.get("content-length")).toBe("10");
+    expect(new Uint8Array(await res.arrayBuffer())).toEqual(Uint8Array.from({ length: 10 }, (_, i) => i));
+    expect(events.at(-1)).toMatchObject({ operation: "get", outcome: "success", actor: "link", path: "photos/cat.png" });
+  });
+
+  it("opens only safe types inline", async () => {
+    const { client } = make({ inlineTypes: ["text/plain"] });
+    const pdf = await call(client, await client.getPresignedUrl("docs/report.pdf"));
+    expect(pdf.headers.get("content-disposition")).toMatch(/^inline;/);
+    // Chrome's PDF viewer does not render under a sandbox CSP; PDFs keep nosniff only.
+    expect(pdf.headers.get("content-security-policy")).toBeNull();
+    expect(pdf.headers.get("x-content-type-options")).toBe("nosniff");
+    const html = await call(client, await client.getPresignedUrl("pages/x.html"));
+    expect(html.headers.get("content-disposition")).toMatch(/^attachment;/);
+    await expect(client.getPresignedUrl("pages/x.html", { disposition: "inline" })).rejects.toThrow(ValidationError);
+    await expect(client.getPresignedUrl("notes.txt", { disposition: "inline" })).resolves.toContain("d=i");
+    // A stored type that can run script downloads, whatever the link says.
+    const sneaky = await call(client, await client.getPresignedUrl("sneaky.png"));
+    expect(sneaky.headers.get("content-type")).toBe("text/html");
+    expect(sneaky.headers.get("content-disposition")).toMatch(/^attachment;/);
+  });
+
+  it("refuses tampered, malformed and expired links", async () => {
+    const { client } = make();
+    const url = new URL(await client.getPresignedUrl("photos/cat.png", { filename: "cat.png" }));
+    const tamper = (fn: (u: URL) => void) => {
+      const u = new URL(url);
+      fn(u);
+      return call(client, u.href);
+    };
+    expect((await tamper((u) => (u.pathname = u.pathname.replace("cat.png", "dog.png")))).status).toBe(403);
+    expect((await tamper((u) => u.searchParams.set("exp", String(Number(u.searchParams.get("exp")) + 60)))).status).toBe(403);
+    expect((await tamper((u) => u.searchParams.set("d", "a"))).status).toBe(403);
+    expect((await tamper((u) => u.searchParams.set("fn", "other.png"))).status).toBe(403);
+    expect((await tamper((u) => u.searchParams.set("sig", "AAAA"))).status).toBe(403);
+
+    vi.useFakeTimers();
+    try {
+      const short = await client.getPresignedUrl("photos/cat.png", { expiresIn: 1 });
+      vi.setSystemTime(Date.now() + 5000);
+      const res = await call(client, short);
+      expect(res.status).toBe(403);
+      expect(res.headers.get("fileway-error")).toBe("expired");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("verifies with every configured secret, so secrets can rotate", async () => {
+    const before = make({ secret: SECRET }).client;
+    const url = await before.getPresignedUrl("photos/cat.png");
+    expect((await call(make({ secret: [SECRET2, SECRET] }).client, url)).status).toBe(200);
+    expect((await call(make({ secret: SECRET2 }).client, url)).status).toBe(403);
+  });
+
+  it("serves ranges as 206 when the driver supports them", async () => {
+    const { client } = make();
+    const url = await client.getPresignedUrl("photos/cat.png");
+    const part = await call(client, url, { headers: { range: "bytes=2-4" } });
+    expect(part.status).toBe(206);
+    expect(part.headers.get("content-range")).toBe("bytes 2-4/10");
+    expect(part.headers.get("content-length")).toBe("3");
+    expect([...new Uint8Array(await part.arrayBuffer())]).toEqual([2, 3, 4]);
+    const tail = await call(client, url, { headers: { range: "bytes=-2" } });
+    expect([...new Uint8Array(await tail.arrayBuffer())]).toEqual([8, 9]);
+    expect((await call(client, url, { headers: { range: "bytes=50-60" } })).status).toBe(416);
+
+    const plain = make({}, { range: false }).client;
+    const full = await call(plain, await plain.getPresignedUrl("photos/cat.png"), { headers: { range: "bytes=2-4" } });
+    expect(full.status).toBe(200);
+    expect(full.headers.get("accept-ranges")).toBeNull();
+  });
+
+  it("answers HEAD without a body, and 404 for a missing file", async () => {
+    const { client, driver } = make();
+    const head = await call(client, await client.getPresignedUrl("photos/cat.png"), { method: "HEAD" });
+    expect(head.status).toBe(200);
+    expect(head.headers.get("content-length")).toBe("10");
+    expect(driver.get).not.toHaveBeenCalled();
+    expect((await call(client, await client.getPresignedUrl("missing.png"))).status).toBe(404);
+  });
+
+  it("runs check for links with an id", async () => {
+    const check = vi.fn(async (link: import("./types.js").VerifiedLink) => link.id !== "revoked");
+    const { client } = make({ check });
+    expect((await call(client, await client.getPresignedUrl("photos/cat.png", { id: "share1" }))).status).toBe(200);
+    expect((await call(client, await client.getPresignedUrl("photos/cat.png", { id: "revoked" }))).status).toBe(403);
+    await call(client, await client.getPresignedUrl("photos/cat.png"));
+    expect(check).toHaveBeenCalledTimes(2);
+    expect(check.mock.calls[0]![0]).toMatchObject({ method: "GET", path: "photos/cat.png", id: "share1", disposition: "inline" });
+  });
+
+  it("uses native presigning in fallback mode and app links in always mode", async () => {
+    const fallback = make({}, { native: true }).client;
+    await expect(fallback.getPresignedUrl("photos/cat.png")).resolves.toBe("https://native/photos/cat.png");
+    const always = make({ mode: "always" }, { native: true }).client;
+    await expect(always.getPresignedUrl("photos/cat.png")).resolves.toMatch(/^https:\/\/files\.example\.com\//);
+  });
+
+  it("issues upload links that write exactly one object within the limit", async () => {
+    const { client, driver, events } = make({}, { limit: 16 });
+    const link = await client.getPresignedUploadUrl({ filename: "avatar.png", path: "avatars", id: "u42", mimeType: "image/png" });
+    expect(link).toMatchObject({ method: "PUT", id: "u42", headers: { "content-type": "image/png" } });
+    const put = (url: string, body: BodyInit, headers: Record<string, string> = {}) =>
+      call(client, url, { method: "PUT", body, headers, duplex: "half" } as RequestInit);
+
+    const ok = await put(link.url, new Uint8Array(8));
+    expect(ok.status).toBe(201);
+    expect(await ok.json()).toEqual({ id: "u42", path: "avatars/u42.png", size: 8 });
+    expect(driver.upload.mock.calls[0]![1]).toMatchObject({ filename: "avatar.png", path: "avatars", id: "u42", mimeType: "image/png" });
+    expect(events.at(-1)).toMatchObject({ operation: "upload", actor: "link", tags: { linkId: "u42" } });
+
+    // Reusing the link overwrites the same object rather than creating new ones.
+    expect((await put(link.url, new Uint8Array(4))).status).toBe(201);
+    expect(driver.store.get("avatars/u42.png")!.bytes.byteLength).toBe(4);
+
+    const stream = new ReadableStream<Uint8Array>({ start: (c) => { c.enqueue(new Uint8Array(10)); c.enqueue(new Uint8Array(10)); c.close(); } });
+    expect((await put(link.url, stream)).status).toBe(413);
+
+    const tampered = new URL(link.url);
+    tampered.searchParams.set("max", "999999");
+    expect((await put(tampered.href, new Uint8Array(1))).status).toBe(403);
+  });
+
+  it("needs a size limit from the link or the driver", async () => {
+    const { client } = make();
+    await expect(client.getPresignedUploadUrl({ filename: "a.txt" })).rejects.toThrow(/maxSize is required/);
+    await expect(client.getPresignedUploadUrl({ filename: "a.txt", maxSize: 100 })).resolves.toMatchObject({ method: "PUT" });
+  });
+
+  it("answers CORS preflights for allowed origins only", async () => {
+    const { client } = make({ cors: ["https://app.example.com"] });
+    const pre = await call(client, `${ORIGIN}/api/fileway/upload`, { method: "OPTIONS", headers: { origin: "https://app.example.com" } });
+    expect(pre.status).toBe(204);
+    expect(pre.headers.get("access-control-allow-origin")).toBe("https://app.example.com");
+    expect(pre.headers.get("access-control-allow-methods")).toBe("GET, HEAD, PUT");
+    const other = await call(client, `${ORIGIN}/api/fileway/upload`, { method: "OPTIONS", headers: { origin: "https://evil.example" } });
+    expect(other.headers.get("access-control-allow-origin")).toBeNull();
+  });
+
+  it("is off without links config, and plugins cannot take its routes", async () => {
+    const plain = new FilewayClient({ driver: disk() });
+    await expect(plain.getPresignedUploadUrl({ filename: "a.txt", maxSize: 1 })).rejects.toMatchObject({ code: "config" });
+    await expect(plain.getPresignedUrl("photos/cat.png")).rejects.toMatchObject({ code: "config" });
+    expect((await call(plain, `${ORIGIN}/api/fileway/files/photos/cat.png`)).status).toBe(404);
+    expect(
+      () =>
+        new FilewayClient({
+          driver: disk(),
+          links: { secret: SECRET, origin: ORIGIN },
+          plugins: [{ id: "p", routes: { "GET /files/*": async () => new Response() } }],
+        }),
+    ).toThrow(/registered twice/);
+  });
+});

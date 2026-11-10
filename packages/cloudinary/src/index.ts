@@ -1,4 +1,4 @@
-import type { BaseDriver, CopyOptions, ListedObject, ListOptions, ListPage, OperationOptions, PresignedUrlOptions, StorageErrorCode, StoredObject, UploadContext, UploadOptions, UploadResult } from "@fileway/core";
+import type { BaseDriver, DriverCapabilities, CopyOptions, ListedObject, ListOptions, ListPage, OperationOptions, PresignedUrlOptions, StorageErrorCode, StoredObject, UploadContext, UploadOptions, UploadResult } from "@fileway/core";
 import { validateUploadOptions, ValidationError, isAbortError, abortError, StorageError, encodeCursor, decodeCursor } from "@fileway/core";
 
 const randomUUID = () => globalThis.crypto.randomUUID();
@@ -373,9 +373,17 @@ export class CloudinaryDriver implements BaseDriver<CloudinaryMeta> {
     return `https://res.cloudinary.com/${this.cloudName}/${asset.resourceType}/upload${versionStr}/${publicId}`;
   }
 
-  async get(publicId: string, options?: CloudinaryLookupOptions): Promise<ReadableStream<Uint8Array>> {
+  /** Range reads, and the upload size limit used by upload links. */
+  get capabilities(): DriverCapabilities {
+    return { range: true, ...(this.maxSizeBytes !== undefined ? { maxUploadBytes: this.maxSizeBytes } : {}) };
+  }
+
+  async get(publicId: string, options?: CloudinaryLookupOptions & { range?: { start: number; end?: number } }): Promise<ReadableStream<Uint8Array>> {
     const url = await this.getUrl(publicId, options);
-    const response = await fetchWithAbort(url, { signal: options?.signal ?? null }, "cloudinary");
+    const response = await fetchWithAbort(url, {
+      ...(options?.range ? { headers: { range: `bytes=${options.range.start}-${options.range.end ?? ""}` } } : {}),
+      signal: options?.signal ?? null,
+    }, "cloudinary");
     if (!response.ok) {
       throw new StorageError(classifyCloudinaryStatus(response.status, "get"), `Cloudinary get failed: ${response.status} ${response.statusText}`, {
         statusCode: response.status,
