@@ -138,7 +138,7 @@ export class FilewayClient<const TConfig extends FilewayConfig> {
 - [x] **Remove edge duplicates**: `driver-cloudinary-edge` and `driver-s3-edge` deleted; their functionality is now in the universal `cloudinary` and `s3`.
 - [x] **Conditional exports**: All packages declare `worker`, `deno`, `bun`, `import`, `require` in `exports` map.
 - [x] **Edge-runtime tests**: `@fileway/core` and `@fileway/cloudinary` run vitest with `environment: "edge-runtime"` via `@edge-runtime/vm`.
-- [x] **All builds & tests pass**: 339 unit tests across 7 packages, plus 10 S3 integration tests against MinIO and 7 Azure integration tests against Azurite.
+- [x] **All builds & tests pass**: 358 unit tests across 7 packages, plus 10 S3 integration tests against MinIO and 7 Azure integration tests against Azurite.
 
 ## Typed Error Taxonomy (Complete)
 
@@ -173,17 +173,24 @@ export class FilewayClient<const TConfig extends FilewayConfig> {
 - [x] **`client.handler`**: web-standard handler under `basePath` (default `/api/fileway`), `"METHOD /path"` and `/*` routes, 404/405/500.
 - [x] **Docs**: `guide/plugins.mdx`. `@fileway/infra` (part 2) will live in the private `fileway-infrastructure` repo.
 
+## App-Signed Links (Complete, unreleased; RFC 0004)
+
+- [x] **Links**: `FilewayConfig.links` (`secret` rotation, `origin` + `basePath`, `mode`, `maxExpiresIn`, `cors`, `inlineTypes`, `check`); HKDF-derived HMAC-SHA256 signing in `packages/core/src/links.ts`; built-in handler routes `GET/HEAD/OPTIONS /files/*` and `PUT/OPTIONS /upload` that plugins cannot claim.
+- [x] **Downloads**: `getPresignedUrl` falls back to app-signed links for drivers without presigning (or always, with `mode: "always"`); safe types inline by default, script-capable types always download; `nosniff` on every response and a sandbox CSP except for PDFs; `Range` gives `206`.
+- [x] **Uploads**: `getPresignedUploadUrl` signs filename, folder, id, type and size limit (`maxSize`, else the driver's `capabilities.maxUploadBytes`, else a `ValidationError`); bodies are counted while streaming.
+- [x] **Drivers**: `get(path, { range })` and `capabilities` (`range`, `maxUploadBytes`) in all six drivers.
+
 ## Current Packages
 
 | Package | Node deps | Runtime | Tests |
 |---|---|---|---|
-| `@fileway/core` | None | Universal | 90 |
-| `@fileway/local` | `node:fs`, `node:path`, `node:stream` | Node.js, Bun | 36 |
-| `@fileway/s3` | None (pure fetch + Web Crypto SigV4) | Universal | 66 unit + 10 MinIO |
-| `@fileway/gcs` | None (pure fetch + Web Crypto RS256 / V4 signing) | Universal | 25 (+ opt-in live) |
-| `@fileway/azure` | None (pure fetch + Web Crypto Shared Key / SAS) | Universal | 34 unit + 7 Azurite |
-| `@fileway/supabase` | None (pure fetch, REST + TUS) | Universal | 27 (+ opt-in live) |
-| `@fileway/cloudinary` | None | Universal | 61 |
+| `@fileway/core` | None | Universal | 103 |
+| `@fileway/local` | `node:fs`, `node:path`, `node:stream` | Node.js, Bun | 37 |
+| `@fileway/s3` | None (pure fetch + Web Crypto SigV4) | Universal | 67 unit + 10 MinIO |
+| `@fileway/gcs` | None (pure fetch + Web Crypto RS256 / V4 signing) | Universal | 26 (+ opt-in live) |
+| `@fileway/azure` | None (pure fetch + Web Crypto Shared Key / SAS) | Universal | 35 unit + 7 Azurite |
+| `@fileway/supabase` | None (pure fetch, REST + TUS) | Universal | 28 (+ opt-in live) |
+| `@fileway/cloudinary` | None | Universal | 62 |
 
 ## Relevant Files
 

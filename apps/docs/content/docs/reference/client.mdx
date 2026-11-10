@@ -21,6 +21,7 @@ The type parameter is the driver, inferred from `config.driver`. To annotate a c
 | `onError` | `(error, context) => void \| Promise<void>` | Optional. Called (and awaited) before an error is re-thrown. Aborts are skipped. See [Observability](/docs/guide/observability#onerror). |
 | `plugins` | `FilewayPlugin[]` | Optional. Event listeners, middleware and routes. See [Plugins and Events](/docs/guide/plugins). |
 | `basePath` | `string` | Optional. Where `client.handler` is mounted. Default `"/api/fileway"`. |
+| `links` | `LinksConfig` | Optional. App-signed download and upload links. See [App-signed links](/docs/guide/downloads#app-signed-links). |
 | `retry` | `RetryConfig` | Optional. Retries transient failures (`network`, `timeout`, `rate-limited`, `provider-error`, HTTP 429/5xx). See [Observability](/docs/guide/observability#retries). |
 
 ## `upload(stream, options)`
@@ -112,10 +113,17 @@ Copy or move a file on the same storage. Return nothing. An existing `to` fails 
 
 ## `getPresignedUrl(path, options?)`
 
-Returns a time-limited, signed download URL. Available on every driver except `LocalDriver`, which throws `StorageError("config")` (see [Downloads](/docs/guide/downloads#pre-signed-urls)).
+Returns a time-limited, signed download URL (see [Downloads](/docs/guide/downloads#pre-signed-urls)). Drivers that cannot presign (such as `LocalDriver`) use [app-signed links](/docs/guide/downloads#app-signed-links) when `links` is configured, and throw `StorageError("config")` otherwise.
 
 | Param | Type | Description |
 |-------|------|-------------|
 | `path` | `string` | Path of the stored file. |
 | `options.expiresIn` | `number` | Lifetime in seconds (default `3600`). S3, GCS and Azure allow at most 604800 (7 days); Cloudinary and Supabase accept any positive integer. |
 | `options.signal` | `AbortSignal` | Cancels the call. |
+| `options.disposition` | `"inline" \| "attachment"` | App-signed links: open in the browser or download. Default: inline for images, PDF, audio and video. |
+| `options.filename` | `string` | App-signed links: the download name. |
+| `options.id` | `string` | App-signed links: an id passed to `links.check`. |
+
+## `getPresignedUploadUrl(options)`
+
+Returns `{ url, method: "PUT", headers, id }`: a signed link a browser can upload one file to. Options: `filename`, `path`, `id` (default a new UUID), `mimeType`, `maxSize` (default the driver's limit; required when it has none), `expiresIn` (default 900). Needs `links`. See [Upload links](/docs/guide/uploads#upload-links).

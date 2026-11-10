@@ -1,7 +1,7 @@
 # RFC 0004: App-signed links
 
-- **Status:** Draft
-- **Target:** `@fileway/core` 1.1 (additive)
+- **Status:** Implemented (unreleased, planned for 0.7.0)
+- **Target:** `@fileway/core` 0.7.0 (additive), range reads in every driver
 - **Depends on:** the request handler from [RFC 0002](./0002-infra-plugin.md). Used by `LocalDriver`, [`@fileway/webdav`](./0003-webdav-driver.md), and Fileway Infrastructure's `link` and `upload-url` routes.
 
 ## Summary
@@ -13,12 +13,12 @@ const client = new FilewayClient({
   driver: new LocalDriver({ directory: "/mnt/office-nas/uploads" }),
   links: {
     secret: process.env.FILEWAY_LINK_SECRET,     // 32+ random bytes, base64
-    baseUrl: "https://files.example.com/fileway", // where client.handler is mounted
+    origin: "https://files.example.com", // links are {origin}{basePath}/files/...
   },
 });
 
 const url = await client.getPresignedUrl("reports/q3.pdf", { expiresIn: 600 });
-// https://files.example.com/fileway/files/reports/q3.pdf?v=1&exp=1794270000&sig=...
+// https://files.example.com/api/fileway/files/reports/q3.pdf?v=1&exp=1794270000&d=i&sig=...
 ```
 
 ## Motivation
@@ -37,8 +37,9 @@ export interface LinksConfig {
    * without breaking links that are still valid.
    */
   secret: string | string[];
-  /** Public URL where `client.handler` is mounted. Links are built from it. */
-  baseUrl: string;
+  /** Public origin where `client.handler` is reachable, e.g. "https://files.example.com".
+   * Links are `{origin}{basePath}/...` (see Decisions). */
+  origin: string;
   /**
    * "fallback" (default): use app-signed links only when the driver has no
    * native presigned URLs. "always": use them for every driver, for example
@@ -74,7 +75,7 @@ client.getPresignedUrl(path, {
 ### URL format
 
 ```
-{baseUrl}/files/{path, encoded per segment}?v=1&exp={unix seconds}&sig={base64url}[&d=i|a][&fn=...][&id=...]
+{origin}{basePath}/files/{path, encoded per segment}?v=1&exp={unix seconds}&d=i|a[&fn=...][&id=...]&sig={base64url}
 ```
 
 ### Signature
@@ -95,7 +96,7 @@ GET
 - `sig` is the full 32-byte HMAC-SHA256, base64url. Verification uses `crypto.subtle.verify`, which compares in constant time, and tries each configured secret in order.
 - Everything that changes what is served is signed. Changing the path, extending `exp`, or switching to inline breaks the signature.
 
-### Serving (`GET` and `HEAD {baseUrl}/files/*`)
+### Serving (`GET` and `HEAD {origin}{basePath}/files/*`)
 
 1. Parse and validate the path with the core path rules (no `..`, no null bytes). Reject unknown `v`.
 2. Check `exp` against the clock, then the signature, then `check` when the link has an `id`. Any failure returns `403` with a generic body; an expired link says so (`fileway-error: expired`) because that leaks nothing.
@@ -133,7 +134,7 @@ When the driver has native presigned uploads (a follow-up for S3, GCS and Azure)
 ### Signature and serving
 
 - The signed string uses `PUT` and adds `filename`, `path`, `id`, `mimeType` and `maxSize`. The uploader cannot choose a different name, folder, type or size limit.
-- `PUT {baseUrl}/upload?...` checks the link as above, then rejects the request up front if `Content-Length` exceeds `maxSize`, and passes `request.body` to `client.upload` with the signed `filename`, `path`, `id` and `mimeType`. The size is enforced again while streaming, so a missing or false `Content-Length` cannot get around it.
+- `PUT {origin}{basePath}/upload?...` checks the link as above, then rejects the request up front if `Content-Length` exceeds `maxSize`, and passes `request.body` to `client.upload` with the signed `filename`, `path`, `id` and `mimeType`. The size is enforced again while streaming, so a missing or false `Content-Length` cannot get around it.
 - One link, one object: the signed `id` fixes the stored path (`pathFor`), and a second upload with the same link overwrites the same object rather than creating new ones. Combined with a short expiry, that bounds what a leaked link can do.
 - Middleware, plugins (including Infrastructure's upload protection) and events run exactly as for any upload.
 - Responses: `201` with `{ id, path, size }`, `403` for a bad link, `413` for too large, and the mapped status for storage errors.
@@ -170,8 +171,10 @@ When the driver has native presigned uploads (a follow-up for S3, GCS and Azure)
 - Security: inline refused for HTML and SVG, CSP and `nosniff` present, path traversal attempts refused before reaching the driver.
 - Uploads: signed fields enforced, `Content-Length` over `maxSize` refused, false `Content-Length` caught while streaming, overwrite on reuse, CORS preflight.
 
-## Open questions
+## Decisions
 
-1. Should `disposition: "inline"` be allowed for images, PDFs, audio and video by default, given previews need it and those types are safe with the sandbox CSP?
-2. Is 5 GiB the right default `maxSize` for upload links, or should the app always set it?
-3. Should `check` also receive the request's IP, for download limits per visitor, or is that Infrastructure's job?
+1. **Inline by default for safe types.** Images (except SVG), PDF, audio and video open in the browser; everything else downloads. HTML, SVG, XML and scripts open inline only when listed in `links.inlineTypes`, and a stored content type that can run script always downloads, whatever the link says.
+2. **Upload size limit.** `maxSize` on the link, else the driver's `capabilities.maxUploadBytes`; if neither exists, `getPresignedUploadUrl` throws a `ValidationError`. There is no silent default.
+3. **`check(link, request)`** receives the full `Request`. Fileway does not guess the client IP; the app reads it from the header its platform sets.
+4. **Address.** `links.origin` plus the client's `basePath`, instead of a full `baseUrl`, so the path is defined once.
+5. **PDFs skip the CSP.** Chrome renders PDFs with an embedded viewer that `sandbox` and `default-src 'none'` block, so PDF responses carry `nosniff` only. Not verified in a real Chrome during implementation (the test browser had no PDF viewer); worth confirming.

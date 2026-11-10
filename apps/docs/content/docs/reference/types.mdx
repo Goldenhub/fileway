@@ -60,8 +60,49 @@ interface UploadResult<TMeta extends Record<string, unknown>> {
 ```ts
 interface PresignedUrlOptions extends OperationOptions {
   expiresIn?: number; // seconds; default 3600. At most 604800 on S3, GCS and Azure
+  disposition?: "inline" | "attachment"; // app-signed links only
+  filename?: string;                     // app-signed links only
+  id?: string;                           // app-signed links only, passed to links.check
 }
 ```
+
+## `LinksConfig`, `VerifiedLink`, `PresignedUploadOptions`
+
+```ts
+interface LinksConfig {
+  secret: string | string[]; // base64, 32+ bytes each; the first signs, all verify
+  origin: string;            // e.g. "https://files.myapp.com"
+  mode?: "fallback" | "always";
+  maxExpiresIn?: number;     // default 604800
+  cors?: string[];
+  inlineTypes?: string[];
+  check?(link: VerifiedLink, request: Request): boolean | Promise<boolean>;
+}
+
+interface PresignedUploadOptions extends OperationOptions {
+  filename: string;
+  path?: string;
+  id?: string;
+  mimeType?: string;
+  maxSize?: number;
+  expiresIn?: number; // default 900
+}
+```
+
+## `GetOptions` and `DriverCapabilities`
+
+```ts
+interface GetOptions extends OperationOptions {
+  range?: { start: number; end?: number }; // inclusive byte offsets
+}
+
+interface DriverCapabilities {
+  range?: boolean;          // get honors options.range
+  maxUploadBytes?: number;  // default limit for upload links
+}
+```
+
+Every built-in driver supports ranges. Custom drivers declare `capabilities` to opt in.
 
 ## `ListOptions`, `ListPage`, `ListedObject`, `CopyOptions`
 

@@ -18,6 +18,8 @@ Returns a static public URL built from the driver's `baseUrl` (or an auto-derive
 
 ## Pre-signed URLs
 
+For storage without its own signed URLs, see [App-signed links](#app-signed-links) below.
+
 Both `S3Driver` and `CloudinaryDriver` can sign time-limited download URLs; only `LocalDriver` cannot (it has no access control to gate).
 
 **S3**: `getPresignedUrl(path, { expiresIn })` returns a SigV4-signed GET URL: anyone with the link can download the object without credentials until it expires. Hand these out for private buckets instead of `getUrl()` results, which assume a publicly readable bucket.
@@ -35,6 +37,37 @@ const url = await client.getPresignedUrl("uploads/report.pdf", { expiresIn: 900 
 
 - `expiresIn` defaults to 3600 seconds and must be a positive integer; no documented maximum.
 - Drivers that cannot presign (`LocalDriver`) omit the method, and `FilewayClient.getPresignedUrl` throws a clear error in that case.
+
+## App-signed links
+
+Local disks, network disks and other storage that cannot sign URLs can still get links: **your app** signs them, and `client.handler` serves the file when the link is opened. Configure `links` with a secret and the public origin where the handler is mounted:
+
+```ts
+const client = new FilewayClient({
+  driver: new LocalDriver({ directory: "/mnt/nas/uploads" }),
+  links: {
+    secret: process.env.FILEWAY_LINK_SECRET!, // 32+ random bytes, base64: openssl rand -base64 32
+    origin: "https://files.myapp.com",        // links are {origin}{basePath}/files/...
+  },
+});
+
+// app/api/fileway/[...all]/route.ts (Next.js)
+export const { GET, HEAD, PUT, OPTIONS } = client.handler;
+
+const url = await client.getPresignedUrl("reports/q3.pdf", { expiresIn: 600 });
+```
+
+- **When they are used:** by default only for drivers that cannot presign (`mode: "fallback"`). With `mode: "always"`, every driver's links go through your app, so every download is logged as an event.
+- **Open or download:** images, PDF, audio and video open in the browser by default; everything else downloads. HTML, SVG, XML and scripts never open inline unless you list the type in `links.inlineTypes`. Override per link with `disposition` and set the download name with `filename`.
+- **Seeking:** links answer `Range` requests with `206`, so video and audio players can seek.
+- **Revoking:** links cannot be revoked one by one. Use short expiries, rotate the secret (pass `secret: [newSecret, oldSecret]` to keep old links working during the change, then drop the old one), or give a link an `id` and refuse it in `links.check(link, request)`.
+- **Bandwidth:** unlike cloud presigned URLs, the bytes pass through your app.
+
+### Keep links safe
+
+- Serve links from a **separate subdomain** with no login cookies (`files.myapp.com`), so a malicious upload opened in the browser cannot act as your users.
+- Every response carries `X-Content-Type-Options: nosniff` and, except for PDFs, `Content-Security-Policy: sandbox; default-src 'none'`. PDFs skip the policy because Chrome's PDF viewer does not render under it.
+- Everything that changes what is served is signed: the path, expiry, open or download, filename and `id`. Changing any of them makes the link fail with `403`.
 
 ## Download / read-back (`get(path)`)
 

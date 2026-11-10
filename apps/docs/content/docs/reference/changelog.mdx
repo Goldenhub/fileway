@@ -11,22 +11,25 @@ All notable changes to Fileway are documented here. Releases are cut from `main`
 
 The first stable release. Target scope, tracked on the [roadmap](https://github.com/Goldenhub/fileway#roadmap):
 
-- **Stable public API**: ⏳ almost. The breaking cleanup shipped in v0.5.0; what is left is collecting feedback on 0.5.x, then the freeze. `UploadOptions`, `UploadResult<TMeta>`, `BaseDriver`, and `FilewayClient` lock in 1.0 semantics; after that, breaking changes become semver-major.
-- **True streaming uploads**: ✅ landed for all drivers. Local pipes straight to disk with backpressure; S3 uses `aws-chunked` per-chunk SigV4 signing when `options.size` is known and bounded-memory multipart uploads otherwise; Cloudinary uses chunked uploads (`X-Unique-Upload-Id` + `Content-Range`) for files larger than `chunkSize`.
+- **Stable public API**: ⏳ not yet. The core contract was cleaned up in v0.5.0, but v0.6.0 and v0.7.0 added new public API (list, stat, copy and move; plugins and events; `client.handler`; app-signed links) that needs real-world use before it is frozen. At 1.0, `UploadOptions`, `UploadResult<TMeta>`, `BaseDriver`, `FilewayClient` and the plugin and links types lock in; after that, breaking changes become semver-major.
+- **True streaming uploads**: ✅ landed for all drivers. Local pipes straight to disk with backpressure; S3 uses `aws-chunked` per-chunk SigV4 signing when `options.size` is known and bounded-memory multipart uploads otherwise; GCS uses resumable sessions, Azure staged blocks, Supabase TUS in 6 MiB chunks, and Cloudinary chunked uploads, each holding one chunk in memory at a time.
 - **Upload cancellation**: ✅ landed for all drivers: `options.signal` rejects with `AbortError` and cleans up partial artifacts.
 - **Middleware stream transformation**: ✅ landed: `beforeUpload` can return a replacement `stream` (and/or `options`), which is what the driver uploads. The known `size` is dropped when the stream is replaced unless the middleware returns the new length.
-- **Operational hardening**: ✅ landed: progress events (`options.onProgress`), typed errors (`StorageError` codes), retries with backoff (`retry` config + `isRetryable`), and dependency-free `logger`/`onError` hooks.
-- **Signed downloads**: ✅ landed for S3 (SigV4 presigned URLs) and Cloudinary (expiring private download URLs) via `getPresignedUrl`.
+- **Operational hardening**: ✅ landed: progress events (`options.onProgress`), typed errors (`StorageError` codes), retries with backoff and idle timeouts (`retry` config), lost-response recovery, dependency-free `logger`/`onError` hooks, and per-operation events for plugins.
+- **Signed downloads**: ✅ landed for every driver via `getPresignedUrl`: native signed URLs on S3, GCS, Azure, Supabase and Cloudinary, and app-signed links for Local and other storage that cannot sign, plus signed upload links.
 
 Expected: once the public API is frozen and has gone through real-world feedback via [GitHub Discussions](https://github.com/Goldenhub/fileway/discussions).
 
-## Unreleased
+## v0.7.0 (2026-11-10)
 
 **Features**
 - **Plugins** ([RFC 0002](https://github.com/Goldenhub/fileway/blob/main/rfcs/0002-infra-plugin.md), part 1). `plugins: [...]` on `FilewayClient`: one object that can listen to events, add upload middleware and serve HTTP routes. Use it for audit trails, usage metering, metrics, webhooks or your own file API.
 - **Events.** Every operation produces one `FilewayEvent` when it finishes, after retries: operation, outcome (`success`, `error`, `aborted`), path, size, duration, attempts, driver and error code. `onEvent` is never awaited and never fails an operation.
 - **`actor` and `tags`** on every client method record who an operation was for. They are copied onto the event and never passed to drivers.
 - **`client.handler`**: a web-standard request handler that serves plugin routes under `basePath` (default `/api/fileway`). Mount it in Next.js (`export const { GET, POST } = client.handler`), Workers, Bun, Deno or Hono.
+- **App-signed links** ([RFC 0004](https://github.com/Goldenhub/fileway/blob/main/rfcs/0004-app-signed-links.md)). With `links: { secret, origin }`, `getPresignedUrl` works for drivers that cannot presign (Local, network disks): your app signs the link and `client.handler` serves it, with `Range` support for seeking. `mode: "always"` routes every driver's links through your app. Images, PDF, audio and video open inline; HTML, SVG and scripts always download; responses carry `nosniff` and, except for PDFs, a sandbox CSP.
+- **`client.getPresignedUploadUrl()`**: a signed `PUT` link for one file, fixing its name, folder, id, type and size limit. Uploads run through middleware, plugins and events.
+- **Range reads:** `get(path, { range })` and `DriverCapabilities` (`range`, `maxUploadBytes`), implemented by every built-in driver.
 
 ## v0.6.0 (2026-11-10)
 

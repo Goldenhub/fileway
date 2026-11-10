@@ -118,6 +118,31 @@ const result = await client.upload(createReadStream(file), {
 
 Configure backoff with the client's `retry` option (e.g. `maxRetries`, `baseDelayMs`), and set `retry.idleTimeoutMs` so an attempt that hangs is cancelled and retried instead of waiting forever (see [Timing out stuck attempts](/docs/guide/observability#timing-out-stuck-attempts)). Without `streamFactory`, a failed upload throws immediately, with no retry. Retried uploads re-transmit the payload, so they cost `N+1` egresss on `N` failures. See [Retries](/docs/guide/observability#retries) for the full configuration and which failures are retried.
 
+## Upload links
+
+With [app-signed links](/docs/guide/downloads#app-signed-links) configured, your server can hand a browser a link to upload one file directly, without sharing any credentials:
+
+```ts
+// On your server, after checking the user may upload:
+const link = await client.getPresignedUploadUrl({
+  filename: "avatar.png",
+  path: "avatars",
+  id: user.id,
+  mimeType: "image/png",
+  maxSize: 5 * 1024 * 1024,
+  expiresIn: 300,
+});
+
+// In the browser:
+await fetch(link.url, { method: link.method, headers: link.headers, body: file });
+```
+
+- The link fixes the filename, folder, id, content type and size limit; changing any of them makes it fail. Reusing the link overwrites the same file.
+- `maxSize` defaults to the driver's `maxSizeBytes`. If the driver has no limit, `maxSize` is required.
+- The body is counted as it arrives, so a missing or false `Content-Length` cannot exceed the limit (`413`).
+- The upload runs through `client.upload`: your middleware, plugins and events all apply. The response is `201` with `{ id, path, size }`.
+- For browsers on another origin, list it in `links.cors`.
+
 ## Safe retries and upload status
 
 A network failure is ambiguous: the provider may have stored the file even though its response never reached you (a reset connection, a timeout, a proxy that dropped the reply). Fileway handles this with a **stable upload ID**:
