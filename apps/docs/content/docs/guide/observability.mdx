@@ -37,6 +37,7 @@ try {
 | `bucket-not-found` | The S3 bucket / Cloudinary cloud does not exist or is not reachable | No |
 | `auth-failed` | Invalid or expired credentials, access denied | Re-auth, then retry |
 | `size-exceeded` | Payload over the provider limit (`EntityTooLarge`, `413`) | No |
+| `conflict` | The destination of a `copy` or `move` already exists and `overwrite` is not set | No; pick another path or pass `overwrite: true` |
 | `rate-limited` | The provider is throttling: HTTP 429, or its own code (S3 `SlowDown`, Azure `ServerBusy`, Cloudinary 420) | Yes, with backoff |
 | `timeout` | An attempt made no progress within `retry.idleTimeoutMs` | Yes, with backoff |
 | `network` | `fetch` failed before an HTTP response (DNS, socket, TLS) | Yes, with backoff |

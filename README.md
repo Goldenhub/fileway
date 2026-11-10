@@ -407,6 +407,20 @@ const client = new FilewayClient({
 - `getUrl(path)` returns the public URL for a stored path.
 - `getPresignedUrl(path, { expiresIn })` returns a time-limited, signed download URL on every driver except Local. `expiresIn` defaults to `3600` seconds; S3, GCS and Azure allow at most `604800` (7 days), Cloudinary and Supabase any positive integer; invalid values throw a `ValidationError`. Drivers that cannot presign throw a clear error.
 
+### `client.list()` / `client.listAll()` / `client.stat(path)` / `client.copy(from, to)` / `client.move(from, to)`
+
+```ts
+const page = await client.list({ prefix: "photos/" }); // { objects, folders, cursor? }
+for await (const file of client.listAll({ prefix: "invoices/", recursive: true })) console.log(file.path);
+
+const file = await client.stat("invoices/inv_42.pdf"); // details, or null
+await client.copy("invoices/inv_42.pdf", "archive/inv_42.pdf");
+await client.move("uploads/tmp.jpg", "avatars/user-42.jpg", { overwrite: true });
+```
+
+- `list` returns one page (one folder level unless `recursive: true`); pass `page.cursor` back for the next. `listAll` follows cursors for you.
+- `copy` and `move` refuse an existing destination with a `conflict` error unless `overwrite: true`. Drivers without a native move copy, then delete. Cloudinary has no copy.
+
 ---
 
 ## Roadmap

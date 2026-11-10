@@ -138,11 +138,11 @@ export class FilewayClient<const TConfig extends FilewayConfig> {
 - [x] **Remove edge duplicates**: `driver-cloudinary-edge` and `driver-s3-edge` deleted; their functionality is now in the universal `cloudinary` and `s3`.
 - [x] **Conditional exports**: All packages declare `worker`, `deno`, `bun`, `import`, `require` in `exports` map.
 - [x] **Edge-runtime tests**: `@fileway/core` and `@fileway/cloudinary` run vitest with `environment: "edge-runtime"` via `@edge-runtime/vm`.
-- [x] **All builds & tests pass**: 291 unit tests across 7 packages, plus 9 S3 integration tests against MinIO and 6 Azure integration tests against Azurite.
+- [x] **All builds & tests pass**: 331 unit tests across 7 packages, plus 10 S3 integration tests against MinIO and 7 Azure integration tests against Azurite.
 
 ## Typed Error Taxonomy (Complete)
 
-- [x] **Single `StorageError`**: `packages/core/src/errors.ts` defines `StorageError` + the `StorageErrorCode` union (`validation`, `config`, `not-found`, `bucket-not-found`, `auth-failed`, `size-exceeded`, `rate-limited`, `timeout`, `network`, `provider-error`) with optional `statusCode`/`provider`/`cause`, `toJSON()`, and `isAbortError()`. `ValidationError` is a subclass (`code === "validation"`); aborts stay standard `DOMException`/`AbortError`.
+- [x] **Single `StorageError`**: `packages/core/src/errors.ts` defines `StorageError` + the `StorageErrorCode` union (`validation`, `config`, `not-found`, `bucket-not-found`, `auth-failed`, `size-exceeded`, `conflict`, `rate-limited`, `timeout`, `network`, `provider-error`) with optional `statusCode`/`provider`/`cause`, `toJSON()`, and `isAbortError()`. `ValidationError` is a subclass (`code === "validation"`); aborts stay standard `DOMException`/`AbortError`.
 - [x] **All drivers throw typed errors**: S3 parses AWS/MinIO XML `<Code>` with HTTP fallback and wraps fetch failures as `network`; Cloudinary maps HTTP status by context (upload vs get); Local classifies missing files as `not-found`; missing S3 credentials and unsupported presigned-URL drivers throw `config`. Message strings unchanged (non-breaking).
 - [x] **Retry implementation**: `packages/core/src/retry.ts` (internal, not exported) holds `isRetryable(err, config)`, `sleep()`, `delayWithJitter()`; `FilewayClient` retries transient failures (`network`/`timeout`/`rate-limited`/`provider-error`/HTTP 429/5xx) on `delete`/`get`/`getUrl`/`getPresignedUrl` by default via `retry` config (exponential backoff + full jitter, abort-interruptible), and on `upload` only when `UploadOptions.streamFactory` re-produces the stream. Non-retryable: `validation`/`config`/`auth-failed`/`not-found`/`bucket-not-found`/`size-exceeded`/`AbortError`. Each retry logs a `warn` (`operation: "retry"`); `onError` fires only on the final failure.
 
@@ -159,17 +159,23 @@ export class FilewayClient<const TConfig extends FilewayConfig> {
 - [x] **Errors**: new `rate-limited` (HTTP 429 and provider throttling codes) and `timeout` (idle timeout) codes, both retryable.
 - [x] **Exports**: core exports only the client, types, errors, `version`, and the driver helpers `ValidationError`, `abortError`, `validateUploadOptions`, `urlEncodePath`. Driver packages export only the driver, its config and meta types; classifiers and parsers are internal. `S3Meta`, `LocalMeta` named; S3 gained `maxSizeBytes`.
 
+## List, Stat, Copy, Move (Complete, unreleased; RFC 0001)
+
+- [x] **Core**: optional `BaseDriver.list`/`copy`/`move`; `FilewayClient.list`, `listAll` (async iterator over cursors), `stat` (wraps `head`, `null` when missing), `copy`, `move` (falls back to copy + delete). All use `runWithRetry`; a retried copy that already landed or a retried move whose source is gone is treated as success. New `conflict` error code. `encodeCursor`/`decodeCursor` exported for drivers.
+- [x] **Drivers**: Local (readdir walk, copyFile, rename with EXDEV fallback), S3 (ListObjectsV2, CopyObject, UploadPartCopy over 5 GiB), GCS (objects.list, objects.rewrite loop, ifGenerationMatch=0), Azure (List Blobs, Copy Blob with If-None-Match and pending polling), Supabase (object/list with a folder walk for recursive, native copy and move), Cloudinary (Admin API list across resource types plus folders, signed rename; no copy).
+- [x] **Docs**: `guide/managing-files.mdx`; RFCs live in `rfcs/` (0001 implemented; 0002 plugin API, 0003 WebDAV, 0004 app-signed links are drafts).
+
 ## Current Packages
 
 | Package | Node deps | Runtime | Tests |
 |---|---|---|---|
-| `@fileway/core` | None | Universal | 72 |
-| `@fileway/local` | `node:fs`, `node:path`, `node:stream` | Node.js, Bun | 29 |
-| `@fileway/s3` | None (pure fetch + Web Crypto SigV4) | Universal | 61 unit + 9 MinIO |
-| `@fileway/gcs` | None (pure fetch + Web Crypto RS256 / V4 signing) | Universal | 22 (+ opt-in live) |
-| `@fileway/azure` | None (pure fetch + Web Crypto Shared Key / SAS) | Universal | 28 unit + 6 Azurite |
-| `@fileway/supabase` | None (pure fetch, REST + TUS) | Universal | 22 (+ opt-in live) |
-| `@fileway/cloudinary` | None | Universal | 57 |
+| `@fileway/core` | None | Universal | 82 |
+| `@fileway/local` | `node:fs`, `node:path`, `node:stream` | Node.js, Bun | 36 |
+| `@fileway/s3` | None (pure fetch + Web Crypto SigV4) | Universal | 66 unit + 10 MinIO |
+| `@fileway/gcs` | None (pure fetch + Web Crypto RS256 / V4 signing) | Universal | 25 (+ opt-in live) |
+| `@fileway/azure` | None (pure fetch + Web Crypto Shared Key / SAS) | Universal | 34 unit + 7 Azurite |
+| `@fileway/supabase` | None (pure fetch, REST + TUS) | Universal | 27 (+ opt-in live) |
+| `@fileway/cloudinary` | None | Universal | 61 |
 
 ## Relevant Files
 

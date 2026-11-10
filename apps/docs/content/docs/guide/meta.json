@@ -1,4 +1,4 @@
 {
   "title": "Guide",
-  "pages": ["capabilities", "uploads", "downloads", "middleware", "metadata", "observability", "runtimes"]
+  "pages": ["capabilities", "uploads", "downloads", "managing-files", "middleware", "metadata", "observability", "runtimes"]
 }

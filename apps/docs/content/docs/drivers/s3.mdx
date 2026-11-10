@@ -212,6 +212,7 @@ All failures are `StorageError`s from `@fileway/core` (see the [error reference]
 | `bucket-not-found` | The bucket does not exist (`NoSuchBucket`). |
 | `auth-failed` | Invalid/expired credentials or access denied (`AccessDenied`, `InvalidAccessKeyId`, `SignatureDoesNotMatch`, `ExpiredToken`, `InvalidToken`, or HTTP 401/403). |
 | `size-exceeded` | Over `maxSizeBytes`, or the provider's limit (`EntityTooLarge`, or HTTP 413). |
+| `conflict` | `copy` or `move` onto an existing object without `overwrite: true` (checked with a `HEAD` first). |
 | `rate-limited` | Throttled (`SlowDown`, `TooManyRequests`, `RequestLimitExceeded`, or HTTP 429). Safe to retry. |
 | `network` | `fetch` failed before an HTTP response (DNS, socket, timeout); the original error is preserved as `cause`. Safe to retry. |
 | `provider-error` | Any other non-2xx response (e.g. HTTP 500). Safe to retry. |

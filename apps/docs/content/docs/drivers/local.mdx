@@ -105,5 +105,6 @@ All failures are `StorageError`s from `@fileway/core` (see the [error reference]
 |------|------|
 | `validation` | Malformed input: missing/oversized `filename`, path separators, absolute `path`, null bytes, malformed `mimeType`, path traversal (a path escaping the configured `directory`) or a symlink in the path. |
 | `size-exceeded` | Upload size exceeding `maxSizeBytes` (the partial file is removed). |
+| `conflict` | `copy` or `move` onto an existing file without `overwrite: true`. |
 | `not-found` | `get()` for a file that does not exist. |
 | `provider-error` | `delete()` failed for a reason other than a missing file (e.g. permissions); the original error is preserved as `cause`. |

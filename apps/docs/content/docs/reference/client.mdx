@@ -84,6 +84,22 @@ Reports whether the upload with `id` is stored, in progress, or missing, by aski
 
 Returns `{ state: "complete", object }`, `{ state: "pending" }`, `{ state: "missing" }`, or `{ state: "unsupported" }` when the driver cannot report status. See [Safe retries and upload status](/docs/guide/uploads#safe-retries-and-upload-status).
 
+## `list(options?)`
+
+Returns one page of the files under `options.prefix`: `{ objects, folders, cursor? }`. Options: `prefix`, `recursive` (default `false`, one folder level), `limit` (1 to 1000, default 100), `cursor`, `signal`. See [Managing Files](/docs/guide/managing-files).
+
+## `listAll(options?)`
+
+An async iterator over every file under `options.prefix`, following cursors. Same options as `list` without `cursor`.
+
+## `stat(path, options?)`
+
+Returns the stored file's details (`StoredObject`: `size`, `contentType`, `lastModified`, typed `meta`), or `null` when it does not exist.
+
+## `copy(from, to, options?)` and `move(from, to, options?)`
+
+Copy or move a file on the same storage. Return nothing. An existing `to` fails with `StorageError("conflict")` unless `options.overwrite` is `true`. Drivers without a native move copy, then delete. Drivers without the operation throw `StorageError("config")`.
+
 ## `getPresignedUrl(path, options?)`
 
 Returns a time-limited, signed download URL. Available on every driver except `LocalDriver`, which throws `StorageError("config")` (see [Downloads](/docs/guide/downloads#pre-signed-urls)).

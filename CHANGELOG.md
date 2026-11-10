@@ -15,6 +15,15 @@ The first stable release. Target scope, tracked on the [roadmap](README.md#roadm
 
 Expected: once the public API is frozen and has gone through real-world feedback via [GitHub Discussions](https://github.com/Goldenhub/fileway/discussions).
 
+## Unreleased
+
+**Features**
+- **List, stat, copy and move** ([RFC 0001](rfcs/0001-list-copy-move.md)). `client.list({ prefix, recursive, limit, cursor })` returns one page of files and folders; `client.listAll()` iterates every file, following cursors; `client.stat(path)` returns a file's details or `null`; `client.copy(from, to)` and `client.move(from, to)` copy and rename on the same storage. All of them retry, log, honor `signal`, and pass through driver-specific options.
+- Every driver supports them: Local, S3 (multipart copy above 5 GiB), Google Cloud Storage (`objects.rewrite`), Azure (Copy Blob, waiting for background copies), Supabase (native copy and move) and Cloudinary (list and rename; no copy).
+- A retried copy or move recovers a lost response: a copy that already landed is not reported as a conflict, and a move whose source is gone succeeds when the destination exists.
+- **New error code `conflict`**: a copy or move onto an existing path without `overwrite: true`. Not retried. Exhaustive `switch` statements over `StorageErrorCode` need the new case.
+- **Driver contract:** optional `BaseDriver.list`, `copy` and `move`. Drivers with only `copy` get `move` as copy plus delete. `@fileway/core` exports `encodeCursor` and `decodeCursor` for driver authors.
+
 ## v0.5.0 (2026-11-02)
 
 **Breaking changes (pre-1.0 API cleanup)**

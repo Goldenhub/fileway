@@ -201,6 +201,7 @@ All failures are `StorageError`s from `@fileway/core` (see the [error reference]
 | `bucket-not-found` | Upload-time HTTP 404: the cloud does not exist. |
 | `not-found` | Download-time HTTP 404: the asset does not exist at the CDN URL. |
 | `size-exceeded` | Upload size exceeding `maxSizeBytes`, or HTTP 413. |
+| `conflict` | `move` onto an existing public ID without `overwrite: true`. |
 | `rate-limited` | Admin API rate limit (HTTP 420) or HTTP 429. Safe to retry. |
 | `network` | `fetch` failed before an HTTP response; the original error is preserved as `cause`. Safe to retry. |
 | `provider-error` | Any other non-2xx response (e.g. HTTP 500). Safe to retry. |

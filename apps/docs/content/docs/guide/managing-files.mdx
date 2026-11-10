@@ -1,0 +1,83 @@
+---
+title: Managing Files
+description: List folders, read a file's details, and copy, move or rename files on any driver
+---
+
+Besides uploading and downloading, `FilewayClient` can list what is stored, read one file's details, and copy or move files. Every operation works the same way on every driver that supports it, with the usual retries, logging, `onError` and `signal`.
+
+## Listing a folder
+
+`list()` returns one page at a time:
+
+```ts
+const page = await client.list({ prefix: "photos/" });
+
+page.objects; // [{ path: "photos/beach.jpg", size: 48213, lastModified, etag, contentType }]
+page.folders; // ["photos/2026/"]
+page.cursor;  // present when there are more results
+```
+
+- `prefix` is the start of the path. Use a trailing `/` to list a folder (`"photos/"`). A prefix without one also matches names: `"photos/2026"` lists entries of `photos/` whose names start with `2026`.
+- By default only **one folder level** is listed: files directly under `prefix` go in `objects`, deeper paths are rolled up into `folders`. Pass `recursive: true` to get every file at any depth, with `folders` empty.
+- `limit` is the page size, from 1 to 1000 (default 100). A page may hold fewer.
+- Pass `page.cursor` back as `cursor` to get the next page. Treat it as opaque, and only reuse it with the same `prefix` and `recursive`.
+
+To walk everything without handling cursors, use `listAll()`:
+
+```ts
+for await (const file of client.listAll({ prefix: "invoices/", recursive: true })) {
+  console.log(file.path, file.size);
+}
+```
+
+`listAll()` yields files only (not folders) and fetches pages as you iterate. Breaking out of the loop, or aborting `signal`, stops it.
+
+`list()` returns less than a full metadata read: no custom metadata, and some drivers leave out the content type. Use `stat()` for one file's full details.
+
+## Reading one file's details
+
+```ts
+const file = await client.stat("invoices/inv_42.pdf");
+if (file) {
+  file.size;         // bytes
+  file.contentType;  // when the provider reports it
+  file.lastModified;
+  file.meta;         // typed per driver, e.g. { bucket, etag } on S3
+}
+```
+
+`stat()` returns `null` when the file does not exist, rather than throwing.
+
+## Copying and moving
+
+```ts
+await client.copy("invoices/inv_42.pdf", "archive/2026/inv_42.pdf");
+await client.move("uploads/tmp-123.jpg", "avatars/user-42.jpg");
+```
+
+- Both return nothing. Call `stat()` on the new path if you need its details.
+- An existing destination fails with a `conflict` error. Pass `overwrite: true` to replace it.
+- Copying or moving a path onto itself is a `validation` error; a missing source is `not-found`.
+- Drivers without a native move copy, then delete. That is not atomic: if the delete fails, both files exist and the error is thrown.
+- A retry after a lost response does the right thing: a copy that already landed is not reported as a conflict, and a move whose source is already gone succeeds when the destination exists.
+
+## Folders
+
+Object storage (S3, R2, GCS, Azure, Supabase, Cloudinary) has no real folders: a "folder" is just a shared prefix in file paths. So Fileway does not create or delete folders. A folder appears in `list()` as long as some file path contains it, and disappears with its last file. Copying or moving a whole folder means listing it and copying each file.
+
+## Driver notes
+
+| Driver | `list` | `copy` | `move` | Notes |
+|---|:---:|:---:|:---:|---|
+| `LocalDriver` | ✅ | ✅ | ✅ | Skips in-progress uploads and symbolic links. `move` across disks falls back to copy, then delete. |
+| `S3Driver` | ✅ | ✅ | ✅ (copy, then delete) | Objects over 5 GiB are copied in parts, which keeps the content type but not custom metadata. `overwrite: false` checks the destination first, which is not atomic. |
+| `GCSDriver` | ✅ | ✅ | ✅ (copy, then delete) | `overwrite: false` is atomic. Large copies repeat until done. |
+| `AzureDriver` | ✅ | ✅ | ✅ (copy, then delete) | `overwrite: false` is atomic. Waits for background copies to finish. |
+| `SupabaseDriver` | ✅ | ✅ | ✅ | Lists one folder per request, so `recursive: true` returns results folder by folder rather than in one sort order. `overwrite: true` deletes the destination first. |
+| `CloudinaryDriver` | ✅ | | ✅ (rename) | Lists public IDs through the Admin API, which is rate limited per hour. No copy. On dynamic-folder accounts, folders follow public IDs only. |
+
+A driver without an operation throws a `config` error (for example `copy` on Cloudinary).
+
+## Custom drivers
+
+`list`, `copy` and `move` are optional `BaseDriver` methods. A driver that adds them gets `list`, `listAll`, `copy` and `move` on the client, and `move` works through `copy` plus `delete` when only `copy` is implemented. `@fileway/core` exports `encodeCursor` and `decodeCursor` for turning a driver's paging position into an opaque cursor. See [Types](/docs/reference/types#basedrivertmeta).
