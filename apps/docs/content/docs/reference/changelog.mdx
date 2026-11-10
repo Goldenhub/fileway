@@ -20,7 +20,7 @@ The first stable release. Target scope, tracked on the [roadmap](https://github.
 
 Expected: once the public API is frozen and has gone through real-world feedback via [GitHub Discussions](https://github.com/Goldenhub/fileway/discussions).
 
-## Unreleased
+## v0.6.0 (2026-11-10)
 
 **Features**
 - **List, stat, copy and move** ([RFC 0001](https://github.com/Goldenhub/fileway/blob/main/rfcs/0001-list-copy-move.md)). `client.list({ prefix, recursive, limit, cursor })` returns one page of files and folders; `client.listAll()` iterates every file, following cursors; `client.stat(path)` returns a file's details or `null`; `client.copy(from, to)` and `client.move(from, to)` copy and rename on the same storage. All of them retry, log, honor `signal`, and pass through driver-specific options.
