@@ -82,6 +82,7 @@ export class FilewayClient<TDriver extends BaseDriver> {
   private onError: ((error: unknown, context: ErrorContext) => void | Promise<void>) | undefined;
   private retry: RetryConfig;
   private plugins: FilewayPlugin[];
+  private waitUntil: ((promise: Promise<unknown>) => void) | undefined;
   private basePath: string;
   private links: LinksConfig | undefined;
   private linkKeys: (() => Promise<CryptoKey[]>) | undefined;
@@ -103,6 +104,7 @@ export class FilewayClient<TDriver extends BaseDriver> {
     }
 
     this.plugins = config.plugins ?? [];
+    this.waitUntil = config.waitUntil;
     this.basePath = (config.basePath ?? "/api/fileway").replace(/\/+$/, "");
     this.links = config.links;
     let builtins = {};
@@ -139,6 +141,7 @@ export class FilewayClient<TDriver extends BaseDriver> {
         warn: (message, meta) => this.emit("warn", message, meta),
         error: (message, meta) => this.emit("error", message, meta),
       },
+      waitUntil: (promise) => this.keepAlive(promise, "plugin background work failed"),
     };
     this.handler = createHandler(routes, this.basePath, ctx, ctx.log);
     for (const plugin of this.plugins) plugin.init?.(ctx);
@@ -436,15 +439,35 @@ export class FilewayClient<TDriver extends BaseDriver> {
   }
 
   /**
-   * A signed link a browser can upload one file to with `PUT`, served by
-   * `client.handler`. The link fixes the filename, folder, id, content type
-   * and size limit. Needs `links` in the client config.
+   * A link a browser can upload one file to with `PUT`. The link fixes the
+   * filename, folder, id, content type and size limit.
+   *
+   * By default the file goes through your app (`client.handler`, needs
+   * `links`), so middleware, plugins and the upload event apply. With
+   * `direct: true`, or when `links` is not configured, drivers that support
+   * it (S3, Google Cloud, Azure) return a link straight to the provider.
    */
   async getPresignedUploadUrl(options: PresignedUploadOptions & TrackOptions): Promise<PresignedUpload> {
     const links = this.links;
-    if (!links || !this.linkKeys) {
-      throw new StorageError("config", "getPresignedUploadUrl needs links in the client config");
+    const native = this.driver.getPresignedUploadUrl;
+    const pathFor = this.driver.pathFor;
+    const directCaps = this.driver.capabilities?.directUpload;
+    const canDirect = native !== undefined && pathFor !== undefined && directCaps !== undefined;
+    const direct = options.direct ?? (links === undefined && canDirect);
+    if (direct && !canDirect) {
+      throw new StorageError("config", `driver ${this.driver.name} does not support direct upload links`, {
+        provider: this.driver.name,
+      });
     }
+    if (!direct && (!links || !this.linkKeys)) {
+      throw new StorageError(
+        "config",
+        canDirect
+          ? "getPresignedUploadUrl needs links in the client config, or direct: true"
+          : "getPresignedUploadUrl needs links in the client config",
+      );
+    }
+
     validateUploadOptions(options);
     const id = options.id ?? globalThis.crypto.randomUUID();
     validateUploadId(id);
@@ -453,13 +476,39 @@ export class FilewayClient<TDriver extends BaseDriver> {
       throw new ValidationError("maxSize is required: the driver has no upload size limit of its own");
     }
     if (!Number.isInteger(maxSize) || maxSize < 1) throw new ValidationError("maxSize must be a positive integer");
+    if (options.size !== undefined) {
+      if (!Number.isInteger(options.size) || options.size < 0) throw new ValidationError("size must be a non-negative integer");
+      if (options.size > maxSize) throw new ValidationError(`size ${options.size} exceeds maxSize ${maxSize}`);
+    }
     const expiresIn = options.expiresIn ?? 900;
-    checkExpiresIn(expiresIn, links.maxExpiresIn ?? DEFAULT_MAX_EXPIRES_IN);
+    const storedPath = pathFor?.call(this.driver, {
+      filename: options.filename,
+      id,
+      ...(options.path ? { path: options.path } : {}),
+      ...(options.mimeType ? { mimeType: options.mimeType } : {}),
+    });
+
+    if (direct) {
+      checkExpiresIn(expiresIn, directCaps!.maxExpiresIn);
+      return this.runWithRetry("getPresignedUrl", storedPath!, async (signal) =>
+        native!.call(this.driver, {
+          path: storedPath!,
+          id,
+          maxSize,
+          expiresIn,
+          ...(signal ? { signal } : {}),
+          ...(options.mimeType ? { mimeType: options.mimeType } : {}),
+          ...(options.size !== undefined ? { size: options.size } : {}),
+        }),
+      options.signal, trackOf(options));
+    }
+
+    checkExpiresIn(expiresIn, links!.maxExpiresIn ?? DEFAULT_MAX_EXPIRES_IN);
     return this.runWithRetry("getPresignedUrl", options.path ?? "", async () => {
       const [key] = await this.linkKeys!();
       const url = await signUpload({
         key: key!,
-        base: this.linkBase(links),
+        base: this.linkBase(links!),
         filename: options.filename,
         id,
         maxSize,
@@ -467,7 +516,13 @@ export class FilewayClient<TDriver extends BaseDriver> {
         ...(options.path ? { path: options.path } : {}),
         ...(options.mimeType ? { mimeType: options.mimeType } : {}),
       });
-      return { url, method: "PUT" as const, headers: options.mimeType ? { "content-type": options.mimeType } : {}, id };
+      return {
+        url,
+        method: "PUT" as const,
+        headers: options.mimeType ? { "content-type": options.mimeType } : {},
+        id,
+        ...(storedPath !== undefined ? { path: storedPath } : {}),
+      };
     }, options.signal, trackOf(options));
   }
 
@@ -774,10 +829,34 @@ export class FilewayClient<TDriver extends BaseDriver> {
         });
       try {
         const result = plugin.onEvent!(full);
-        if (result && typeof (result as Promise<void>).then === "function") (result as Promise<void>).catch(fail);
+        if (result && typeof (result as Promise<void>).then === "function") {
+          this.keepAlive(result as Promise<void>, "plugin onEvent failed", { plugin: plugin.id });
+        }
       } catch (err) {
         fail(err);
       }
+    }
+  }
+
+  /**
+   * Lets `promise` run in the background: a rejection is logged with `warn`,
+   * and the promise goes to the configured `waitUntil` so serverless platforms
+   * keep it alive after the response. Never throws.
+   */
+  private keepAlive(promise: Promise<unknown>, message: string, meta: Record<string, unknown> = {}): void {
+    const guarded = Promise.resolve(promise).catch((err: unknown) =>
+      this.emit("warn", message, {
+        ...meta,
+        error: err instanceof Error ? { name: err.name, message: err.message } : String(err),
+      }),
+    );
+    if (!this.waitUntil) return;
+    try {
+      this.waitUntil(guarded);
+    } catch (err) {
+      this.emit("warn", "waitUntil failed", {
+        error: err instanceof Error ? { name: err.name, message: err.message } : String(err),
+      });
     }
   }
 }

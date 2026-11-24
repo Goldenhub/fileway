@@ -1564,6 +1564,48 @@ describe("plugins, events and handler", () => {
     expect(warn).toHaveBeenCalledWith("plugin onEvent failed", expect.objectContaining({ plugin: "rejects" }));
   });
 
+  it("hands onEvent promises and ctx.waitUntil work to the configured waitUntil", async () => {
+    const kept: Promise<unknown>[] = [];
+    const waitUntil = vi.fn((p: Promise<unknown>) => void kept.push(p));
+    let flushed = false;
+    let ctxRef: import("./types.js").PluginContext | undefined;
+    const client = new FilewayClient({
+      driver: memDriver(),
+      waitUntil,
+      plugins: [
+        { id: "sync", onEvent: () => {} },
+        { id: "async", onEvent: async () => {}, init: (ctx) => void (ctxRef = ctx) },
+      ],
+    });
+    await client.upload(bytes(1), { filename: "a.txt" });
+    // Only the promise-returning listener is kept alive.
+    expect(waitUntil).toHaveBeenCalledTimes(1);
+
+    ctxRef!.waitUntil(new Promise<void>((r) => setTimeout(() => { flushed = true; r(); }, 5)));
+    expect(waitUntil).toHaveBeenCalledTimes(2);
+    await Promise.all(kept);
+    expect(flushed).toBe(true);
+  });
+
+  it("logs rejected background work and a throwing waitUntil without failing", async () => {
+    const warn = vi.fn();
+    let ctxRef: import("./types.js").PluginContext | undefined;
+    const client = new FilewayClient({
+      driver: memDriver(),
+      logger: { warn },
+      waitUntil: () => { throw new Error("no context"); },
+      plugins: [{ id: "bg", init: (ctx) => void (ctxRef = ctx), onEvent: async () => {} }],
+    });
+    await expect(client.upload(bytes(1), { filename: "a.txt" })).resolves.toBeDefined();
+    expect(warn).toHaveBeenCalledWith("waitUntil failed", expect.anything());
+
+    const noWait = new FilewayClient({ driver: memDriver(), logger: { warn }, plugins: [{ id: "bg2", init: (ctx) => void (ctxRef = ctx) }] });
+    expect(noWait).toBeDefined();
+    ctxRef!.waitUntil(Promise.reject(new Error("flush failed")));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(warn).toHaveBeenCalledWith("plugin background work failed", expect.objectContaining({ error: expect.objectContaining({ message: "flush failed" }) }));
+  });
+
   it("runs init once with the client, and plugin middleware after the app's", async () => {
     const order: string[] = [];
     const init = vi.fn();
@@ -1834,6 +1876,68 @@ describe("app-signed links", () => {
     const { client } = make();
     await expect(client.getPresignedUploadUrl({ filename: "a.txt" })).rejects.toThrow(/maxSize is required/);
     await expect(client.getPresignedUploadUrl({ filename: "a.txt", maxSize: 100 })).resolves.toMatchObject({ method: "PUT" });
+  });
+
+  describe("direct upload links", () => {
+    function directDriver(caps: { enforcesSize: boolean; maxExpiresIn: number } = { enforcesSize: true, maxExpiresIn: 3600 }) {
+      return {
+        name: "cloud",
+        upload: vi.fn(),
+        delete: vi.fn(),
+        getUrl: vi.fn(),
+        get: vi.fn(),
+        capabilities: { directUpload: caps },
+        pathFor: (o: UploadOptions & { id: string }) => `${o.path ? `${o.path}/` : ""}${o.id}.${o.filename.split(".").pop()}`,
+        getPresignedUploadUrl: vi.fn(async (o: import("./types.js").DirectUploadOptions) => ({
+          url: `https://bucket.example/${o.path}?sig=1`,
+          method: "PUT" as const,
+          headers: o.mimeType ? { "content-type": o.mimeType } : {},
+          id: o.id,
+          path: o.path,
+        })),
+      } as unknown as import("./types.js").BaseDriver & {
+        getPresignedUploadUrl: ReturnType<typeof vi.fn>;
+      };
+    }
+
+    it("goes through the app by default when links are configured, direct on request", async () => {
+      const driver = directDriver();
+      const client = new FilewayClient({ driver, links: { secret: SECRET, origin: ORIGIN } });
+      const viaApp = await client.getPresignedUploadUrl({ filename: "a.png", id: "u1", maxSize: 10 });
+      expect(viaApp.url).toMatch(/^https:\/\/files\.example\.com\/api\/fileway\/upload\?/);
+      expect(viaApp.path).toBe("u1.png");
+      expect(driver.getPresignedUploadUrl).not.toHaveBeenCalled();
+
+      const direct = await client.getPresignedUploadUrl({ filename: "a.png", path: "avatars", id: "u1", maxSize: 10, size: 7, mimeType: "image/png", direct: true });
+      expect(direct).toMatchObject({ url: "https://bucket.example/avatars/u1.png?sig=1", path: "avatars/u1.png", id: "u1" });
+      expect(driver.getPresignedUploadUrl).toHaveBeenCalledWith(
+        expect.objectContaining({ path: "avatars/u1.png", id: "u1", maxSize: 10, size: 7, mimeType: "image/png", expiresIn: 900 }),
+      );
+    });
+
+    it("uses direct links when links are not configured, and explains when neither is possible", async () => {
+      const client = new FilewayClient({ driver: directDriver() });
+      await expect(client.getPresignedUploadUrl({ filename: "a.png", maxSize: 10 })).resolves.toMatchObject({ url: expect.stringMatching(/^https:\/\/bucket\.example\//) });
+      await expect(client.getPresignedUploadUrl({ filename: "a.png", maxSize: 10, direct: false })).rejects.toThrow(/links in the client config, or direct: true/);
+
+      const plain = new FilewayClient({ driver: disk() });
+      await expect(plain.getPresignedUploadUrl({ filename: "a.txt", maxSize: 1, direct: true })).rejects.toMatchObject({ code: "config" });
+    });
+
+    it("checks size and expiry against the limits", async () => {
+      const client = new FilewayClient({ driver: directDriver({ enforcesSize: false, maxExpiresIn: 900 }) });
+      await expect(client.getPresignedUploadUrl({ filename: "a.png", maxSize: 10, size: 11 })).rejects.toThrow(/exceeds maxSize/);
+      await expect(client.getPresignedUploadUrl({ filename: "a.png", maxSize: 10, size: 1.5 })).rejects.toThrow(/size must be/);
+      await expect(client.getPresignedUploadUrl({ filename: "a.png", maxSize: 10, expiresIn: 901 })).rejects.toThrow(/expiresIn must be an integer from 1 to 900/);
+    });
+
+    it("logs one getPresignedUrl event per direct link, with no upload event", async () => {
+      const events: import("./types.js").FilewayEvent[] = [];
+      const client = new FilewayClient({ driver: directDriver(), plugins: [{ id: "c", onEvent: (e) => void events.push(e) }] });
+      await client.getPresignedUploadUrl({ filename: "a.png", path: "x", id: "i1", maxSize: 10, actor: "user_1" });
+      expect(events).toHaveLength(1);
+      expect(events[0]).toMatchObject({ operation: "getPresignedUrl", path: "x/i1.png", actor: "user_1", outcome: "success" });
+    });
   });
 
   it("answers CORS preflights for allowed origins only", async () => {

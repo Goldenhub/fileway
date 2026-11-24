@@ -155,6 +155,13 @@ export interface DriverCapabilities {
   /** The largest upload the driver accepts (its `maxSizeBytes`), used as the
    * default limit for upload links. */
   maxUploadBytes?: number;
+  /** The driver can issue direct upload links (straight to the provider). */
+  directUpload?: {
+    /** The provider rejects bodies over the link's size limit. Azure cannot. */
+    enforcesSize: boolean;
+    /** The longest expiry the driver allows for a direct upload link, in seconds. */
+    maxExpiresIn: number;
+  };
 }
 
 /** Options for `getPresignedUploadUrl`. */
@@ -169,14 +176,41 @@ export interface PresignedUploadOptions extends OperationOptions {
   maxSize?: number;
   /** Seconds until the link expires. Default 900. */
   expiresIn?: number;
+  /**
+   * `true`: the file goes straight to the provider (S3, Google Cloud, Azure),
+   * skipping your app, its middleware, plugins and the upload event.
+   * `false`: the file goes through `client.handler` (needs `links`).
+   * Default: through the app when `links` is configured, otherwise direct
+   * when the driver supports it.
+   */
+  direct?: boolean;
+  /** The file's exact size in bytes. Required for direct S3 links, which only
+   * accept that exact length; must not exceed `maxSize`. */
+  size?: number;
 }
 
 export interface PresignedUpload {
   url: string;
   method: "PUT";
-  /** Headers the uploader should send (the content type, when set). */
+  /** Headers the uploader must send with the body. */
   headers: Record<string, string>;
   id: string;
+  /** Where the file is stored once uploaded, when the driver can tell in advance. */
+  path?: string;
+}
+
+/** What the client passes to a driver's `getPresignedUploadUrl`. */
+export interface DirectUploadOptions extends OperationOptions {
+  /** The object key, from the driver's `pathFor`. */
+  path: string;
+  id: string;
+  mimeType?: string;
+  /** Exact size in bytes, when the caller knows it. */
+  size?: number;
+  /** Largest allowed body in bytes. */
+  maxSize: number;
+  /** Seconds until the link expires, within the driver's `directUpload.maxExpiresIn`. */
+  expiresIn: number;
 }
 
 /** A link that passed signature and expiry checks, as given to `links.check`. */
@@ -236,6 +270,12 @@ export interface BaseDriver<TMeta extends Record<string, unknown> = Record<strin
    * Optional: drivers that cannot presign (e.g. LocalDriver) omit it.
    */
   getPresignedUrl?(path: string, options?: PresignedUrlOptions): Promise<string>;
+  /**
+   * A link a browser can `PUT` one file to, straight to the provider.
+   * Optional; drivers that offer it also set `capabilities.directUpload` and
+   * implement `pathFor`.
+   */
+  getPresignedUploadUrl?(options: DirectUploadOptions): Promise<PresignedUpload>;
   /**
    * The path an upload with `options.id` would be stored at, without any I/O.
    * Optional: together with `head`, enables lost-response recovery and
@@ -368,6 +408,15 @@ export interface FilewayConfig<TDriver extends BaseDriver> {
   basePath?: string;
   /** App-signed download and upload links, served by `client.handler`. */
   links?: LinksConfig;
+  /**
+   * Keeps background work alive after the response is sent, on platforms that
+   * stop a request's work when it responds. Pass the platform's own function:
+   * `waitUntil` from `@vercel/functions` on Vercel, or from `cloudflare:workers`
+   * on Cloudflare Workers. Plugins' `onEvent` promises and
+   * `ctx.waitUntil(...)` calls are handed to it. Not needed on long-running
+   * servers (Node.js, Bun, Deno).
+   */
+  waitUntil?: (promise: Promise<unknown>) => void;
 }
 
 /**
@@ -413,6 +462,13 @@ export interface PluginContext {
   driverName: string;
   /** The client's logger (silent when none is configured). */
   log: Logger;
+  /**
+   * Runs `promise` in the background without awaiting it: a rejection is
+   * logged with `warn`, and the promise is handed to the client's `waitUntil`
+   * (when configured) so it can finish after the response on serverless
+   * platforms. Use it for work such as flushing queued events.
+   */
+  waitUntil(promise: Promise<unknown>): void;
 }
 
 export interface RouteContext extends PluginContext {
