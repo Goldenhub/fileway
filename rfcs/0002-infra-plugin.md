@@ -124,6 +124,7 @@ infra({
     enabled?: boolean,               // default true
     redact?: "none" | "hash-paths" | "omit-paths", // default "none"
     sampleRate?: number,             // 0..1, default 1 (audit needs 1)
+    fileInfo?: boolean,              // default true; false leaves mimeType and size out
   },
   protection?: boolean,              // default true; rules come from the dashboard
   allow?: (op: AdminOperation, path: string) => boolean | Promise<boolean>, // app-side veto
@@ -135,6 +136,8 @@ infra({
 - `onEvent` pushes into an in-memory queue. A flush sends a batch (up to 500 events or 1 MB) with `POST {endpoint}/v1/events`, `Authorization: Bearer <apiKey>`.
 - Flushes every 2 seconds or at 100 queued events. On serverless and edge runtimes, the handler and the client call `waitUntil` when the platform provides it (Workers, Vercel), so a flush survives the response.
 - Delivery is at least once with exponential backoff; the service de-duplicates by event `id`. The queue is capped (default 10,000 events); when full, the oldest are dropped and a `warn` is logged.
+- The queue lives in memory only, so it works the same on every runtime. On Node and Bun, the plugin also flushes on `SIGTERM` and `beforeExit`. A hard crash can lose the events of the last flush interval (about 2 seconds); apps that need a guaranteed audit trail also write events to their own database with a plugin of their own.
+- Events include `mimeType` and `size` by default, for storage and file type analytics. `fileInfo: false` leaves them out.
 - `redact` applies before anything leaves the app. `hash-paths` uses SHA-256 with a per-project salt from the dashboard, so paths stay groupable without being readable.
 
 ### 2. Admin routes (the dashboard's requests)
@@ -146,7 +149,7 @@ Served under `{base}/infra/*`:
 | `POST /infra/list` | One page of a folder | `client.list` |
 | `POST /infra/stat` | One file's details | `client.stat` |
 | `POST /infra/link` | Short-lived download or preview URL | `client.getPresignedUrl`; for drivers without presigned URLs (Local, WebDAV), an app-signed link served by this handler ([RFC 0004](./0004-app-signed-links.md)) |
-| `POST /infra/upload-url` | Presigned upload target for dashboard uploads | `client.getPresignedUploadUrl` ([RFC 0004](./0004-app-signed-links.md)): app-signed for every driver now, native for S3, GCS and Azure in a follow-up |
+| `POST /infra/upload-url` | Presigned upload target for dashboard uploads | `client.getPresignedUploadUrl` ([RFC 0004](./0004-app-signed-links.md)): app-signed for every driver, and native (straight to the bucket) for S3, GCS and Azure before launch |
 | `POST /infra/delete` | Delete one file | `client.delete` |
 | `POST /infra/move`, `/infra/copy` | Rename, move, copy | `client.move`, `client.copy` |
 | `GET /infra/health` | Version, driver name, capabilities | none |
@@ -206,9 +209,9 @@ npm provenance may not be available for a package built from a private repositor
 - Infra: batching, backoff and queue cap with a mocked endpoint; redaction; signature verification (valid, expired, replayed, tampered body, wrong secret); `allow` veto; type sniffing on streams split across chunks; fail-open and fail-closed.
 - Runtimes: unit tests in Node and `edge-runtime`; one end-to-end test against a local mock service in CI.
 
-## Open questions
+## Decisions
 
-1. Should events carry `mimeType` and `size` by default, or only with an opt-in for privacy?
-2. Is per-project pricing (one API key per app) the right unit, or per organization?
-3. Dashboard uploads can ship with app-signed upload links (RFC 0004) for every driver. Native presigned uploads for S3, GCS and Azure (POST policy, signed PUT, SAS write) would keep large cloud uploads off the app's bandwidth: worth doing before launch, or after?
-4. Should the plugin persist its event queue across restarts (for example to a file on Node) or accept loss on crash?
+1. **File type and size in events:** included by default, since storage and file type analytics need them and they are less sensitive than paths. `events.fileInfo: false` leaves them out.
+2. **Projects and organizations:** an organization holds the plan, members and usage limits. Inside it, each project (an app or an environment such as staging) has its own API key. Splitting staging from production never needs a second organization.
+3. **Native presigned uploads before launch:** `getPresignedUploadUrl` gains native signing in the S3 (POST policy or signed PUT), GCS (signed PUT) and Azure (SAS write) drivers, so large dashboard uploads go straight to the bucket instead of through the app. This is framework work in the public repo, released before Infrastructure launches; app-signed upload links remain the fallback for every other driver.
+4. **Event queue:** in memory only, flushed on a timer, at 100 events, with `waitUntil` on serverless platforms, and on `SIGTERM` and `beforeExit` on Node and Bun. A hard crash can lose about 2 seconds of events. Persisting to disk was rejected: it does nothing on edge or serverless runtimes and adds recovery code for a small gain.
