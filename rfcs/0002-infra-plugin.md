@@ -199,12 +199,15 @@ Reporting `basePath` needs one addition to `@fileway/core`: `PluginContext.baseP
 4. Upload a file in the app; the first event appears live. Analytics and the audit log work from here.
 5. **Where can we reach your app?** The user enters the app URL; the base path field is prefilled from `/v1/connect` and can be changed. **Check connection** sends a signed `GET /infra/health` from the user's browser and confirms the project id. On success, the file browser turns on; on failure, the screen says why (handler not mounted, app unreachable from this browser, not HTTPS, clock skew).
 
-   **App running on your own computer?** The setup screen tells the user to open a tunnel to the app's local port and enter the tunnel's HTTPS URL, with both commands shown:
+   **App running on your own computer?** The setup screen tells the user to open a tunnel to the app's local port and enter the tunnel's HTTPS URL, with these commands shown:
 
    ```bash
-   npx outray http 3000   # OutRay (outray.co), open source
-   ngrok http 3000        # ngrok (ngrok.com)
+   npx outray http 3000                            # OutRay (outray.co), open source
+   ngrok http 3000                                 # ngrok (ngrok.com)
+   cloudflared tunnel --url http://localhost:3000  # Cloudflare Tunnel, no account needed
    ```
+
+   Cloudflare's quick tunnel prints a random `https://<name>.trycloudflare.com` address that lasts until the command stops; a named tunnel on the user's own Cloudflare domain gives a fixed address.
 
    A tunnel gives the app an HTTPS address that works for teammates on other machines and in browsers that block or prompt for local network access. Entering `http://localhost:3000` still works for the person running the app, from their own browser. Free tunnel addresses often change on each start; the setup screen says to update the URL in project settings when that happens, or to use a fixed domain from the tunnel provider. Local development uses its own project (for example "my-app (development)"), so its events stay apart from production.
 
