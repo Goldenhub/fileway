@@ -1,6 +1,6 @@
-import type { BaseDriver, DriverCapabilities, GetOptions, CopyOptions, ListedObject, ListOptions, ListPage, OperationOptions, PresignedUrlOptions, StoredObject, UploadContext, UploadOptions, UploadResult } from "@fileway/core";
+import type { BaseDriver, DirectUploadOptions, DriverCapabilities, GetOptions, CopyOptions, ListedObject, ListOptions, ListPage, OperationOptions, PresignedUpload, PresignedUrlOptions, StoredObject, UploadContext, UploadOptions, UploadResult } from "@fileway/core";
 import { validateUploadOptions, ValidationError, urlEncodePath, abortError, isAbortError, StorageError, encodeCursor, decodeCursor } from "@fileway/core";
-import { blobReadSas, bytesToBase64, signRequest, SERVICE_VERSION } from "./sharedkey.js";
+import { blobReadSas, blobSas, bytesToBase64, signRequest, SERVICE_VERSION } from "./sharedkey.js";
 import { classifyAzureError, parseConnectionString } from "./internal.js";
 
 const randomUUID = () => globalThis.crypto.randomUUID();
@@ -15,6 +15,10 @@ const MAX_BLOCKS = 50_000;
 const PRESIGN_DEFAULT_EXPIRY = 3600;
 const PRESIGN_MIN_EXPIRY = 1;
 const PRESIGN_MAX_EXPIRY = 604800;
+// Direct upload links cannot limit size on Azure, so they stay short-lived.
+const DIRECT_UPLOAD_MAX_EXPIRY = 900;
+// One Put Blob request accepts up to 5000 MiB.
+const SINGLE_PUT_MAX = 5000 * 1024 * 1024;
 // Metadata names must be valid C# identifiers, so no hyphens here.
 const TOKEN_KEY = "fileway_upload_token";
 const TOKEN_HEADER = `x-ms-meta-${TOKEN_KEY}`;
@@ -232,12 +236,17 @@ export class AzureDriver implements BaseDriver<AzureMeta> {
     return `${this.baseUrl}/${urlEncodePath(path)}`;
   }
 
-  /** Streams the blob. `options.signal` also cancels reading the body. */
-  /** Range reads, and the upload size limit used by upload links. */
+  /** Range reads, direct upload links (with an account key), and the upload size limit used by upload links. */
   get capabilities(): DriverCapabilities {
-    return { range: true, ...(this.maxSizeBytes !== undefined ? { maxUploadBytes: this.maxSizeBytes } : {}) };
+    return {
+      range: true,
+      // Azure SAS cannot limit the body size, so direct links are kept short.
+      ...(this.auth.accountKey ? { directUpload: { enforcesSize: false, maxExpiresIn: DIRECT_UPLOAD_MAX_EXPIRY } } : {}),
+      ...(this.maxSizeBytes !== undefined ? { maxUploadBytes: this.maxSizeBytes } : {}),
+    };
   }
 
+  /** Streams the blob. `options.signal` also cancels reading the body. */
   async get(path: string, options?: GetOptions): Promise<ReadableStream<Uint8Array>> {
     const res = await this.request("GET", path, { headers: (options?.range ? { range: `bytes=${options.range.start}-${options.range.end ?? ""}` } : {}), ...withSignal(options) });
     if (!res.ok) throw await azureError("Azure get failed", res);
@@ -264,6 +273,27 @@ export class AzureDriver implements BaseDriver<AzureMeta> {
     }
     const sas = await blobReadSas(accountName, accountKey, this.container, path, new Date(Date.now() + expiresIn * 1000));
     return `${this.blobUrl(path)}?${sas}`;
+  }
+
+  /**
+   * A service SAS `PUT` (create and write) a browser can upload one file to,
+   * straight to the container. Azure cannot enforce a size limit on a SAS, so
+   * the link expires within 15 minutes; check the size with `stat` afterwards
+   * when it matters. Needs an account key.
+   */
+  async getPresignedUploadUrl(options: DirectUploadOptions): Promise<PresignedUpload> {
+    const { accountName, accountKey } = this.auth;
+    if (!accountKey) {
+      throw new StorageError("config", "AzureDriver needs accountKey to create upload links", { provider: PROVIDER });
+    }
+    if (options.maxSize > SINGLE_PUT_MAX) {
+      throw new ValidationError(`direct Azure upload links are limited to ${SINGLE_PUT_MAX} bytes (one Put Blob)`);
+    }
+    const expiry = new Date(Date.now() + options.expiresIn * 1000);
+    const sas = await blobSas(accountName, accountKey, this.container, options.path, expiry, "cw");
+    const headers: Record<string, string> = { "x-ms-blob-type": "BlockBlob" };
+    if (options.mimeType) headers["content-type"] = options.mimeType;
+    return { url: `${this.blobUrl(options.path)}?${sas}`, method: "PUT", headers, id: options.id, path: options.path };
   }
 
   /** The blob name an upload with `options.id` is stored under: `<path>/<id>.<ext>`. */

@@ -251,6 +251,28 @@ describe("S3Driver (AWS S3)", () => {
     );
   });
 
+  it("presigns a direct upload PUT with the exact length and type signed", async () => {
+    const link = await driver.getPresignedUploadUrl({ path: "avatars/u1.png", id: "u1", size: 1234, maxSize: 5000, mimeType: "image/png", expiresIn: 600 });
+    expect(link).toMatchObject({ method: "PUT", id: "u1", path: "avatars/u1.png", headers: { "content-type": "image/png" } });
+    const url = new URL(link.url);
+    expect(url.origin + url.pathname).toBe("https://test-bucket.s3.us-east-1.amazonaws.com/avatars/u1.png");
+    expect(url.searchParams.get("X-Amz-SignedHeaders")).toBe("content-length;content-type;host");
+    expect(url.searchParams.get("X-Amz-Expires")).toBe("600");
+    expect(url.searchParams.get("X-Amz-Signature")).toMatch(/^[0-9a-f]{64}$/);
+    expect(mockFetch).not.toHaveBeenCalled();
+
+    const untyped = new URL((await driver.getPresignedUploadUrl({ path: "a.bin", id: "a", size: 1, maxSize: 5, expiresIn: 60 })).url);
+    expect(untyped.searchParams.get("X-Amz-SignedHeaders")).toBe("content-length;host");
+  });
+
+  it("needs the exact size for direct upload links, within one PUT", async () => {
+    await expect(driver.getPresignedUploadUrl({ path: "a.bin", id: "a", maxSize: 5, expiresIn: 60 })).rejects.toThrow(/exact size/);
+    await expect(
+      driver.getPresignedUploadUrl({ path: "a.bin", id: "a", size: 6 * 1024 ** 3, maxSize: 6 * 1024 ** 3, expiresIn: 60 }),
+    ).rejects.toThrow(/one PUT/);
+    expect(driver.capabilities.directUpload).toEqual({ enforcesSize: true, maxExpiresIn: 604800 });
+  });
+
   it("should presign a URL with a nested path without over-encoding it", async () => {
     const url = await driver.getPresignedUrl("dir/sub/file name.txt");
     expect(new URL(url).pathname).toBe("/dir/sub/file%20name.txt");
@@ -1168,7 +1190,7 @@ describe("S3Driver list, copy, move", () => {
 describe("S3Driver range reads", () => {
   it("sends a Range header and declares range support", async () => {
     const driver = new S3Driver({ bucket: "b", credentials: { accessKeyId: "AKID", secretAccessKey: "secret" }, maxSizeBytes: 50 });
-    expect(driver.capabilities).toEqual({ range: true, maxUploadBytes: 50 });
+    expect(driver.capabilities).toEqual({ range: true, maxUploadBytes: 50, directUpload: { enforcesSize: true, maxExpiresIn: 604800 } });
     mockFetch.mockResolvedValueOnce(new Response("abc", { status: 206 }));
     await driver.get("a.bin", { range: { start: 2, end: 4 } });
     expect(((mockFetch.mock.calls[0]![1] as RequestInit).headers as Record<string, string>).range).toBe("bytes=2-4");

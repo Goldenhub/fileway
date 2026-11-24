@@ -367,6 +367,51 @@ describe("getPresignedUrl", () => {
   });
 });
 
+describe("getPresignedUploadUrl", () => {
+  it("signs a PUT with the size range and type headers, verifiable with the public key", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-27T10:00:00.000Z"));
+    try {
+      const driver = new GCSDriver({ bucket: "bkt", credentials: { clientEmail: EMAIL, privateKey: PEM } });
+      const link = await driver.getPresignedUploadUrl({ path: "avatars/u1.png", id: "u1", maxSize: 5000, mimeType: "image/png", expiresIn: 900 });
+      expect(link).toMatchObject({
+        method: "PUT",
+        id: "u1",
+        path: "avatars/u1.png",
+        headers: { "x-goog-content-length-range": "0,5000", "content-type": "image/png" },
+      });
+      const signed = new URL(link.url);
+      expect(signed.searchParams.get("X-Goog-SignedHeaders")).toBe("content-type;host;x-goog-content-length-range");
+
+      const query = [...signed.searchParams]
+        .filter(([k]) => k !== "X-Goog-Signature")
+        .sort(([a], [b]) => (a < b ? -1 : 1))
+        .map(([k, v]) => `${rfc3986(k)}=${rfc3986(v)}`)
+        .join("&");
+      const headers = "content-type:image/png\nhost:storage.googleapis.com\nx-goog-content-length-range:0,5000\n";
+      const canonical = ["PUT", signed.pathname, query, headers, "content-type;host;x-goog-content-length-range", "UNSIGNED-PAYLOAD"].join("\n");
+      const stringToSign = ["GOOG4-RSA-SHA256", "20261027T100000Z", "20261027/auto/storage/goog4_request", await sha256Hex(canonical)].join("\n");
+      const valid = await crypto.subtle.verify(
+        "RSASSA-PKCS1-v1_5",
+        publicKey,
+        fromHex(signed.searchParams.get("X-Goog-Signature")!),
+        new TextEncoder().encode(stringToSign),
+      );
+      expect(valid).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("fixes the range to the exact size when given, and needs a key", async () => {
+    const driver = new GCSDriver({ bucket: "bkt", credentials: { clientEmail: EMAIL, privateKey: PEM } });
+    const link = await driver.getPresignedUploadUrl({ path: "a.bin", id: "a", size: 42, maxSize: 100, expiresIn: 60 });
+    expect(link.headers).toEqual({ "x-goog-content-length-range": "42,42" });
+    expect(driver.capabilities.directUpload).toEqual({ enforcesSize: true, maxExpiresIn: 604800 });
+    await expect(tokenDriver().getPresignedUploadUrl({ path: "a", id: "a", maxSize: 1, expiresIn: 60 })).rejects.toMatchObject({ code: "config" });
+  });
+});
+
 describe("classifyGcsError", () => {
   it("falls back to the HTTP status", () => {
     expect(classifyGcsError(401, "")).toBe("auth-failed");

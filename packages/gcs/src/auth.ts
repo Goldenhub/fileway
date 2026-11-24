@@ -125,7 +125,7 @@ export function rfc3986(value: string): string {
 }
 
 /** A V4 signed GET URL (`GOOG4-RSA-SHA256`) for `objectName` in `bucket`. */
-export async function signedReadUrl(args: {
+export function signedReadUrl(args: {
   origin: string;
   bucket: string;
   objectName: string;
@@ -134,8 +134,33 @@ export async function signedReadUrl(args: {
   expiresIn: number;
   now: Date;
 }): Promise<string> {
+  return signedUrl(args);
+}
+
+/**
+ * A V4 signed URL (`GOOG4-RSA-SHA256`). GET with only `host` signed by
+ * default; `method` and `headers` sign other requests, and the uploader must
+ * send exactly those headers (for example `x-goog-content-length-range`,
+ * which makes Google Cloud reject bodies outside the range).
+ */
+export async function signedUrl(args: {
+  origin: string;
+  bucket: string;
+  objectName: string;
+  clientEmail: string;
+  key: CryptoKey;
+  expiresIn: number;
+  now: Date;
+  method?: string;
+  headers?: Record<string, string>;
+}): Promise<string> {
   const { origin, bucket, objectName, clientEmail, key, expiresIn, now } = args;
+  const method = args.method ?? "GET";
   const host = new URL(origin).host;
+  const signed: Record<string, string> = { host };
+  for (const [name, value] of Object.entries(args.headers ?? {})) signed[name.toLowerCase()] = value.trim();
+  const names = Object.keys(signed).sort();
+  const signedHeaders = names.join(";");
   const datetime = now.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "");
   const date = datetime.slice(0, 8);
   const scope = `${date}/auto/storage/goog4_request`;
@@ -145,13 +170,14 @@ export async function signedReadUrl(args: {
     "X-Goog-Credential": `${clientEmail}/${scope}`,
     "X-Goog-Date": datetime,
     "X-Goog-Expires": String(expiresIn),
-    "X-Goog-SignedHeaders": "host",
+    "X-Goog-SignedHeaders": signedHeaders,
   };
   const canonicalQuery = Object.keys(query)
     .sort()
     .map((k) => `${rfc3986(k)}=${rfc3986(query[k]!)}`)
     .join("&");
-  const canonicalRequest = ["GET", path, canonicalQuery, `host:${host}\n`, "host", "UNSIGNED-PAYLOAD"].join("\n");
+  const canonicalHeaders = names.map((name) => `${name}:${signed[name]}\n`).join("");
+  const canonicalRequest = [method, path, canonicalQuery, canonicalHeaders, signedHeaders, "UNSIGNED-PAYLOAD"].join("\n");
   const stringToSign = ["GOOG4-RSA-SHA256", datetime, scope, await sha256Hex(canonicalRequest)].join("\n");
   const signature = toHex(await rsaSign(key, stringToSign));
   return `${origin}${path}?${canonicalQuery}&X-Goog-Signature=${signature}`;

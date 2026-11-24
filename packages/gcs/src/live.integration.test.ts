@@ -56,6 +56,17 @@ describeEnv("GCSDriver against Google Cloud Storage", () => {
     for (const p of [a.path, `${prefix}/lcm/c.txt`]) await driver.delete(p);
   }, 60_000);
 
+  it("uploads straight to the bucket with a direct link, and rejects a body over the limit", async () => {
+    const client = new FilewayClient({ driver });
+    const link = await client.getPresignedUploadUrl({ filename: "direct.txt", path: prefix, mimeType: "text/plain", maxSize: 100 });
+    const ok = await fetch(link.url, { method: link.method, headers: link.headers, body: new Uint8Array(50) });
+    expect(ok.ok).toBe(true);
+    expect((await driver.head(link.path!))?.size).toBe(50);
+    const tooBig = await fetch(link.url, { method: link.method, headers: link.headers, body: new Uint8Array(101) });
+    expect(tooBig.ok).toBe(false);
+    await driver.delete(link.path!);
+  }, 60_000);
+
   it("reports upload status through FilewayClient", async () => {
     const client = new FilewayClient({ driver });
     const result = await client.upload(bytes(5), { filename: "s.txt", path: prefix, id: "inv_42" });

@@ -265,6 +265,8 @@ describe("SAS auth", () => {
     expect(url.searchParams.get("sig")).toBe("abc+");
     expect(headers.authorization).toBeUndefined();
     await expect(driver.getPresignedUrl("x.txt")).rejects.toMatchObject({ code: "config" });
+    expect(driver.capabilities.directUpload).toBeUndefined();
+    await expect(driver.getPresignedUploadUrl({ path: "a", id: "a", maxSize: 1, expiresIn: 60 })).rejects.toMatchObject({ code: "config" });
   });
 });
 
@@ -368,6 +370,40 @@ describe("getPresignedUrl", () => {
 
   it("validates expiresIn", async () => {
     await expect(makeDriver().getPresignedUrl("a.txt", { expiresIn: 0 })).rejects.toThrow(ValidationError);
+  });
+});
+
+describe("getPresignedUploadUrl", () => {
+  it("creates a create-and-write SAS with the blob type header", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-27T10:00:00.000Z"));
+    try {
+      const link = await makeDriver().getPresignedUploadUrl({ path: "avatars/u1.png", id: "u1", maxSize: 5000, mimeType: "image/png", expiresIn: 900 });
+      expect(link).toMatchObject({
+        method: "PUT",
+        id: "u1",
+        path: "avatars/u1.png",
+        headers: { "x-ms-blob-type": "BlockBlob", "content-type": "image/png" },
+      });
+      const url = new URL(link.url);
+      expect(url.origin + url.pathname).toBe("https://acct.blob.core.windows.net/files/avatars/u1.png");
+      expect(url.searchParams.get("sp")).toBe("cw");
+      expect(url.searchParams.get("se")).toBe("2026-10-27T10:15:00Z");
+      const stringToSign = [
+        "cw", "", "2026-10-27T10:15:00Z", "/blob/acct/files/avatars/u1.png", "", "", "",
+        url.searchParams.get("sv"), "b", "", "", "", "", "", "", "",
+      ].join("\n");
+      expect(url.searchParams.get("sig")).toBe(await hmacBase64(KEY, stringToSign));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("declares short, unenforced links and needs an account key", async () => {
+    expect(makeDriver().capabilities.directUpload).toEqual({ enforcesSize: false, maxExpiresIn: 900 });
+    await expect(
+      makeDriver().getPresignedUploadUrl({ path: "a", id: "a", maxSize: 6000 * 1024 * 1024, expiresIn: 60 }),
+    ).rejects.toThrow(/one Put Blob/);
   });
 });
 
@@ -504,7 +540,7 @@ describe("list, copy, move", () => {
 
 describe("range reads", () => {
   it("sends a signed Range header and declares range support", async () => {
-    expect(makeDriver({ maxSizeBytes: 9 }).capabilities).toEqual({ range: true, maxUploadBytes: 9 });
+    expect(makeDriver({ maxSizeBytes: 9 }).capabilities).toEqual({ range: true, maxUploadBytes: 9, directUpload: { enforcesSize: false, maxExpiresIn: 900 } });
     mockFetch.mockResolvedValueOnce(new Response("abc", { status: 206 }));
     await makeDriver().get("a.bin", { range: { start: 0, end: 2 } });
     expect(call(0).headers.range).toBe("bytes=0-2");

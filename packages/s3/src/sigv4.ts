@@ -129,8 +129,10 @@ export interface PresignedUrlResult {
 
 /**
  * Builds a SigV4 presigned (query-string-authenticated) URL for a request.
- * Only the `host` header is signed and the payload is `UNSIGNED-PAYLOAD`, so
- * the resulting URL grants access to a plain GET without any headers.
+ * By default it is a GET with only the `host` header signed. `method` and
+ * `headers` sign other requests: an upload link signs `PUT` with
+ * `content-length` and `content-type`, so the provider rejects any other
+ * length or type. The payload is always `UNSIGNED-PAYLOAD`.
  */
 export async function presignUrl(
   path: string,
@@ -138,7 +140,13 @@ export async function presignUrl(
   cred: SigV4Credentials,
   date: Date,
   expiresIn: number,
+  request: { method?: string; headers?: Record<string, string> } = {},
 ): Promise<PresignedUrlResult> {
+  const method = request.method ?? "GET";
+  const signed: Record<string, string> = { host };
+  for (const [name, value] of Object.entries(request.headers ?? {})) signed[name.toLowerCase()] = value.trim();
+  const names = Object.keys(signed).sort();
+  const signedHeaders = names.join(";");
   const amzDate = iso8601(date);
   const dateStr = dateStamp(date);
   const scope = `${dateStr}/${cred.region}/${cred.service}/aws4_request`;
@@ -149,12 +157,12 @@ export async function presignUrl(
     "X-Amz-Date": amzDate,
     "X-Amz-Expires": String(expiresIn),
     ...(cred.sessionToken !== undefined ? { "X-Amz-Security-Token": cred.sessionToken } : {}),
-    "X-Amz-SignedHeaders": "host",
+    "X-Amz-SignedHeaders": signedHeaders,
   };
 
   const canonicalQuery = buildCanonicalQueryString(query);
-  const canonicalHeaders = `host:${host}\n`;
-  const canonicalRequest = ["GET", path, canonicalQuery, canonicalHeaders, "host", UNSIGNED_PAYLOAD].join("\n");
+  const canonicalHeaders = names.map((name) => `${name}:${signed[name]}\n`).join("");
+  const canonicalRequest = [method, path, canonicalQuery, canonicalHeaders, signedHeaders, UNSIGNED_PAYLOAD].join("\n");
   const canonicalHash = await sha256(canonicalRequest);
 
   const stringToSign = ["AWS4-HMAC-SHA256", amzDate, scope, canonicalHash].join("\n");

@@ -89,6 +89,16 @@ describeEnv("AzureDriver against Azurite", () => {
     expect((await res.arrayBuffer()).byteLength).toBe(10);
   });
 
+  it("uploads straight to the container with a direct link", async () => {
+    const client = new FilewayClient({ driver });
+    const link = await client.getPresignedUploadUrl({ filename: "direct.txt", path: "direct", mimeType: "text/plain", maxSize: 100 });
+    expect(link.url.startsWith(`${ENDPOINT}/${CONTAINER}/direct/`)).toBe(true);
+    // What a browser does: a plain PUT with the returned headers, no credentials.
+    const res = await fetch(link.url, { method: link.method, headers: link.headers, body: new Uint8Array(42) });
+    expect(res.status).toBe(201);
+    await expect(client.stat(link.path!)).resolves.toMatchObject({ size: 42, contentType: "text/plain" });
+  });
+
   it("reports upload status through FilewayClient", async () => {
     const client = new FilewayClient({ driver });
     await client.upload(bytes(5), { filename: "status.txt", id: "inv_42" });

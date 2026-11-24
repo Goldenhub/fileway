@@ -1,4 +1,4 @@
-import type { BaseDriver, DriverCapabilities, GetOptions, CopyOptions, ListedObject, ListOptions, ListPage, OperationOptions, PresignedUrlOptions, StorageErrorCode, StoredObject, UploadContext, UploadOptions, UploadResult } from "@fileway/core";
+import type { BaseDriver, DirectUploadOptions, DriverCapabilities, GetOptions, CopyOptions, ListedObject, ListOptions, ListPage, OperationOptions, PresignedUpload, PresignedUrlOptions, StorageErrorCode, StoredObject, UploadContext, UploadOptions, UploadResult } from "@fileway/core";
 import { validateUploadOptions, ValidationError, urlEncodePath, abortError, isAbortError, StorageError, encodeCursor, decodeCursor } from "@fileway/core";
 import { buildCanonicalQueryString, createStreamingBody, presignUrl, sign, signStreamingRequest, sha256 } from "./sigv4.js";
 import type { SigV4Credentials } from "./sigv4.js";
@@ -569,11 +569,51 @@ export class S3Driver implements BaseDriver<S3Meta> {
     return `${url}?${queryString}`;
   }
 
-  /** Streams the object. `options.signal` also cancels reading the body. */
-  /** Range reads, and the upload size limit used by upload links. */
-  get capabilities(): DriverCapabilities {
-    return { range: true, ...(this.config.maxSizeBytes !== undefined ? { maxUploadBytes: this.config.maxSizeBytes } : {}) };
+  /**
+   * A presigned `PUT` a browser can upload one file to, straight to the
+   * bucket. S3 can only enforce an exact length on a signed PUT, so `size` is
+   * required and signed as `Content-Length`; `content-type` is signed when
+   * set. The browser sets `Content-Length` from the body itself.
+   */
+  async getPresignedUploadUrl(options: DirectUploadOptions): Promise<PresignedUpload> {
+    if (options.size === undefined) {
+      throw new ValidationError("direct S3 upload links need the file's exact size: pass size");
+    }
+    if (options.size > SINGLE_PUT_MAX) {
+      throw new ValidationError(`direct S3 upload links are limited to ${SINGLE_PUT_MAX} bytes (one PUT)`);
+    }
+    const cred = getCredentials(this.config);
+    const { url, canonicalPath, host } = buildEndpoint(this.config, options.path);
+    const headers: Record<string, string> = { "content-length": String(options.size) };
+    if (options.mimeType) headers["content-type"] = options.mimeType;
+    const { queryString } = await presignUrl(
+      canonicalPath,
+      host,
+      { ...cred, region: this.config.region!, service: SERVICE },
+      new Date(),
+      options.expiresIn,
+      { method: "PUT", headers },
+    );
+    return {
+      url: `${url}?${queryString}`,
+      method: "PUT",
+      // Content-Length is set by the browser from the body; it cannot be sent by hand.
+      headers: options.mimeType ? { "content-type": options.mimeType } : {},
+      id: options.id,
+      path: options.path,
+    };
   }
+
+  /** Range reads, direct upload links, and the upload size limit used by upload links. */
+  get capabilities(): DriverCapabilities {
+    return {
+      range: true,
+      directUpload: { enforcesSize: true, maxExpiresIn: PRESIGN_MAX_EXPIRY },
+      ...(this.config.maxSizeBytes !== undefined ? { maxUploadBytes: this.config.maxSizeBytes } : {}),
+    };
+  }
+
+  /** Streams the object. `options.signal` also cancels reading the body. */
 
   async get(path: string, options?: GetOptions): Promise<ReadableStream<Uint8Array>> {
     const cred = getCredentials(this.config);

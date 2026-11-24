@@ -104,16 +104,31 @@ export async function signRequest(
  * Query string for a read-only service SAS on one blob. `blobName` is the raw
  * (unencoded) blob name; `expiry` is when the link stops working.
  */
-export async function blobReadSas(
+export function blobReadSas(
   accountName: string,
   accountKey: string,
   container: string,
   blobName: string,
   expiry: Date,
 ): Promise<string> {
+  return blobSas(accountName, accountKey, container, blobName, expiry, "r");
+}
+
+/**
+ * Query string for a service SAS on one blob with the given permissions:
+ * `"r"` to read, `"cw"` to create or overwrite it (an upload link).
+ */
+export async function blobSas(
+  accountName: string,
+  accountKey: string,
+  container: string,
+  blobName: string,
+  expiry: Date,
+  permissions: string,
+): Promise<string> {
   const se = expiry.toISOString().replace(/\.\d{3}Z$/, "Z");
   const fields = {
-    sp: "r",
+    sp: permissions,
     st: "",
     se,
     resource: `/blob/${accountName}/${container}/${blobName}`,
@@ -131,7 +146,7 @@ export async function blobReadSas(
     rsct: "",
   };
   const signature = await hmacBase64(accountKey, Object.values(fields).join("\n"));
-  const query = new URLSearchParams({ sv: SERVICE_VERSION, se, sr: "b", sp: "r", sig: signature });
+  const query = new URLSearchParams({ sv: SERVICE_VERSION, se, sr: "b", sp: permissions, sig: signature });
   return query.toString();
 }
 

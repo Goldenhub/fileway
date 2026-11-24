@@ -1,6 +1,6 @@
-import type { BaseDriver, DriverCapabilities, GetOptions, CopyOptions, ListOptions, ListPage, OperationOptions, PresignedUrlOptions, StoredObject, UploadContext, UploadOptions, UploadResult } from "@fileway/core";
+import type { BaseDriver, DirectUploadOptions, DriverCapabilities, GetOptions, CopyOptions, ListOptions, ListPage, OperationOptions, PresignedUpload, PresignedUrlOptions, StoredObject, UploadContext, UploadOptions, UploadResult } from "@fileway/core";
 import { validateUploadOptions, ValidationError, urlEncodePath, abortError, isAbortError, StorageError, encodeCursor, decodeCursor } from "@fileway/core";
-import { signedReadUrl, TokenSource } from "./auth.js";
+import { signedReadUrl, signedUrl, TokenSource } from "./auth.js";
 import { classifyGcsError } from "./errors.js";
 import type { ServiceAccountKey } from "./auth.js";
 
@@ -297,7 +297,12 @@ export class GCSDriver implements BaseDriver<GCSMeta> {
   /** Streams the object. `options.signal` also cancels reading the body. */
   /** Range reads, and the upload size limit used by upload links. */
   get capabilities(): DriverCapabilities {
-    return { range: true, ...(this.maxSizeBytes !== undefined ? { maxUploadBytes: this.maxSizeBytes } : {}) };
+    return {
+      range: true,
+      // Direct upload links need a service account to sign with.
+      ...(this.account ? { directUpload: { enforcesSize: true, maxExpiresIn: PRESIGN_MAX_EXPIRY } } : {}),
+      ...(this.maxSizeBytes !== undefined ? { maxUploadBytes: this.maxSizeBytes } : {}),
+    };
   }
 
   async get(path: string, options?: GetOptions): Promise<ReadableStream<Uint8Array>> {
@@ -337,6 +342,35 @@ export class GCSDriver implements BaseDriver<GCSMeta> {
       expiresIn,
       now: new Date(),
     });
+  }
+
+  /**
+   * A V4 signed `PUT` a browser can upload one file to, straight to the
+   * bucket. The signed `x-goog-content-length-range` header makes Google Cloud
+   * reject bodies over `maxSize` (or of any other length than `size`, when
+   * given). Needs `credentials` or `serviceAccount`.
+   */
+  async getPresignedUploadUrl(options: DirectUploadOptions): Promise<PresignedUpload> {
+    if (!this.account || !this.tokens) {
+      throw new StorageError("config", "GCSDriver needs credentials or serviceAccount to create upload links", {
+        provider: PROVIDER,
+      });
+    }
+    const range = options.size !== undefined ? `${options.size},${options.size}` : `0,${options.maxSize}`;
+    const headers: Record<string, string> = { "x-goog-content-length-range": range };
+    if (options.mimeType) headers["content-type"] = options.mimeType;
+    const url = await signedUrl({
+      origin: this.endpoint,
+      bucket: this.bucket,
+      objectName: options.path,
+      clientEmail: this.account.clientEmail,
+      key: await this.tokens.signingKey(),
+      expiresIn: options.expiresIn,
+      now: new Date(),
+      method: "PUT",
+      headers,
+    });
+    return { url, method: "PUT", headers, id: options.id, path: options.path };
   }
 
   /** The object name an upload with `options.id` is stored under: `<path>/<id>.<ext>`. */

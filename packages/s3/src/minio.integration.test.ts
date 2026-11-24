@@ -148,6 +148,31 @@ describeEnv("S3Driver integration against MinIO", () => {
     await client.delete(result.path);
   });
 
+  it("uploads straight to the bucket with a direct link, and rejects a different size", async () => {
+    const bytes = new TextEncoder().encode("direct-upload-content");
+    const link = await client.getPresignedUploadUrl({
+      filename: "direct.txt",
+      path: "uploads",
+      mimeType: "text/plain",
+      size: bytes.byteLength,
+      maxSize: 1024,
+      direct: true,
+    });
+    expect(link.path).toBe(`uploads/${link.id}.txt`);
+
+    // What a browser does: a plain PUT with the returned headers, no credentials.
+    const ok = await fetch(link.url, { method: link.method, headers: link.headers, body: bytes });
+    expect(ok.ok).toBe(true);
+    const stored = await client.stat(link.path!);
+    expect(stored).toMatchObject({ size: bytes.byteLength, contentType: "text/plain" });
+
+    const wrong = await fetch(link.url, { method: link.method, headers: link.headers, body: new Uint8Array(bytes.byteLength + 5) });
+    expect(wrong.ok).toBe(false);
+    expect([400, 403]).toContain(wrong.status);
+
+    await client.delete(link.path!);
+  });
+
   it("keeps filenames unique across uploads", async () => {
     const upload = () =>
       client.upload(
