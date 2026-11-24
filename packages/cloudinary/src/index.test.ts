@@ -204,16 +204,18 @@ describe("CloudinaryDriver", () => {
 
     it("should reject with AbortError when fetch aborts", async () => {
       const controller = new AbortController();
-      mockFetch.mockImplementation(
-        (_url: string, init: RequestInit) =>
-          new Promise((_resolve, reject) => {
-            init.signal?.addEventListener(
-              "abort",
-              () => reject(controller.signal.reason),
-              { once: true },
-            );
-          }),
-      );
+      let requestSent!: () => void;
+      const sent = new Promise<void>((resolve) => (requestSent = resolve));
+      mockFetch.mockImplementation((_url: string, init: RequestInit) => {
+        requestSent();
+        return new Promise((_resolve, reject) => {
+          init.signal?.addEventListener(
+            "abort",
+            () => reject(controller.signal.reason),
+            { once: true },
+          );
+        });
+      });
 
       const stream = new ReadableStream({
         start(controller) {
@@ -227,7 +229,9 @@ describe("CloudinaryDriver", () => {
         signal: controller.signal,
       });
       const errPromise = upload.catch((e) => e);
-      setTimeout(() => controller.abort(), 20);
+      // Abort once the request is in flight, not after a fixed delay.
+      await sent;
+      controller.abort();
       const err = await errPromise;
 
       expect(err.name).toBe("AbortError");

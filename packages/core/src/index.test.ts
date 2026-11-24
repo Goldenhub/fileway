@@ -864,10 +864,13 @@ describe("FilewayClient retry", () => {
 
   it("stops retrying when the signal aborts during the retry delay", async () => {
     const onError = vi.fn();
+    let attempted!: () => void;
+    const firstAttempt = new Promise<void>((resolve) => (attempted = resolve));
     const driver: BaseDriver = {
       name: "mock",
       upload: vi.fn(async () => ({ id: "f", url: "u", path: "p", size: 0, meta: {} })),
       delete: vi.fn(async () => {
+        attempted();
         throw new StorageError("network", "down", { provider: "s3" });
       }),
       getUrl: vi.fn(async (p) => `u${p}`),
@@ -877,7 +880,10 @@ describe("FilewayClient retry", () => {
     const controller = new AbortController();
 
     const pending = client.delete("x", { signal: controller.signal });
-    setTimeout(() => controller.abort(), 10);
+    // Abort after the first attempt failed, so the client is in its 10 s retry delay.
+    await firstAttempt;
+    await new Promise((r) => setTimeout(r, 0));
+    controller.abort();
 
     await expect(pending).rejects.toMatchObject({ name: "AbortError" });
     expect(driver.delete).toHaveBeenCalledTimes(1);
@@ -1173,7 +1179,12 @@ describe("retry.idleTimeoutMs", () => {
   });
 
   it("keeps the caller's own abort final", async () => {
-    const driver = baseDriver(async (_s, o) => hang(o));
+    let started!: () => void;
+    const attempt = new Promise<void>((resolve) => (started = resolve));
+    const driver = baseDriver(async (_s, o) => {
+      started();
+      return hang(o);
+    });
     const client = new FilewayClient({ driver, retry: { ...quickRetry, idleTimeoutMs: 1000 } });
     const controller = new AbortController();
 
@@ -1182,7 +1193,9 @@ describe("retry.idleTimeoutMs", () => {
       signal: controller.signal,
       streamFactory: () => trickle(1, 0),
     });
-    setTimeout(() => controller.abort(), 20);
+    // Abort while the first attempt is running, not after a fixed delay.
+    await attempt;
+    controller.abort();
 
     await expect(pending).rejects.toMatchObject({ name: "AbortError" });
     expect(driver.upload).toHaveBeenCalledTimes(1);

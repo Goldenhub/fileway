@@ -375,10 +375,13 @@ describe("S3Driver streaming upload (known size)", () => {
 
   it("should abort an in-flight streaming upload with AbortError", async () => {
     const controller = new AbortController();
+    let requestSent!: () => void;
+    const sent = new Promise<void>((resolve) => (requestSent = resolve));
     // Mirrors undici: the request hangs until the signal aborts, at which point
     // the body stream is cancelled.
     mockFetch.mockImplementation((_input, init) => {
       const body = init?.body as ReadableStream<Uint8Array> | undefined;
+      requestSent();
       return new Promise((_resolve, reject) => {
         init?.signal?.addEventListener(
           "abort",
@@ -407,7 +410,10 @@ describe("S3Driver streaming upload (known size)", () => {
       signal: controller.signal,
     });
     const errPromise = upload.catch((e) => e);
-    setTimeout(() => controller.abort(), 20);
+    // Abort once the request is in flight, not after a fixed delay: under load,
+    // signing can take longer than any timer, and the abort would land first.
+    await sent;
+    controller.abort();
     const err = await errPromise;
 
     expect(err.name).toBe("AbortError");
@@ -602,13 +608,25 @@ describe("S3Driver multipart upload", () => {
     const controller = new AbortController();
     let released!: () => void;
     const gate = new Promise<void>((resolve) => (released = resolve));
-    const stream = new ReadableStream<Uint8Array>({
-      async start(c) {
-        c.enqueue(new TextEncoder().encode("data"));
-        await gate; // hold mid-upload
-        c.close();
+    let firstRead!: () => void;
+    const reading = new Promise<void>((resolve) => (firstRead = resolve));
+    let pulls = 0;
+    // highWaterMark 0: `pull` runs only when the driver reads, which it does
+    // after CreateMultipartUpload has returned an upload id.
+    const stream = new ReadableStream<Uint8Array>(
+      {
+        async pull(c) {
+          if (pulls++ === 0) {
+            c.enqueue(new TextEncoder().encode("data"));
+            firstRead();
+            return;
+          }
+          await gate; // hold mid-upload
+          c.close();
+        },
       },
-    });
+      { highWaterMark: 0 },
+    );
     mockMultipart();
 
     const upload = driver.upload(stream, {
@@ -616,7 +634,8 @@ describe("S3Driver multipart upload", () => {
       signal: controller.signal,
     });
     const errPromise = upload.catch((e) => e);
-    setTimeout(() => controller.abort(), 20);
+    await reading;
+    controller.abort();
     const err = await errPromise;
     released();
 
