@@ -15,7 +15,7 @@ The first stable release. Target scope, tracked on the [roadmap](README.md#roadm
 
 Expected: once the public API is frozen and has gone through real-world feedback via [GitHub Discussions](https://github.com/Goldenhub/fileway/discussions).
 
-## Unreleased
+## v0.8.0 (2026-11-24)
 
 **Features**
 - **Direct upload links.** `getPresignedUploadUrl({ ..., direct: true })` returns a link straight to the bucket on S3 (and R2, MinIO), Google Cloud Storage and Azure, so large browser uploads skip your app's bandwidth and your host's request size limit. The browser call is the same `fetch(link.url, { method, headers, body })`. S3 needs the exact `size` and rejects any other length; Google Cloud enforces `maxSize` with a signed `x-goog-content-length-range` header; Azure cannot limit the size, so its links expire within 15 minutes. Direct uploads skip middleware, plugins and the `upload` event. Links keep going through your app by default when `links` is configured; without `links`, drivers that support it return direct links.
