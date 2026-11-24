@@ -4,7 +4,7 @@ import { Inter, JetBrains_Mono } from "next/font/google";
 import { RootProvider } from "fumadocs-ui/provider/next";
 import { Analytics } from "@vercel/analytics/react";
 import { SpeedInsights } from "@vercel/speed-insights/next";
-import { SITE_NAME, SITE_DESCRIPTION, SITE_URL, GITHUB_URL, NPM_URL, HOME_OG_IMAGE, OG_IMAGE_SIZE, FEED_ALTERNATE } from "@/lib/site";
+import { SITE_NAME, SITE_DESCRIPTION, SHARE_TITLE, SITE_URL, GITHUB_URL, NPM_URL, HOME_OG_IMAGE, OG_IMAGE_SIZE, FEED_ALTERNATE } from "@/lib/site";
 import "./global.css";
 
 const sans = Inter({
@@ -23,7 +23,9 @@ const mono = JetBrains_Mono({
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
   title: {
-    default: `${SITE_NAME}: Runtime-agnostic file storage for JavaScript & TypeScript`,
+    // Kept under 60 characters so search results show it whole, and keeps the
+    // words people search for: TypeScript, file uploads, cloud.
+    default: `${SITE_NAME}: TypeScript file uploads that run on any cloud`,
     template: `%s · ${SITE_NAME}`,
   },
   description: SITE_DESCRIPTION,
@@ -59,15 +61,15 @@ export const metadata: Metadata = {
   openGraph: {
     type: "website",
     siteName: SITE_NAME,
-    title: `${SITE_NAME}: Runtime-agnostic file storage for JavaScript & TypeScript`,
+    title: SHARE_TITLE,
     description: SITE_DESCRIPTION,
     url: SITE_URL,
     locale: "en_US",
-    images: [{ url: HOME_OG_IMAGE, ...OG_IMAGE_SIZE, alt: `${SITE_NAME}: one standard API for all your file storage` }],
+    images: [{ url: HOME_OG_IMAGE, ...OG_IMAGE_SIZE, alt: SHARE_TITLE }],
   },
   twitter: {
     card: "summary_large_image",
-    title: `${SITE_NAME}: Runtime-agnostic file storage for JavaScript & TypeScript`,
+    title: SHARE_TITLE,
     description: SITE_DESCRIPTION,
     images: [HOME_OG_IMAGE],
   },

@@ -40,7 +40,7 @@ export function Footer() {
         <div>
           <Logo />
           <p className="mt-3 max-w-xs text-sm leading-relaxed text-ink-muted">
-            Runtime-agnostic file storage for JavaScript & TypeScript.
+            Write your file uploads once. Run them on any cloud.
           </p>
         </div>
         {columns.map((col) => (

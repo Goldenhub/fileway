@@ -152,9 +152,10 @@ export async function GET(_req: Request, { params }: { params: Promise<{ slug: s
 
   if (slug.join("/") === HOME_OG_IMAGE.replace(/^\/og\//, "")) {
     return render({
-      title: "One standard API for all your file storage.",
-      highlight: "Zero dependencies.",
-      description: "Local disk, S3, R2, Google Cloud, Azure, Supabase and Cloudinary. Runs on Node.js, Bun, Deno and the edge.",
+      title: "Write your file uploads once.",
+      highlight: "Run them on any cloud.",
+      description: "One TypeScript API for S3, R2, Google Cloud, Azure, Supabase, Cloudinary and local disk, on any runtime.",
+      badge: "Free and open source",
     });
   }
 
