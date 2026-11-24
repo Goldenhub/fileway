@@ -159,13 +159,13 @@ export class FilewayClient<const TConfig extends FilewayConfig> {
 - [x] **Errors**: new `rate-limited` (HTTP 429 and provider throttling codes) and `timeout` (idle timeout) codes, both retryable.
 - [x] **Exports**: core exports only the client, types, errors, `version`, and the driver helpers `ValidationError`, `abortError`, `validateUploadOptions`, `urlEncodePath`. Driver packages export only the driver, its config and meta types; classifiers and parsers are internal. `S3Meta`, `LocalMeta` named; S3 gained `maxSizeBytes`.
 
-## List, Stat, Copy, Move (Complete, unreleased; RFC 0001)
+## List, Stat, Copy, Move (Complete, v0.6.0; RFC 0001)
 
 - [x] **Core**: optional `BaseDriver.list`/`copy`/`move`; `FilewayClient.list`, `listAll` (async iterator over cursors), `stat` (wraps `head`, `null` when missing), `copy`, `move` (falls back to copy + delete). All use `runWithRetry`; a retried copy that already landed or a retried move whose source is gone is treated as success. New `conflict` error code. `encodeCursor`/`decodeCursor` exported for drivers.
 - [x] **Drivers**: Local (readdir walk, copyFile, rename with EXDEV fallback), S3 (ListObjectsV2, CopyObject, UploadPartCopy over 5 GiB), GCS (objects.list, objects.rewrite loop, ifGenerationMatch=0), Azure (List Blobs, Copy Blob with If-None-Match and pending polling), Supabase (object/list with a folder walk for recursive, native copy and move), Cloudinary (Admin API list across resource types plus folders, signed rename; no copy).
 - [x] **Docs**: `guide/managing-files.mdx`; RFCs live in `rfcs/` (0001 implemented; 0002 plugin API, 0003 WebDAV, 0004 app-signed links are drafts).
 
-## Plugins, Events and Handler (Complete, unreleased; RFC 0002 part 1)
+## Plugins, Events and Handler (Complete, v0.7.0; RFC 0002 part 1)
 
 - [x] **Plugins**: `FilewayConfig.plugins` (`id`, `init`, `middlewares` appended after the app's, `onEvent`, `routes`); duplicate ids or routes are `config` errors (`packages/core/src/plugins.ts`).
 - [x] **Events**: one `FilewayEvent` per operation after retries, published from `runWithRetry` / `finishUpload` on success and `reportFailure` on failure (`aborted` for `AbortError`); `onEvent` is never awaited and failures are logged with `warn`.
@@ -173,7 +173,7 @@ export class FilewayClient<const TConfig extends FilewayConfig> {
 - [x] **`client.handler`**: web-standard handler under `basePath` (default `/api/fileway`), `"METHOD /path"` and `/*` routes, 404/405/500.
 - [x] **Docs**: `guide/plugins.mdx`. `@fileway/infra` (part 2) will live in the private `fileway-infrastructure` repo.
 
-## App-Signed Links (Complete, unreleased; RFC 0004)
+## App-Signed Links (Complete, v0.7.0; RFC 0004)
 
 - [x] **Links**: `FilewayConfig.links` (`secret` rotation, `origin` + `basePath`, `mode`, `maxExpiresIn`, `cors`, `inlineTypes`, `check`); HKDF-derived HMAC-SHA256 signing in `packages/core/src/links.ts`; built-in handler routes `GET/HEAD/OPTIONS /files/*` and `PUT/OPTIONS /upload` that plugins cannot claim.
 - [x] **Downloads**: `getPresignedUrl` falls back to app-signed links for drivers without presigning (or always, with `mode: "always"`); safe types inline by default, script-capable types always download; `nosniff` on every response and a sandbox CSP except for PDFs; `Range` gives `206`.

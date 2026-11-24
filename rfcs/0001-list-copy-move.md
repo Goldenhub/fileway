@@ -1,6 +1,6 @@
 # RFC 0001: Listing, copying, moving and stat
 
-- **Status:** Implemented (unreleased, planned for 0.6.0)
+- **Status:** Implemented, released in 0.6.0
 - **Target:** 0.6.0 (additive apart from the new `conflict` error code)
 - **Drivers:** Local, S3, GCS, Azure, Supabase, Cloudinary
 

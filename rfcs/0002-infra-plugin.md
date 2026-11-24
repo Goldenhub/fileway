@@ -1,6 +1,6 @@
 # RFC 0002: Plugins and the `@fileway/infra` plugin
 
-- **Status:** Part 1 (plugin API, events, handler) implemented, unreleased, planned for 0.7.0. Part 2 (`@fileway/infra`) is a draft.
+- **Status:** Part 1 (plugin API, events, handler) implemented, released in 0.7.0. Part 2 (`@fileway/infra`) is a draft.
 - **Target:** `@fileway/core` 0.7.0 (plugin API, additive, this repo); `@fileway/infra` 0.1 (private `fileway-infrastructure` repo)
 - **Depends on:** [RFC 0001](./0001-list-copy-move.md) (list, stat, copy, move)
 

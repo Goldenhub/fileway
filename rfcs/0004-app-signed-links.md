@@ -1,6 +1,6 @@
 # RFC 0004: App-signed links
 
-- **Status:** Implemented (unreleased, planned for 0.7.0)
+- **Status:** Implemented, released in 0.7.0
 - **Target:** `@fileway/core` 0.7.0 (additive), range reads in every driver
 - **Depends on:** the request handler from [RFC 0002](./0002-infra-plugin.md). Used by `LocalDriver`, [`@fileway/webdav`](./0003-webdav-driver.md), and Fileway Infrastructure's `link` and `upload-url` routes.
 
