@@ -1,6 +1,7 @@
 import { Header } from "../components/landing/header";
 import { Hero } from "../components/landing/hero";
 import { InteractiveDemo } from "../components/landing/interactive-demo";
+import { WhoItsFor } from "../components/landing/who-its-for";
 import { BentoGrid } from "../components/landing/bento-grid";
 import { DriversSection } from "../components/landing/drivers-section";
 import { CodeComparison } from "../components/landing/code-comparison";
@@ -37,6 +38,7 @@ export default function HomePage() {
       <main>
         <Hero />
         <InteractiveDemo />
+        <WhoItsFor />
         <BentoGrid />
         <DriversSection />
         <CodeComparison />
