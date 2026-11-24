@@ -71,7 +71,7 @@ export const auditLog: FilewayPlugin = {
 
 - `onEvent` is **not awaited**: it never slows down or fails an operation. If it throws or its promise rejects, the error is logged with your `logger`'s `warn` and the operation carries on. If you need delivery guarantees (webhooks, billing), queue the event and send it from a background job.
 - `middlewares` are added after the client's own `middlewares`, so they see the final stream and options. See [Middleware](/docs/guide/middleware).
-- `init(ctx)` runs once, after the client is created, with `ctx.client`, `ctx.driverName`, `ctx.basePath` (where `client.handler` is mounted), `ctx.log` and `ctx.waitUntil`.
+- `init(ctx)` runs once, after the client is created, with `ctx.client`, `ctx.driverName`, `ctx.basePath` (where `client.handler` is mounted), `ctx.features` (what the client can do: `list`, `stat`, `copy`, `move`, `range`, `downloadLinks`, `uploadLinks`), `ctx.log` and `ctx.waitUntil`.
 - Plugin ids must be unique; duplicates are a `config` error when the client is created.
 
 ### Serverless platforms: `waitUntil`

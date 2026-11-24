@@ -18,6 +18,7 @@ export const version: string = typeof __FILEWAY_VERSION__ === "string" ? __FILEW
 
 import type {
   BaseDriver,
+  ClientFeatures,
   CopyOptions,
   LinksConfig,
   PresignedUpload,
@@ -136,6 +137,7 @@ export class FilewayClient<TDriver extends BaseDriver> {
       client: this as unknown as FilewayClient<BaseDriver>,
       driverName: this.driver.name,
       basePath: this.basePath,
+      features: this.features,
       log: {
         debug: (message, meta) => this.emit("debug", message, meta),
         info: (message, meta) => this.emit("info", message, meta),
@@ -146,6 +148,30 @@ export class FilewayClient<TDriver extends BaseDriver> {
     };
     this.handler = createHandler(routes, this.basePath, ctx, ctx.log);
     for (const plugin of this.plugins) plugin.init?.(ctx);
+  }
+
+  /**
+   * What this client can do with its driver and configuration, for example to
+   * hide actions a driver does not support. Fallbacks count: `move` works
+   * through copy then delete, download links through app-signed links.
+   */
+  get features(): ClientFeatures {
+    const d = this.driver;
+    const caps = d.capabilities;
+    return {
+      list: typeof d.list === "function",
+      stat: typeof d.head === "function",
+      copy: typeof d.copy === "function",
+      move: typeof d.move === "function" || typeof d.copy === "function",
+      range: caps?.range === true,
+      downloadLinks: typeof d.getPresignedUrl === "function" || this.links !== undefined,
+      uploadLinks: {
+        app: this.links !== undefined,
+        direct:
+          typeof d.getPresignedUploadUrl === "function" && typeof d.pathFor === "function" && caps?.directUpload !== undefined,
+      },
+      ...(caps?.maxUploadBytes !== undefined ? { maxUploadBytes: caps.maxUploadBytes } : {}),
+    };
   }
 
   async upload(

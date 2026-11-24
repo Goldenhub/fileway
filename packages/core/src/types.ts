@@ -455,6 +455,29 @@ export interface FilewayEvent {
   tags?: Record<string, string>;
 }
 
+/**
+ * What a `FilewayClient` can do with its driver and configuration. `true`
+ * means the client method works, natively or through a fallback.
+ */
+export interface ClientFeatures {
+  /** `list` and `listAll`. */
+  list: boolean;
+  /** `stat` (needs the driver's `head`). */
+  stat: boolean;
+  /** `copy`. */
+  copy: boolean;
+  /** `move`: natively, or as copy then delete. */
+  move: boolean;
+  /** `get(path, { range })` reads part of a file. */
+  range: boolean;
+  /** `getPresignedUrl`: the provider's signed URL, or an app-signed link (`links`). */
+  downloadLinks: boolean;
+  /** `getPresignedUploadUrl`: through the app (`links`), straight to the provider, both, or neither. */
+  uploadLinks: { app: boolean; direct: boolean };
+  /** The driver's upload size limit, when it has one. */
+  maxUploadBytes?: number;
+}
+
 /** What a plugin receives in `init` and in its routes. */
 export interface PluginContext {
   client: FilewayClient<BaseDriver>;
@@ -462,6 +485,8 @@ export interface PluginContext {
   driverName: string;
   /** Where `client.handler` is mounted, e.g. `"/api/fileway"` (no trailing slash). */
   basePath: string;
+  /** What this client can do with its driver, e.g. to hide actions it does not support. */
+  features: ClientFeatures;
   /** The client's logger (silent when none is configured). */
   log: Logger;
   /**

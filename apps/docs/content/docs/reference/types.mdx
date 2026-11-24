@@ -269,8 +269,22 @@ interface PluginContext {
   client: FilewayClient<BaseDriver>;
   driverName: string;
   basePath: string;   // where client.handler is mounted, e.g. "/api/fileway"
+  features: ClientFeatures;
   log: Logger;
   waitUntil(promise: Promise<unknown>): void; // background work; uses config.waitUntil when set
+}
+
+// What the client can do with its driver; fallbacks count (move as copy + delete,
+// download links as app-signed links). Also available as client.features.
+interface ClientFeatures {
+  list: boolean;
+  stat: boolean;
+  copy: boolean;
+  move: boolean;
+  range: boolean;
+  downloadLinks: boolean;
+  uploadLinks: { app: boolean; direct: boolean };
+  maxUploadBytes?: number;
 }
 
 type PluginRoute = (request: Request, ctx: PluginContext & { params: { wildcard?: string } }) => Promise<Response> | Response;

@@ -75,6 +75,10 @@ Deletes a stored file. Returns `Promise<void>`. Deleting a file that does not ex
 
 Returns the public URL for a stored file (see [Downloads](/docs/guide/downloads#geturlpath)).
 
+## `client.features`
+
+What the client can do with its driver and configuration, for example to hide actions in a UI: `{ list, stat, copy, move, range, downloadLinks, uploadLinks: { app, direct }, maxUploadBytes? }`. Fallbacks count: `move` is `true` when the driver can copy, and `downloadLinks` when `links` is configured. See [`ClientFeatures`](/docs/reference/types#filewayplugin-filewayevent-trackoptions).
+
 ## `client.handler`
 
 A web-standard request handler that serves plugin routes under `basePath`: `{ fetch, GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS }`, all the same function. Mount it with `export const { GET, POST } = client.handler` in Next.js, or `fetch: client.handler.fetch` on Workers, Bun and Deno. See [Plugins and Events](/docs/guide/plugins#routes-and-clienthandler).

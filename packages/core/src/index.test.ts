@@ -1633,6 +1633,29 @@ describe("plugins, events and handler", () => {
     expect(order).toEqual(["app", "plugin"]);
   });
 
+  it("describes what the client can do, counting fallbacks", () => {
+    const bare = new FilewayClient({ driver: { name: "bare", upload: vi.fn(), delete: vi.fn(), getUrl: vi.fn(), get: vi.fn() } as never });
+    expect(bare.features).toEqual({
+      list: false,
+      stat: false,
+      copy: false,
+      move: false,
+      range: false,
+      downloadLinks: false,
+      uploadLinks: { app: false, direct: false },
+    });
+
+    // mem has list and copy: move works as copy then delete.
+    const init = vi.fn();
+    const withLinks = new FilewayClient({
+      driver: memDriver(),
+      links: { secret: "a".repeat(44), origin: "https://files.example.com" },
+      plugins: [{ id: "p", init }],
+    });
+    expect(withLinks.features).toMatchObject({ list: true, copy: true, move: true, stat: false, downloadLinks: true, uploadLinks: { app: true, direct: false } });
+    expect(init.mock.calls[0]![0].features).toEqual(withLinks.features);
+  });
+
   it("gives plugins the handler's basePath, without a trailing slash", () => {
     const init = vi.fn();
     new FilewayClient({ driver: memDriver(), basePath: "/files/", plugins: [{ id: "p", init }] });
