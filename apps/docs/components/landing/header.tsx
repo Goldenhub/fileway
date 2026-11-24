@@ -7,6 +7,8 @@ import { Button } from "./ui";
 const links = [
   { href: "/docs", label: "Docs" },
   { href: "/docs/drivers/local", label: "Drivers" },
+  { href: "/#features", label: "Features" },
+  { href: "/#faq", label: "FAQ" },
   { href: "/docs/reference/changelog", label: "Changelog" },
 ];
 

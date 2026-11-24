@@ -1,8 +1,9 @@
 import { Tab, Tabs } from "fumadocs-ui/components/tabs";
-import { ArrowRight } from "lucide-react";
+import { ArrowRight, Check } from "lucide-react";
 import { GITHUB_URL, SITE_VERSION } from "@/lib/site";
 import { GitHubIcon } from "../brand";
 import { CodeBlock } from "../code-block";
+import { CopyButton } from "./install-command";
 import { Button, WindowFrame } from "./ui";
 
 const managers = [
@@ -56,22 +57,22 @@ export function Hero() {
             <span className="rounded-full bg-brand-soft px-1.5 py-0.5 font-mono text-[11px] text-brand-ink">
               v{SITE_VERSION}
             </span>
-            Runtime-agnostic file storage
+            New: signed links, plugins and events
             <ArrowRight className="size-3" />
           </a>
 
           <h1 className="mt-6 text-4xl font-semibold tracking-tight text-ink sm:text-5xl lg:text-[3.5rem] lg:leading-[1.08]">
-            One standard API for all your file storage.{" "}
-            <span className="text-brand-ink">Zero dependencies.</span>
+            Write your file uploads once.{" "}
+            <span className="text-brand-ink">Run them on any cloud.</span>
           </h1>
 
           <p className="mt-6 max-w-xl text-lg leading-relaxed text-ink-muted">
-            Stream files effortlessly across Node.js, Cloudflare Workers, Bun, and Deno. Swap between Local, S3, Google
-            Cloud Storage, Azure, Supabase and Cloudinary with a single line of code.
+            Fileway is one free, open-source TypeScript API for S3, R2, Google Cloud, Azure, Supabase, Cloudinary and
+            local disk. Files stream on Node.js, Bun, Deno and the edge, and switching providers is a one-line change.
           </p>
 
           <div className="mt-8 flex flex-wrap items-center gap-3">
-            <Button href="/docs" event="cta_click" data={{ target: "get-started" }}>
+            <Button href="/docs/getting-started/quickstart" event="cta_click" data={{ target: "get-started" }}>
               Get started <ArrowRight className="size-4" />
             </Button>
             <Button
@@ -82,9 +83,18 @@ export function Hero() {
               data={{ target: "github" }}
               variant="secondary"
             >
-              <GitHubIcon /> GitHub
+              <GitHubIcon /> Star on GitHub
             </Button>
           </div>
+
+          <ul className="mt-6 flex flex-wrap gap-x-5 gap-y-2 text-sm text-ink-muted">
+            {["MIT licensed", "Zero core dependencies", "Built for TypeScript"].map((item) => (
+              <li key={item} className="flex items-center gap-1.5">
+                <Check className="size-4 text-brand-ink" />
+                {item}
+              </li>
+            ))}
+          </ul>
         </div>
 
         <WindowFrame title="upload.ts" className="min-w-0 shadow-xl shadow-black/5">
@@ -95,6 +105,8 @@ export function Hero() {
                   <div className="flex items-center gap-2 overflow-x-auto py-3 font-mono text-sm">
                     <span className="select-none text-ink-muted">$</span>
                     <code className="whitespace-nowrap text-ink">{m.cmd}</code>
+                    {/* Sticky, so it stays visible when a long command scrolls on phones. */}
+                    <CopyButton text={m.cmd} location={`hero-${m.id}`} className="sticky right-0 bg-surface" />
                   </div>
                 </Tab>
               ))}

@@ -6,6 +6,8 @@ const buttonStyles = {
     "bg-ink text-surface hover:bg-ink/85",
   secondary:
     "border border-line bg-surface text-ink hover:bg-surface-muted",
+  brand:
+    "bg-brand text-neutral-950 hover:bg-brand/90",
 };
 
 /** Pill button that records an analytics event on click. */
