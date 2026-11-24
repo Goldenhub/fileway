@@ -120,6 +120,8 @@ It serves plugin routes under `basePath` (a `FilewayConfig` option, default `"/a
 infra({
   apiKey: string,                    // from the dashboard; identifies the project
   endpoint?: string,                 // default https://api.usefileway.dev
+  url?: string,                      // the app's public URL; overrides the one entered in the dashboard
+  dashboardOrigin?: string,          // default https://app.usefileway.dev; for a self-hosted dashboard
   events?: {
     enabled?: boolean,               // default true
     redact?: "none" | "hash-paths" | "omit-paths", // default "none"
@@ -142,7 +144,16 @@ infra({
 
 ### 2. Admin routes (the dashboard's requests)
 
-Served under `{base}/infra/*`:
+Served under `{base}/infra/*`. The requests are **sent by the dashboard user's browser**, not by the service: the service signs a short-lived request, the dashboard page sends it to the customer's app, and the answer goes straight back to the browser. This means:
+
+- the file browser works for apps on a private network or VPN, and in local development, whenever the user's browser can reach the app;
+- the service never calls customer URLs, so it cannot be used to probe internal addresses;
+- file lists and names never pass through Fileway's servers, even when events are redacted;
+- the app must be served over HTTPS, or from `localhost`, or browsers block the requests as mixed content.
+
+The plugin answers CORS preflights on `/infra/*` for `dashboardOrigin` only (no other origin is ever allowed), including the private network preflight header browsers send before a public site reaches a private address. Users on private networks may see a one-time browser permission prompt.
+
+Requests sent by the service itself (for scheduled or background features) are out of scope. If a future feature needs them, they get their own design, with HTTPS only, no redirects, short timeouts and refusal of private and internal IP ranges.
 
 | Route | Does | Uses |
 |---|---|---|
@@ -152,11 +163,11 @@ Served under `{base}/infra/*`:
 | `POST /infra/upload-url` | Presigned upload target for dashboard uploads | `client.getPresignedUploadUrl` ([RFC 0004](./0004-app-signed-links.md)): app-signed for every driver, and native (straight to the bucket) for S3, GCS and Azure before launch |
 | `POST /infra/delete` | Delete one file | `client.delete` |
 | `POST /infra/move`, `/infra/copy` | Rename, move, copy | `client.move`, `client.copy` |
-| `GET /infra/health` | Version, driver name, capabilities | none |
+| `GET /infra/health` | Version, driver name, capabilities and the project id, so the dashboard can confirm it reached this project's app | none |
 
 Every request is authenticated by signature, not by the API key alone:
 
-- The service signs `method`, `path`, `body SHA-256` and a `timestamp` with HMAC-SHA256 using a **signing secret** derived from the API key (the key itself is never sent to the app). Headers: `fileway-signature`, `fileway-timestamp`, `fileway-nonce`.
+- The service signs `method`, `path`, `body SHA-256` and a `timestamp` with HMAC-SHA256, for one dashboard user and one action, and hands the signed request to the dashboard page to send using a **signing secret** derived from the API key (the key itself is never sent to the app). Headers: `fileway-signature`, `fileway-timestamp`, `fileway-nonce`.
 - The plugin rejects requests older than 60 seconds or with a nonce it has seen in that window, then checks the signature with a constant-time compare (Web Crypto `verify`).
 - The request carries the dashboard user's id and role. The service enforces roles; the plugin also calls `allow(op, path)` when provided, so the app keeps a final veto (for example, never allow deletes under `invoices/`).
 - Responses never include storage credentials. `link` returns URLs that expire in at most 15 minutes.
@@ -176,7 +187,19 @@ Virus scanning is out of scope here; it needs a service-side scanner and its own
 
 ### 4. Health and connection
 
-On `init`, the plugin calls `POST {endpoint}/v1/connect` with its version, driver name, capabilities (which optional driver methods exist) and the handler base URL if configured. The dashboard uses capabilities to hide actions the driver cannot do (for example, no copy on Cloudinary).
+On `init`, the plugin calls `POST {endpoint}/v1/connect` with its version, driver name, capabilities (which optional driver methods exist), the client's `basePath` and `url` when set. The dashboard uses capabilities to hide actions the driver cannot do (for example, no copy on Cloudinary).
+
+Reporting `basePath` needs one addition to `@fileway/core`: `PluginContext.basePath`, the path where `client.handler` is mounted.
+
+### 5. Onboarding and the app URL
+
+1. Sign up at `app.usefileway.dev`, name the organization and create a project. The API key is shown once.
+2. Install `@fileway/infra` and add `infra({ apiKey })` to the client's plugins (plus `waitUntil` on serverless platforms), and mount `client.handler`. The setup screen shows this code with the key filled in.
+3. Deploy. The setup screen waits for `/v1/connect`, then shows the driver, version and capabilities.
+4. Upload a file in the app; the first event appears live. Analytics and the audit log work from here.
+5. **Where can we reach your app?** The user enters the app URL; the base path field is prefilled from `/v1/connect` and can be changed. **Check connection** sends a signed `GET /infra/health` from the user's browser and confirms the project id. On success, the file browser turns on; on failure, the screen says why (handler not mounted, app unreachable from this browser, not HTTPS, clock skew).
+
+The URL is stored per project and editable in project settings. When `infra({ url })` is set, it wins and the dashboard field is read-only. Staging and production are separate projects, each with its own URL; per-branch preview deployments are not covered in the first version.
 
 ## Failure modes
 
@@ -184,7 +207,8 @@ On `init`, the plugin calls `POST {endpoint}/v1/connect` with its version, drive
 |---|---|
 | Infrastructure unreachable | Uploads and downloads unaffected; events queue then drop oldest; dashboard shows "app offline" |
 | Wrong or revoked API key | One `error` log at startup, events disabled, admin routes return 401 |
-| App behind a private network | Events still flow out; the dashboard cannot reach admin routes. Enterprise self-hosted dashboard covers this |
+| App behind a private network | Events still flow out. The file browser works for users whose browser can reach the app (on the network or VPN), after a possible one-time browser prompt; others see why it is unavailable |
+| App served over plain HTTP (not `localhost`) | Events work; browsers block admin requests as mixed content, and the setup screen asks for HTTPS |
 | Clock skew over 60 seconds | Admin requests rejected with a clear `fileway-error: clock-skew` header |
 | Handler not mounted | Dashboard shows setup instructions; events still work |
 
@@ -215,3 +239,5 @@ npm provenance may not be available for a package built from a private repositor
 2. **Projects and organizations:** an organization holds the plan, members and usage limits. Inside it, each project (an app or an environment such as staging) has its own API key. Splitting staging from production never needs a second organization.
 3. **Native presigned uploads before launch:** `getPresignedUploadUrl` gains native signing in the S3 (POST policy or signed PUT), GCS (signed PUT) and Azure (SAS write) drivers, so large dashboard uploads go straight to the bucket instead of through the app. This is framework work in the public repo, released before Infrastructure launches; app-signed upload links remain the fallback for every other driver.
 4. **Event queue:** in memory only, flushed on a timer, at 100 events, with `waitUntil` on serverless platforms, and on `SIGTERM` and `beforeExit` on Node and Bun. A hard crash can lose about 2 seconds of events. Persisting to disk was rejected: it does nothing on edge or serverless runtimes and adds recovery code for a small gain.
+5. **Admin requests are sent by the browser.** The service signs, the dashboard page sends, the answer goes straight to the browser. Chosen for private networks and local development, no requests from the service to customer URLs, and file names that never pass through Fileway's servers. Requests sent by the service are left for a future feature that needs them.
+6. **The app URL is entered during onboarding,** with the base path prefilled from `/v1/connect`; `infra({ url })` overrides it for teams that configure everything in code.
