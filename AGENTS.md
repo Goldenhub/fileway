@@ -180,7 +180,7 @@ export class FilewayClient<const TConfig extends FilewayConfig> {
 - [x] **Uploads**: `getPresignedUploadUrl` signs filename, folder, id, type and size limit (`maxSize`, else the driver's `capabilities.maxUploadBytes`, else a `ValidationError`); bodies are counted while streaming.
 - [x] **Drivers**: `get(path, { range })` and `capabilities` (`range`, `maxUploadBytes`) in all six drivers.
 
-## waitUntil and Direct Upload Links (Complete, unreleased; planned for v0.8.0)
+## waitUntil and Direct Upload Links (Complete, v0.8.0)
 
 - [x] **`waitUntil`**: `FilewayConfig.waitUntil` and `PluginContext.waitUntil`; promises returned by `onEvent` go through a private `keepAlive` that logs rejections with `warn` and hands them to the platform's `waitUntil`. A throwing `waitUntil` is logged, never fatal.
 - [x] **Direct upload links**: `PresignedUploadOptions.direct` and `size`; `PresignedUpload.path`; optional `BaseDriver.getPresignedUploadUrl(DirectUploadOptions)` and `DriverCapabilities.directUpload` (`enforcesSize`, `maxExpiresIn`). Default: through the app when `links` is set, direct otherwise. S3 signs a PUT with the exact `content-length` (size required, 5 GiB); GCS signs `x-goog-content-length-range`; Azure issues an `sp=cw` SAS with `x-ms-blob-type`, capped at 900 seconds because size cannot be enforced.

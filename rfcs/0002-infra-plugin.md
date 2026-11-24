@@ -1,6 +1,6 @@
 # RFC 0002: Plugins and the `@fileway/infra` plugin
 
-- **Status:** Part 1 (plugin API, events, handler) implemented, released in 0.7.0. Core prerequisites for part 2 (`waitUntil`, direct upload links for S3, GCS and Azure) implemented, planned for 0.8.0. Part 2 (`@fileway/infra`) is a draft.
+- **Status:** Part 1 (plugin API, events, handler) implemented, released in 0.7.0. Core prerequisites for part 2 (`waitUntil`, direct upload links for S3, GCS and Azure) released in 0.8.0. Part 2 (`@fileway/infra`) is a draft.
 - **Target:** `@fileway/core` 0.7.0 (plugin API, additive, this repo); `@fileway/infra` 0.1 (private `fileway-infrastructure` repo)
 - **Depends on:** [RFC 0001](./0001-list-copy-move.md) (list, stat, copy, move)
 
