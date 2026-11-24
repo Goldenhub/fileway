@@ -142,6 +142,41 @@ await fetch(link.url, { method: link.method, headers: link.headers, body: file }
 - The body is counted as it arrives, so a missing or false `Content-Length` cannot exceed the limit (`413`).
 - The upload runs through `client.upload`: your middleware, plugins and events all apply. The response is `201` with `{ id, path, size }`.
 - For browsers on another origin, list it in `links.cors`.
+- `link.path` is where the file will be stored, so you can save it before the upload happens.
+
+### Direct upload links
+
+On S3 (and S3-compatible services such as R2 and MinIO), Google Cloud Storage and Azure, a link can also point straight at the bucket. The file then goes from the browser to the provider without passing through your app, so large uploads cost your server no bandwidth and are not limited by your host's request size (about 4.5 MB on Vercel Functions).
+
+```ts
+// On your server:
+const link = await client.getPresignedUploadUrl({
+  filename: "demo.mp4",
+  path: "videos",
+  mimeType: "video/mp4",
+  size: file.size,          // sent by the browser before uploading
+  maxSize: 500 * 1024 * 1024,
+  direct: true,
+});
+
+// In the browser: the same call as for app-signed links.
+await fetch(link.url, { method: link.method, headers: link.headers, body: file });
+```
+
+|  | Through your app (default) | Direct |
+|---|---|---|
+| Where the bytes go | Your app, then the provider | Straight to the provider |
+| Needs | `links` in the client config | A driver that supports it, with signing credentials |
+| Middleware, plugins, `upload` event | Run | **Skipped** (only creating the link is logged, as a `getPresignedUrl` event) |
+| Size limit | Enforced while streaming | Enforced by the provider (S3, Google Cloud); **not enforced on Azure** |
+
+- **Which one you get:** `direct: true` asks for a direct link and `direct: false` for one through your app. Without `direct`, links go through your app when `links` is configured, and direct otherwise. Existing apps keep their middleware and events unless they opt in.
+- **S3 needs the exact size.** S3 can only enforce an exact length on a signed upload, so pass `size`; any other length is rejected. One link uploads up to 5 GiB.
+- **Google Cloud** enforces `maxSize` (or the exact `size`, when given) through the `x-goog-content-length-range` header in `link.headers`. Send every header in `link.headers` as is. It needs `credentials` or `serviceAccount`.
+- **Azure cannot limit the size** of a direct upload. Links expire within 15 minutes, and if the size matters, check it after the upload with `client.stat(link.path)`. It needs `accountKey`. One link uploads up to 5000 MiB.
+- **After the upload,** confirm it with `client.stat(link.path)`, and record it yourself if you rely on upload events, since your app never sees the request.
+- **CORS:** the browser talks to the bucket, so the bucket needs a CORS rule allowing `PUT` from your site's origin with the headers in `link.headers` (`content-type`, plus `x-goog-content-length-range` on Google Cloud and `x-ms-blob-type` on Azure). Set it in the provider's console or CLI.
+- **Checking support in code:** a driver that can issue direct links sets `driver.capabilities.directUpload` to `{ enforcesSize, maxExpiresIn }`.
 
 ## Safe retries and upload status
 

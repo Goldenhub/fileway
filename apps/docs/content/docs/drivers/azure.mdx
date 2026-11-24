@@ -57,6 +57,7 @@ Staged blocks are invisible until they are committed. If the upload fails, is ca
 - `get(path)` streams the blob.
 - `getUrl(path)` returns `https://<account>.blob.core.windows.net/<container>/<path>`, which works for containers with public read access. Set `baseUrl` for a CDN or custom domain.
 - `getPresignedUrl(path, { expiresIn })` returns a read-only service SAS URL, up to 7 days. It needs `accountKey`.
+- `client.getPresignedUploadUrl({ ..., direct: true })` returns a create-and-write service SAS for one blob, so the browser uploads straight to the container with the `x-ms-blob-type: BlockBlob` header from `link.headers`. **Azure cannot limit the size of these uploads**: links expire within 15 minutes, and if the size matters, check it afterwards with `client.stat(link.path)`. It needs `accountKey`, allows up to 5000 MiB, and needs a CORS rule on the storage account allowing `PUT`. See [Direct upload links](/docs/guide/uploads#direct-upload-links).
 
 ## Upload status
 

@@ -86,6 +86,26 @@ interface PresignedUploadOptions extends OperationOptions {
   mimeType?: string;
   maxSize?: number;
   expiresIn?: number; // default 900
+  direct?: boolean;   // true: straight to the provider; default: through your app when links is set
+  size?: number;      // exact bytes; required for direct S3 links
+}
+
+interface PresignedUpload {
+  url: string;
+  method: "PUT";
+  headers: Record<string, string>; // send all of them with the body
+  id: string;
+  path?: string;                   // where the file will be stored
+}
+
+// What the client passes to a driver's getPresignedUploadUrl
+interface DirectUploadOptions extends OperationOptions {
+  path: string; // from the driver's pathFor
+  id: string;
+  mimeType?: string;
+  size?: number;
+  maxSize: number;
+  expiresIn: number;
 }
 ```
 
@@ -99,6 +119,10 @@ interface GetOptions extends OperationOptions {
 interface DriverCapabilities {
   range?: boolean;          // get honors options.range
   maxUploadBytes?: number;  // default limit for upload links
+  directUpload?: {          // the driver issues direct upload links
+    enforcesSize: boolean;  // false on Azure
+    maxExpiresIn: number;   // seconds
+  };
 }
 ```
 
@@ -164,6 +188,7 @@ interface BaseDriver<TMeta extends Record<string, unknown> = Record<string, unkn
   getUrl(path: string, options?: OperationOptions): Promise<string>;
   get(path: string, options?: OperationOptions): Promise<ReadableStream<Uint8Array>>;
   getPresignedUrl?(path: string, options?: PresignedUrlOptions): Promise<string>;
+  getPresignedUploadUrl?(options: DirectUploadOptions): Promise<PresignedUpload>; // with pathFor and capabilities.directUpload
   // Optional: enable lost-response recovery and getUploadStatus.
   pathFor?(options: UploadOptions & { id: string }): string;
   head?(path: string, options?: OperationOptions): Promise<StoredObject<TMeta> | null>;
@@ -222,6 +247,10 @@ interface FilewayConfig<TDriver extends BaseDriver> {
   logger?: Logger;
   onError?: (error: unknown, context: ErrorContext) => void | Promise<void>;
   retry?: RetryConfig;
+  plugins?: FilewayPlugin[];
+  basePath?: string;   // where client.handler is mounted; default "/api/fileway"
+  links?: LinksConfig;
+  waitUntil?: (promise: Promise<unknown>) => void; // the platform's waitUntil on serverless
 }
 ```
 
@@ -240,6 +269,7 @@ interface PluginContext {
   client: FilewayClient<BaseDriver>;
   driverName: string;
   log: Logger;
+  waitUntil(promise: Promise<unknown>): void; // background work; uses config.waitUntil when set
 }
 
 type PluginRoute = (request: Request, ctx: PluginContext & { params: { wildcard?: string } }) => Promise<Response> | Response;

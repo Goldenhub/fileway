@@ -71,8 +71,26 @@ export const auditLog: FilewayPlugin = {
 
 - `onEvent` is **not awaited**: it never slows down or fails an operation. If it throws or its promise rejects, the error is logged with your `logger`'s `warn` and the operation carries on. If you need delivery guarantees (webhooks, billing), queue the event and send it from a background job.
 - `middlewares` are added after the client's own `middlewares`, so they see the final stream and options. See [Middleware](/docs/guide/middleware).
-- `init(ctx)` runs once, after the client is created, with `ctx.client`, `ctx.driverName` and `ctx.log`.
+- `init(ctx)` runs once, after the client is created, with `ctx.client`, `ctx.driverName`, `ctx.log` and `ctx.waitUntil`.
 - Plugin ids must be unique; duplicates are a `config` error when the client is created.
+
+### Serverless platforms: `waitUntil`
+
+On Vercel and Cloudflare Workers, work still running after the response is sent can be stopped. Because `onEvent` is not awaited, an event written to your database could be cut off. Give the client the platform's `waitUntil` and Fileway keeps that work alive:
+
+```ts
+// Vercel
+import { waitUntil } from "@vercel/functions";
+// Cloudflare Workers
+import { waitUntil } from "cloudflare:workers";
+
+const client = new FilewayClient({ driver, plugins: [auditLog], waitUntil });
+```
+
+- Every promise returned by a plugin's `onEvent` is handed to `waitUntil`.
+- Plugins can run their own background work with `ctx.waitUntil(promise)`, for example flushing a batch of queued events. Rejections are logged with `warn`.
+- On Next.js 15.1 or later, you can pass `after` from `next/server` instead: `waitUntil: (promise) => after(promise)`.
+- Long-running servers (Node.js, Bun, Deno) don't need it.
 
 ### More examples
 

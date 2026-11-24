@@ -68,6 +68,7 @@ If the stream ends before or after a declared `size`, or the upload fails or is 
 - `get(path)` streams the object (`?alt=media`).
 - `getUrl(path)` returns `https://storage.googleapis.com/<bucket>/<path>`, which works for publicly readable objects. Set `baseUrl` for a CDN or custom domain.
 - `getPresignedUrl(path, { expiresIn })` returns a V4 signed URL (`GOOG4-RSA-SHA256`), up to 7 days. It needs `serviceAccount` or `credentials`; with only `getAccessToken` it throws a `config` error.
+- `client.getPresignedUploadUrl({ ..., direct: true })` returns a V4 signed `PUT` straight to the bucket. The signed `x-goog-content-length-range` header makes Google Cloud reject bodies over `maxSize` (or of any length other than `size`, when given), so send every header in `link.headers`. It needs `serviceAccount` or `credentials`, and a bucket CORS rule allowing `PUT`. See [Direct upload links](/docs/guide/uploads#direct-upload-links).
 
 ## Upload status
 

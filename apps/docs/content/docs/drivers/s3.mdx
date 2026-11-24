@@ -126,6 +126,10 @@ const url = await client.getPresignedUrl("uploads/report.pdf", { expiresIn: 900 
 - Signing runs entirely with Web Crypto and your configured `credentials`: no network call and no SDK. Only the `host` header is signed with an `UNSIGNED-PAYLOAD` hash, so the URL works from any plain `fetch` or browser `<a href>`.
 - Works with `endpoint`/`forcePathStyle` too, e.g. MinIO, which validates SigV4 presigning.
 
+### Direct upload links
+
+`client.getPresignedUploadUrl({ ..., size, direct: true })` returns a presigned `PUT` straight to the bucket. S3 can only enforce an exact length on a signed upload, so `size` (the file's byte count) is required and signed as `Content-Length`, together with `Content-Type` when `mimeType` is set; any other length is rejected. One link uploads up to 5 GiB. The bucket needs a CORS rule allowing `PUT` from your site. See [Direct upload links](/docs/guide/uploads#direct-upload-links).
+
 ## MinIO
 
 ```ts

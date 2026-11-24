@@ -22,6 +22,7 @@ The type parameter is the driver, inferred from `config.driver`. To annotate a c
 | `plugins` | `FilewayPlugin[]` | Optional. Event listeners, middleware and routes. See [Plugins and Events](/docs/guide/plugins). |
 | `basePath` | `string` | Optional. Where `client.handler` is mounted. Default `"/api/fileway"`. |
 | `links` | `LinksConfig` | Optional. App-signed download and upload links. See [App-signed links](/docs/guide/downloads#app-signed-links). |
+| `waitUntil` | `(promise) => void` | Optional. The platform's `waitUntil` (Vercel, Cloudflare Workers), so plugin background work finishes after the response. See [Plugins](/docs/guide/plugins#serverless-platforms-waituntil). |
 | `retry` | `RetryConfig` | Optional. Retries transient failures (`network`, `timeout`, `rate-limited`, `provider-error`, HTTP 429/5xx). See [Observability](/docs/guide/observability#retries). |
 
 ## `upload(stream, options)`
@@ -126,4 +127,6 @@ Returns a time-limited, signed download URL (see [Downloads](/docs/guide/downloa
 
 ## `getPresignedUploadUrl(options)`
 
-Returns `{ url, method: "PUT", headers, id }`: a signed link a browser can upload one file to. Options: `filename`, `path`, `id` (default a new UUID), `mimeType`, `maxSize` (default the driver's limit; required when it has none), `expiresIn` (default 900). Needs `links`. See [Upload links](/docs/guide/uploads#upload-links).
+Returns `{ url, method: "PUT", headers, id, path }`: a signed link a browser can upload one file to, with `fetch(url, { method, headers, body })`. Options: `filename`, `path`, `id` (default a new UUID), `mimeType`, `maxSize` (default the driver's limit; required when it has none), `expiresIn` (default 900), `direct` and `size`.
+
+By default the file goes through your app (`client.handler`, needs `links`). With `direct: true`, or when `links` is not configured, S3, Google Cloud and Azure return a link straight to the bucket; `size` (the exact byte count) is required on S3. Direct uploads skip middleware, plugins and the `upload` event. See [Upload links](/docs/guide/uploads#upload-links) and [Direct upload links](/docs/guide/uploads#direct-upload-links).

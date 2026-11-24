@@ -16,6 +16,7 @@ Fileway is intentionally minimal. This page is the overview: exactly what each d
 | Multipart upload (large files) | <span style={{ color: "var(--color-fd-primary)" }}>n/a</span> | ✅ | ✅ | ✅ | ✅ | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> |
 | Public URL retrieval (`getUrl`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Pre-signed URLs | ✅² | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Upload links (`getPresignedUploadUrl`) | ✅² | ✅³ | ✅³ | ✅³ | ✅² | ✅² |
 | Download / read-back | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | List files and folders (`list`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Copy (`copy`) | ✅ | ✅ | ✅ | ✅ | ✅ | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> |
@@ -28,7 +29,7 @@ Fileway is intentionally minimal. This page is the overview: exactly what each d
 | TTL / expiration | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> |
 | Lifecycle rules | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> | <span style={{ color: "var(--color-fd-primary)" }}>✕</span> |
 
-Legend: **✅** supported today · **¹** streams with bounded memory, one part, block or chunk at a time; S3 also streams a known size as one `aws-chunked` request (see [uploads](/docs/guide/uploads)) · **²** through [app-signed links](/docs/guide/downloads#app-signed-links), served by your app · **n/a** not applicable (streams directly to disk, no parts) · <span style={{ color: "var(--color-fd-primary)" }}>✕</span> not yet supported (in the works).
+Legend: **✅** supported today · **¹** streams with bounded memory, one part, block or chunk at a time; S3 also streams a known size as one `aws-chunked` request (see [uploads](/docs/guide/uploads)) · **²** through [app-signed links](/docs/guide/downloads#app-signed-links), served by your app · **³** through your app, or [direct to the bucket](/docs/guide/uploads#direct-upload-links) (Azure cannot limit the size of direct uploads) · **n/a** not applicable (streams directly to disk, no parts) · <span style={{ color: "var(--color-fd-primary)" }}>✕</span> not yet supported (in the works).
 
 ## Roadmap
 
