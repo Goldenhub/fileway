@@ -135,6 +135,7 @@ export class FilewayClient<TDriver extends BaseDriver> {
     const ctx: PluginContext = {
       client: this as unknown as FilewayClient<BaseDriver>,
       driverName: this.driver.name,
+      basePath: this.basePath,
       log: {
         debug: (message, meta) => this.emit("debug", message, meta),
         info: (message, meta) => this.emit("info", message, meta),

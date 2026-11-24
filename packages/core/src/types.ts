@@ -460,6 +460,8 @@ export interface PluginContext {
   client: FilewayClient<BaseDriver>;
   /** The configured driver's `name`. */
   driverName: string;
+  /** Where `client.handler` is mounted, e.g. `"/api/fileway"` (no trailing slash). */
+  basePath: string;
   /** The client's logger (silent when none is configured). */
   log: Logger;
   /**

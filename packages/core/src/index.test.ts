@@ -1615,9 +1615,15 @@ describe("plugins, events and handler", () => {
       plugins: [{ id: "p", init, middlewares: [{ beforeUpload: async () => void order.push("plugin") }] }],
     });
     expect(init).toHaveBeenCalledTimes(1);
-    expect(init.mock.calls[0]![0]).toMatchObject({ client, driverName: "mem" });
+    expect(init.mock.calls[0]![0]).toMatchObject({ client, driverName: "mem", basePath: "/api/fileway" });
     await client.upload(bytes(1), { filename: "a.txt" });
     expect(order).toEqual(["app", "plugin"]);
+  });
+
+  it("gives plugins the handler's basePath, without a trailing slash", () => {
+    const init = vi.fn();
+    new FilewayClient({ driver: memDriver(), basePath: "/files/", plugins: [{ id: "p", init }] });
+    expect(init.mock.calls[0]![0]).toMatchObject({ basePath: "/files" });
   });
 
   it("rejects duplicate plugin ids, duplicate routes and malformed route keys", () => {
