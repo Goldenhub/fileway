@@ -65,4 +65,5 @@ jobs:
             echo "COOLIFY_TOKEN is not set; image pushed, nothing deployed."
             exit 0
           fi
-          curl -fsS --max-time 60 --request POST -H "Authorization: Bearer $COOLIFY_TOKEN" "$COOLIFY_WEBHOOK_DOCS"
+          # --fail-with-body: still fails the job, but shows why.
+          curl -sS --fail-with-body --max-time 60 --request POST -H "Authorization: Bearer $COOLIFY_TOKEN" "$COOLIFY_WEBHOOK_DOCS"
