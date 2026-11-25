@@ -69,6 +69,42 @@ const url = await client.getPresignedUrl("reports/q3.pdf", { expiresIn: 600 });
 - Every response carries `X-Content-Type-Options: nosniff` and, except for PDFs, `Content-Security-Policy: sandbox; default-src 'none'`. PDFs skip the policy because Chrome's PDF viewer does not render under it.
 - Everything that changes what is served is signed: the path, expiry, open or download, filename and `id`. Changing any of them makes the link fail with `403`.
 
+### Download events
+
+Each download through an app-signed link is logged as a `get` [event](/docs/guide/plugins#events) that plugins receive in `onEvent`:
+
+| Field | Value |
+|---|---|
+| `operation` | `"get"` |
+| `path` | The file's path. This is the stable way to identify a file: uploads are stored at `<folder>/<id>.<ext>` on every driver that builds paths that way (local disk, S3, Google Cloud, Azure, Supabase), so the same upload id gives the same path on all of them. Cloudinary stores `<folder>/<id>`, without the extension. |
+| `actor` | `"link"` |
+| `tags.linkId` | The `id` you passed to `getPresignedUrl`, when you passed one. It is part of the signature, so it cannot be changed. |
+| `outcome`, `durationMs`, `driver` | As for every event. `durationMs` is the time to open the file, not the whole transfer. |
+
+The event's own `id` is unique per event (for de-duplication); it does not identify the file.
+
+To match a download to whatever created the link, give the link an `id` and tag the call that creates it with the same value. The link expires; the events keep both:
+
+```ts
+const runId = "qa-2026-11-25-checkout"; // your own id: a QA run, a share, a ticket
+
+const url = await client.getPresignedUrl(upload.path, {
+  expiresIn: 600,
+  id: runId,                 // signed into the link; comes back as tags.linkId on downloads
+  tags: { qaRun: runId },    // on the getPresignedUrl event, with your actor
+});
+
+// In a plugin's onEvent:
+//   { operation: "getPresignedUrl", path, tags: { qaRun: runId }, actor: "..." }  when the link is created
+//   { operation: "get", path, actor: "link", tags: { linkId: runId } }           each time it is opened
+```
+
+What is and is not logged:
+
+- **Logged:** every `GET` of a valid link, including each range request a video or audio player makes while seeking.
+- **Not logged:** `HEAD` requests, and links refused for a bad signature, after expiry, or by `links.check`.
+- **Cloud presigned URLs are not logged.** By default S3, Google Cloud, Azure and Supabase hand out their own presigned URLs, and the download goes straight to the provider without passing through your app. Set `links: { mode: "always" }` to send those downloads through your app as well, so they are logged the same way as local disk.
+
 ## Download / read-back (`get(path)`)
 
 Every driver streams a stored file back as a WHATWG `ReadableStream<Uint8Array>`: the same type it accepts on upload:
