@@ -111,11 +111,48 @@ export default function PrivacyPage() {
 
       <H2 id="google">Google user data</H2>
       <P>
-        Fileway's use and transfer of information received from Google APIs adheres to the{" "}
+        If you choose "Sign in with Google", Fileway uses Google's OAuth sign-in. This section describes exactly how we
+        handle the data we receive from Google.
+      </P>
+      <H3>Data we access</H3>
+      <P>
+        Only the basic scopes <code>openid</code>, <code>email</code> and <code>profile</code>. From these we receive your
+        Google account ID, your name, your email address, whether Google has verified that email address, and the URL of
+        your profile picture. Google also issues sign-in tokens (an ID token and an access token). We do not request
+        access to Gmail, Google Drive, Calendar, Contacts or any other Google service, and we cannot see your Google
+        password.
+      </P>
+      <H3>How we use it</H3>
+      <P>
+        Only to create your Fileway account, sign you in, show your name and picture in the dashboard, show your name to
+        other members of organizations you join, and email you about your account. We do not use Google user data for
+        advertising, to build profiles, or to develop, improve or train AI or machine learning models, and we do not use
+        it to create, generate or alter images of anyone.
+      </P>
+      <H3>How we share it</H3>
+      <P>
+        We do not sell or transfer Google user data to anyone. Your name, email address and picture are visible only to
+        members of organizations you belong to. The data is stored by our hosting provider (Hetzner, in the EU) on our
+        behalf, and we disclose it otherwise only when the law requires it.
+      </P>
+      <H3>How we store and protect it</H3>
+      <P>
+        Your Google profile data and tokens are stored in our database on servers in Finland (EU). The database is not
+        reachable from the internet, all connections use HTTPS, and only the Fileway operators can access it. We do not
+        use the Google tokens to call Google APIs on your behalf.
+      </P>
+      <H3>How long we keep it, and how to delete it</H3>
+      <P>
+        We keep it while your Fileway account exists. Email <A href={`mailto:${LEGAL_EMAIL}`}>{LEGAL_EMAIL}</A> to delete
+        your account: we delete your Google profile data and tokens within 30 days, and they leave our backups within 30
+        days after that. You can also remove Fileway's access at any time in your{" "}
+        <A href="https://myaccount.google.com/connections">Google account settings</A>.
+      </P>
+      <H3>Limited Use</H3>
+      <P>
+        Fileway's use and transfer of information received from Google APIs to any other app will adhere to the{" "}
         <A href="https://developers.google.com/terms/api-services-user-data-policy">Google API Services User Data Policy</A>,
-        including the Limited Use requirements. We use your Google name, email address and profile picture only to create
-        and identify your Fileway account. We do not sell it, use it for advertising, share it except as described below,
-        or use it to develop or train AI or machine learning models.
+        including the Limited Use requirements.
       </P>
 
       <H2 id="processors">Who processes it</H2>
