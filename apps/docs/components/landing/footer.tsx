@@ -61,15 +61,23 @@ export function Footer() {
       <div className="border-t border-line">
         <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-6 text-sm text-ink-muted sm:px-6">
           <p>Open source under the MIT License</p>
-          <a
-            href={GITHUB_URL}
-            target="_blank"
-            rel="noopener noreferrer"
-            aria-label="GitHub"
-            className="transition-colors hover:text-ink"
-          >
-            <GitHubIcon />
-          </a>
+          <div className="flex items-center gap-5">
+            <Link href="/privacy" className="transition-colors hover:text-ink">
+              Privacy
+            </Link>
+            <Link href="/terms" className="transition-colors hover:text-ink">
+              Terms
+            </Link>
+            <a
+              href={GITHUB_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="GitHub"
+              className="transition-colors hover:text-ink"
+            >
+              <GitHubIcon />
+            </a>
+          </div>
         </div>
       </div>
     </footer>

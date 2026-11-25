@@ -1,0 +1,172 @@
+import type { Metadata } from "next";
+import { LegalPage, H2, H3, P, Ul, A, Strong, LEGAL_EMAIL } from "@/components/landing/legal";
+
+export const metadata: Metadata = {
+  title: "Privacy policy",
+  description:
+    "What Fileway collects on usefileway.dev and in Fileway Infrastructure, why, who processes it, how long it is kept and how to have it deleted.",
+  alternates: { canonical: "/privacy" },
+};
+
+export default function PrivacyPage() {
+  return (
+    <LegalPage
+      title="Privacy policy"
+      intro={
+        <>
+          <p>
+            This policy explains what information Fileway collects, why, and what you can do about it. It covers this
+            website (usefileway.dev, including the documentation) and <Strong>Fileway Infrastructure</Strong>, the hosted
+            dashboard at app.usefileway.dev and its API at api.usefileway.dev.
+          </p>
+          <p className="mt-4">
+            The open source Fileway framework (the <code>@fileway/*</code> packages on npm) runs entirely inside your own
+            application. It sends nothing to us unless you add the <code>@fileway/infra</code> plugin and connect it to
+            Fileway Infrastructure.
+          </p>
+        </>
+      }
+    >
+      <H2 id="summary">The short version</H2>
+      <Ul>
+        <li>We collect what we need to sign you in and run the dashboard, and nothing for advertising.</li>
+        <li>
+          Your files never pass through our servers. File contents go between your users, your app and your storage
+          provider only.
+        </li>
+        <li>We do not sell personal information, and we do not use it to train AI models.</li>
+        <li>
+          You can ask us at any time for a copy of your data or to delete it: <A href={`mailto:${LEGAL_EMAIL}`}>{LEGAL_EMAIL}</A>.
+        </li>
+      </Ul>
+
+      <H2 id="collect">What we collect</H2>
+
+      <H3>When you sign in to the dashboard</H3>
+      <P>
+        You sign in with GitHub or Google. We receive and store your <Strong>name, email address, profile picture URL</Strong>{" "}
+        and your account ID at that provider. From Google we request only the basic <code>openid</code>,{" "}
+        <code>email</code> and <code>profile</code> scopes. We never get your password and cannot read your email,
+        repositories, contacts or files at GitHub or Google.
+      </P>
+      <P>
+        The sign-in tokens the provider issues are stored with your account so the sign-in works; we do not use them to
+        call GitHub or Google on your behalf.
+      </P>
+      <P>
+        For each signed-in session we store the session expiry, your <Strong>IP address and browser user agent</Strong>{" "}
+        (so you can recognise your sessions and so we can spot abuse), and a session cookie in your browser.
+      </P>
+
+      <H3>Organizations, projects and keys</H3>
+      <P>
+        What you create in the dashboard: organization and project names, who is a member and with which role, the URL
+        of your app, and API keys. We store only a one way hash of each API key, never the key itself.
+      </P>
+
+      <H3>File activity from your app</H3>
+      <P>
+        When you connect an app with the <code>@fileway/infra</code> plugin, it sends us a record of each file
+        operation so the dashboard can show your audit log and analytics:
+      </P>
+      <Ul>
+        <li>the operation (upload, download, delete, and so on), whether it succeeded, the error if it failed, how long it took and which storage driver ran it;</li>
+        <li>the file path, unless you configure the plugin to send a hash of it or nothing;</li>
+        <li>the file size and type, unless you turn that off;</li>
+        <li>the actor and tags your app attaches, if any (for example your own user ID for whoever uploaded the file);</li>
+        <li>the plugin, framework and driver versions, and the app's settings for what it reports.</li>
+      </Ul>
+      <P>
+        We never receive file contents or your storage credentials. When you browse files in the dashboard, your browser
+        talks to your app directly; the file data does not go through our servers.
+      </P>
+      <P>
+        If you put personal information about your own users into paths, actors or tags, you are the controller of that
+        information and we process it on your behalf, only to provide the dashboard to you.
+      </P>
+
+      <H3>On this website</H3>
+      <P>
+        We measure visits with privacy friendly, cookieless analytics that count page views, referrers, country and
+        device type without identifying you. The site sets no advertising or tracking cookies.
+      </P>
+
+      <H3>Server logs</H3>
+      <P>
+        Like any web service, our servers and Cloudflare record technical request data (IP address, time, URL, status)
+        for security and troubleshooting. These logs are kept for a short time and are not used to build profiles.
+      </P>
+
+      <H2 id="use">How we use it</H2>
+      <Ul>
+        <li>to sign you in, keep your account secure and show you your organizations and projects;</li>
+        <li>to provide the audit log, analytics and file browser for the apps you connect;</li>
+        <li>to prevent abuse and keep the service running;</li>
+        <li>to email you about your account or important changes to the service (no marketing email unless you opt in).</li>
+      </Ul>
+      <P>
+        Where data protection law such as the GDPR applies, our legal basis is the contract with you (providing the
+        service you signed up for) and our legitimate interest in keeping it secure.
+      </P>
+
+      <H2 id="google">Google user data</H2>
+      <P>
+        Fileway's use and transfer of information received from Google APIs adheres to the{" "}
+        <A href="https://developers.google.com/terms/api-services-user-data-policy">Google API Services User Data Policy</A>,
+        including the Limited Use requirements. We use your Google name, email address and profile picture only to create
+        and identify your Fileway account. We do not sell it, use it for advertising, share it except as described below,
+        or use it to develop or train AI or machine learning models.
+      </P>
+
+      <H2 id="processors">Who processes it</H2>
+      <P>We use a small number of providers to run the service:</P>
+      <Ul>
+        <li><Strong>Hetzner Online</Strong> (servers and database, in Finland, EU);</li>
+        <li><Strong>Cloudflare</Strong> (DNS, network protection and, for database backups, R2 storage);</li>
+        <li><Strong>GitHub</Strong> and <Strong>Google</Strong> (only for signing in, when you choose them);</li>
+        <li><Strong>Vercel</Strong> (hosting and analytics for this website, until it moves to our own servers).</li>
+      </Ul>
+      <P>
+        We share information otherwise only if the law requires it, or with a successor if the project changes hands,
+        in which case this policy continues to apply.
+      </P>
+
+      <H2 id="retention">How long we keep it</H2>
+      <Ul>
+        <li>Account and organization data: until you delete your account or ask us to.</li>
+        <li>File activity: until you delete the project. During the beta there is no automatic expiry; we will add one, and update this policy, before paid plans launch.</li>
+        <li>Sessions: until they expire or you sign out.</li>
+        <li>Backups: overwritten within 30 days.</li>
+      </Ul>
+
+      <H2 id="rights">Your choices and rights</H2>
+      <P>
+        You can see, correct, export or delete your information, and object to how we use it. Email{" "}
+        <A href={`mailto:${LEGAL_EMAIL}`}>{LEGAL_EMAIL}</A> from the address on your account and we will respond within 30
+        days. Deleting your account removes your profile, sessions and memberships; organizations you alone own are deleted
+        with their projects and activity. You may also complain to your local data protection authority.
+      </P>
+      <P>
+        You can also revoke Fileway's access at any time in your{" "}
+        <A href="https://github.com/settings/applications">GitHub settings</A> or{" "}
+        <A href="https://myaccount.google.com/connections">Google account</A>.
+      </P>
+
+      <H2 id="security">Security</H2>
+      <P>
+        All traffic is encrypted with HTTPS. API keys are stored hashed, the database is not reachable from the
+        internet, and requests the dashboard sends to your app are signed and expire within a minute. No system is
+        perfectly secure; if a breach affects your data we will tell you without undue delay.
+      </P>
+
+      <H2 id="children">Children</H2>
+      <P>Fileway is a tool for software developers and is not meant for anyone under 16.</P>
+
+      <H2 id="changes">Changes</H2>
+      <P>
+        We will post any change here and update the date at the top. For significant changes we will also email account
+        holders before they take effect.
+      </P>
+    </LegalPage>
+  );
+}

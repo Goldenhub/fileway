@@ -10,7 +10,9 @@ export const SITE_DESCRIPTION =
 export const SHARE_TITLE = `${SITE_NAME}: Write your file uploads once. Run them on any cloud.`;
 export const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? "https://www.usefileway.dev";
 export const GITHUB_URL = "https://github.com/Goldenhub/fileway";
-export const NPM_URL = "https://www.npmjs.com/org/fileway";
+/** Fileway Infrastructure, the hosted dashboard. */
+export const DASHBOARD_URL = "https://app.usefileway.dev";
+export const NPM_URL ="https://www.npmjs.com/org/fileway";
 
 /** Shared Open Graph / Twitter image for the landing page (app/og/[...slug]/route.tsx). */
 export const HOME_OG_IMAGE = "/og/home.png";

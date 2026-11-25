@@ -32,5 +32,9 @@ export default function sitemap(): MetadataRoute.Sitemap {
     });
   }
 
-  return [landing, ...docPages];
+  const legal = ["/privacy", "/terms"].map(
+    (path): MetadataRoute.Sitemap[number] => ({ url: `${SITE_URL}${path}`, changeFrequency: "yearly", priority: 0.3 }),
+  );
+
+  return [landing, ...docPages, ...legal];
 }
