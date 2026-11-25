@@ -91,10 +91,17 @@ export default function PrivacyPage() {
         device type without identifying you. The site sets no advertising or tracking cookies.
       </P>
 
-      <H3>Server logs</H3>
+      <H3>Server logs and error reports</H3>
       <P>
         Like any web service, our servers and Cloudflare record technical request data (IP address, time, URL, status)
         for security and troubleshooting. These logs are kept for a short time and are not used to build profiles.
+      </P>
+      <P>
+        When the dashboard or the API hits an unexpected error, we send an error report to Sentry so we can fix it: the
+        error message, where in our code it happened, the route (for example <code>/projects/[projectId]/files</code>),
+        the browser or runtime version and the release. Before a report leaves our servers or your browser we remove
+        names, email addresses, IP addresses, cookies, request bodies, query strings, API keys and file paths. Reports are
+        stored in Sentry's EU region and deleted within 90 days.
       </P>
 
       <H2 id="use">How we use it</H2>
@@ -159,7 +166,8 @@ export default function PrivacyPage() {
       <P>We use a small number of providers to run the service:</P>
       <Ul>
         <li><Strong>Hetzner Online</Strong> (servers and database, in Finland, EU);</li>
-        <li><Strong>Cloudflare</Strong> (DNS, network protection and, for database backups, R2 storage);</li>
+        <li><Strong>Cloudflare</Strong> (DNS, network protection and, for database backups, R2 storage in the EU);</li>
+        <li><Strong>Sentry</Strong> (error reports with personal data removed, stored in the EU);</li>
         <li><Strong>GitHub</Strong> and <Strong>Google</Strong> (only for signing in, when you choose them);</li>
         <li><Strong>Vercel</Strong> (hosting and analytics for this website, until it moves to our own servers).</li>
       </Ul>
@@ -173,7 +181,8 @@ export default function PrivacyPage() {
         <li>Account and organization data: until you delete your account or ask us to.</li>
         <li>File activity: until you delete the project. During the beta there is no automatic expiry; we will add one, and update this policy, before paid plans launch.</li>
         <li>Sessions: until they expire or you sign out.</li>
-        <li>Backups: overwritten within 30 days.</li>
+        <li>Backups: deleted after 30 days.</li>
+        <li>Error reports: deleted within 90 days.</li>
       </Ul>
 
       <H2 id="rights">Your choices and rights</H2>
