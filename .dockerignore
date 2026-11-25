@@ -1,0 +1,14 @@
+# Keep secrets, local state and build output out of images.
+.env
+.env.*
+# .git stays in: the docs build reads page dates from it. Only the build stage
+# sees it; the final image holds nothing but the static export.
+.claude
+marketing
+**/node_modules
+**/dist
+**/.next
+**/out
+**/coverage
+**/*.tsbuildinfo
+**/.DS_Store
