@@ -1,0 +1,103 @@
+---
+title: Configuration
+description: Every option of the infra() plugin. Hash or omit paths, sample events, limit what the dashboard can do, and run on serverless.
+---
+
+```ts
+import { infra } from "@fileway/infra";
+
+infra({
+  apiKey: process.env.FILEWAY_API_KEY!,
+  events: { redact: "hash-paths", fileInfo: true, sampleRate: 1, maxQueue: 10_000 },
+  url: "https://myapp.com",
+  allow: (action, path) => !(action === "delete" && path.startsWith("invoices/")),
+});
+```
+
+| Option | Default | |
+|---|---|---|
+| `apiKey` | required | The project's API key, from the dashboard |
+| `events.enabled` | `true` | `false` sends nothing |
+| `events.redact` | `"none"` | `"hash-paths"` or `"omit-paths"`; see [below](#events) |
+| `events.fileInfo` | `true` | `false` leaves out each file's type and size |
+| `events.sampleRate` | `1` | Fraction of events to send, 0 to 1 |
+| `events.maxQueue` | `10000` | Events kept in memory while they can't be sent; beyond it the oldest are dropped |
+| `url` | none | Your app's public URL; overrides the one entered in the dashboard |
+| `allow` | none | Your veto on file actions from the dashboard; see [below](#allow) |
+| `flushOnExit` | `true` | On Node.js and Bun, send queued events when the process exits |
+| `fetch` | `globalThis.fetch` | A custom `fetch`, for example behind a proxy |
+
+The plugin also has `plugin.flush()`, which sends queued events now (it never rejects), and `plugin.pending`, the number of events waiting.
+
+## Events
+
+Each file operation your app makes through the client becomes one event: the operation, its outcome and error code, duration, retries, driver, the path, the file's type and size, and the `actor` and `tags` you pass. See [Plugins and events](/docs/guide/plugins#events) for the full shape.
+
+### Paths: `events.redact`
+
+| Value | What leaves your app | In the dashboard |
+|---|---|---|
+| `"none"` | The path, e.g. `invoices/2026/acme.pdf` | Full paths; the file browser can open what you click in the audit log |
+| `"hash-paths"` | A salted SHA-256 of the path. The salt is per project, so the same path hashes differently in another project | Events for the same file group together, but nobody at Fileway can read the name |
+| `"omit-paths"` | Nothing | Activity and counts only |
+
+Use `hash-paths` when paths contain personal data, such as user names or email addresses in folder names.
+
+### Who did it: `actor` and `tags`
+
+Pass them on any client call, and they appear in the audit log:
+
+```ts
+await client.upload(stream, { filename: "avatar.png", actor: user.id, tags: { tenant: org.slug } });
+```
+
+Prefer an internal ID to an email address. Fileway shows names for dashboard users; for your app's users, it shows what you send.
+
+### Sampling
+
+`sampleRate: 0.1` sends about one event in ten. The analytics stay roughly right, but the audit log is no longer complete, so keep `1` (the default) if you rely on it. Refused dashboard actions are always recorded, whatever the rate.
+
+### When events can't be sent
+
+Sending happens in the background and never fails or slows down a file operation.
+
+- **Service unreachable or busy:** events stay queued and are retried with backoff. When the service asks to slow down (`Retry-After`), the plugin waits that long, at most an hour.
+- **Monthly event limit reached:** the plugin logs one warning, keeps new events queued, and sends them once the limit resets.
+- **Queue full** (`maxQueue`): the oldest events are dropped, with one warning.
+- **Key rejected or revoked:** events are turned off, with one error in your logger. Restart the app with a valid key.
+
+## Serverless: `waitUntil`
+
+On Vercel and Cloudflare Workers, background work can be cut off once the response is sent. Pass the platform's `waitUntil` to the client (not to `infra()`), and sends in progress finish after the response:
+
+```ts
+import { waitUntil } from "@vercel/functions"; // Cloudflare: import { waitUntil } from "cloudflare:workers";
+
+const client = new FilewayClient({ driver, plugins: [infra({ apiKey })], waitUntil });
+```
+
+Events that haven't been sent when an invocation ends are sent by a later invocation of the same instance.
+
+## The app's URL: `url`
+
+The dashboard's file browser needs to know where your app is. You enter it during setup or in **Settings**, and the plugin reports its `basePath`. Setting `url` in code wins over the dashboard, which then shows it instead of the field. This suits apps whose URL is known at deploy time:
+
+```ts
+infra({ apiKey, url: process.env.APP_URL });
+```
+
+## Limiting the dashboard: `allow`
+
+Dashboard roles already decide who can do what (see [Security](/docs/infrastructure/security#roles)). `allow` is your app's own final say, checked after Fileway's signature and the user's role:
+
+```ts
+infra({
+  apiKey,
+  allow: (action, path) => {
+    if (path.startsWith("invoices/")) return action === "list" || action === "stat" || action === "link";
+    return true;
+  },
+});
+```
+
+`action` is one of `health`, `list`, `stat`, `link` (open a file), `upload-url`, `delete`, `move` or `copy`. It may return a promise. A refused action is answered with `403` and recorded in your audit log as **refused by app**.

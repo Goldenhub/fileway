@@ -2,8 +2,8 @@ import type { ReactNode } from "react";
 import type { Metadata } from "next";
 import { Inter, JetBrains_Mono } from "next/font/google";
 import { RootProvider } from "fumadocs-ui/provider/next";
-import { Analytics } from "@vercel/analytics/react";
-import { SpeedInsights } from "@vercel/speed-insights/next";
+import Script from "next/script";
+import { UMAMI_SCRIPT_URL, UMAMI_WEBSITE_ID } from "@/lib/analytics";
 import { SITE_NAME, SITE_DESCRIPTION, SHARE_TITLE, SITE_URL, GITHUB_URL, NPM_URL, HOME_OG_IMAGE, OG_IMAGE_SIZE, FEED_ALTERNATE } from "@/lib/site";
 import "./global.css";
 
@@ -96,8 +96,17 @@ export default function RootLayout({ children }: { children: ReactNode }) {
     <html lang="en" className={`${sans.variable} ${mono.variable}`} suppressHydrationWarning>
       <body>
         <RootProvider theme={{ defaultTheme: "light" }} search={{ options: { type: "static" } }}>{children}</RootProvider>
-        <Analytics />
-        <SpeedInsights />
+        {UMAMI_WEBSITE_ID ? (
+          // Self-hosted Umami: no cookies, honours Do Not Track, and counts only
+          // the production domains (never localhost or previews).
+          <Script
+            src={UMAMI_SCRIPT_URL}
+            data-website-id={UMAMI_WEBSITE_ID}
+            data-domains="www.usefileway.dev,usefileway.dev"
+            data-do-not-track="true"
+            strategy="afterInteractive"
+          />
+        ) : null}
       </body>
     </html>
   );

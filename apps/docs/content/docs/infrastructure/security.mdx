@@ -1,0 +1,66 @@
+---
+title: Security
+description: How Fileway Infrastructure keeps your storage keys in your app, signs every file request from the dashboard, and lets your app refuse any of them.
+---
+
+The plugin adds two things to your app: it **sends events** out, and it **answers file requests** from the dashboard. This page explains how each is protected. The plugin's code is MIT licensed and published unminified on npm, so you can read exactly what runs in your app.
+
+## Your keys and your files stay with you
+
+- **Storage credentials never leave your app.** The plugin uses your `FilewayClient` as it is; Fileway never receives your S3 keys, service account or tokens.
+- **File contents never pass through Fileway.** Opening or uploading a file in the dashboard gives your browser a short-lived signed link (15 minutes) from your app, and the bytes go between your browser and your app or storage provider.
+- **Fileway never calls your app.** Every file request is sent by the dashboard user's browser, so your app needs no inbound access from Fileway's servers.
+
+## API keys
+
+- Keys look like `fwk_<prefix>_<secret>`. Fileway stores only a SHA-256 hash, so a key is shown once, when it is created.
+- A key only sends events and connects the app to its project. It cannot read events back, see other projects, or act on your files.
+- Revoke a key in **Settings**: the API refuses it within a minute, and the plugin turns events off with one error in your logs.
+
+## File requests from the dashboard
+
+When someone uses the file browser, the dashboard's server signs the request, and their browser sends it to your app's `client.handler` (under `/infra/*`). The plugin runs these checks before anything touches your storage:
+
+1. **Signature.** Fileway signs each request with its private ECDSA P-256 key. The plugin verifies it with the public key it received when it connected. The private key never leaves Fileway's dashboard server.
+2. **What is signed:** the method, path, a hash of the body, a timestamp, a one-time nonce, the project, the user and their role. Changing any of them invalidates the request.
+3. **Your project.** A request signed for another project is refused.
+4. **Freshness.** Requests older than 60 seconds are refused, and each nonce works once, so a captured request cannot be replayed. Keep your server's clock in sync (NTP); a clock that is off by more than a minute makes requests fail with `clock-skew`.
+5. **The user's role** (see below).
+6. **Your `allow` rule**, if you set one.
+
+Only after all of that does the plugin call your client: `list`, `stat`, a short-lived download or upload link, `delete`, `move` or `copy`. Responses allow cross-origin access from `https://app.usefileway.dev` only.
+
+### Roles
+
+| Role | Browse and open files | Upload, delete, move, copy | Project settings and keys |
+|---|---|---|---|
+| Owner | Yes | Yes | Yes |
+| Admin | Yes | Yes | Yes |
+| Member | Yes | Yes | No |
+| Viewer | Yes | No | No |
+
+The role is part of the signed request, so it is enforced by your app as well as by the dashboard.
+
+### Your app has the final say
+
+`allow` runs last, inside your app, on every request:
+
+```ts
+infra({
+  apiKey,
+  // Nobody deletes from the dashboard, whatever their role.
+  allow: (action) => action !== "delete",
+});
+```
+
+See [Configuration](/docs/infrastructure/configuration#allow) for more.
+
+## The audit trail of refusals
+
+- A user whose role doesn't allow an action is refused by the dashboard, recorded as **not allowed for role**.
+- An action your `allow` rule refuses is recorded by the plugin as **refused by app**. These records are never sampled out.
+- Requests with a missing or invalid signature are refused without a record: they did not come from your dashboard.
+
+## Reporting a vulnerability
+
+Please report security issues privately through [GitHub security advisories](https://github.com/Goldenhub/fileway/security/advisories/new) rather than in public discussions.

@@ -1,6 +1,5 @@
 import { ArrowRight, BarChart3, FolderOpen, ShieldCheck, Users } from "lucide-react";
-import { DASHBOARD_URL, GITHUB_URL } from "@/lib/site";
-import { GitHubIcon } from "../brand";
+import { DASHBOARD_URL } from "@/lib/site";
 import { InstallCommand } from "./install-command";
 import { Button, Section } from "./ui";
 
@@ -48,15 +47,8 @@ export function InfraTeaser() {
           <Button href={DASHBOARD_URL} event="cta_click" data={{ target: "infra-dashboard" }}>
             Open the dashboard <ArrowRight className="size-4" />
           </Button>
-          <Button
-            href={GITHUB_URL}
-            target="_blank"
-            rel="noopener noreferrer"
-            event="cta_click"
-            data={{ target: "infra-follow" }}
-            variant="secondary"
-          >
-            <GitHubIcon /> Follow on GitHub
+          <Button href="/docs/infrastructure" event="cta_click" data={{ target: "infra-docs" }} variant="secondary">
+            How it works
           </Button>
         </div>
         <p className="mt-4 text-sm text-ink-muted">

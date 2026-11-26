@@ -1,0 +1,51 @@
+---
+title: Overview
+description: Fileway Infrastructure, the hosted dashboard for apps built with Fileway. An audit log, analytics and a file browser, added with one plugin.
+---
+
+**Fileway Infrastructure** is an optional hosted dashboard for apps built with Fileway. Add the `@fileway/infra` plugin to your `FilewayClient` and you get:
+
+- **An audit log** of every upload, download, delete, copy and move: who did it, to which file, whether it worked and how long it took.
+- **Analytics:** activity per day, error rates, and storage used by uploads.
+- **A file browser:** list, open, upload, move, copy and delete your app's files from the dashboard, with roles for your team.
+
+It is **in beta and free** while it is. Sign in at [app.usefileway.dev](https://app.usefileway.dev) with GitHub or Google.
+
+## How it works
+
+1. **Events go out.** The plugin records one small event per file operation and sends them in the background, in batches. Your app never waits for Fileway.
+2. **The dashboard reads them** to show the audit log and analytics.
+3. **File actions come back in.** When you browse files in the dashboard, Fileway signs each request for your project, and **your browser** sends it straight to your app, where the plugin checks the signature and your rules before anything runs. Fileway's servers never call your app.
+
+## What Fileway sees, and what it never sees
+
+| Fileway receives | Fileway never receives |
+|---|---|
+| The operation, outcome, timing and driver of each file operation | File contents |
+| The file path, unless you hash it or leave it out ([`events.redact`](/docs/infrastructure/configuration#events)) | Your storage credentials (S3 keys, service accounts, tokens) |
+| The file's type and size, unless you turn that off | Anything your app does that isn't a Fileway file operation |
+| The `actor` and `tags` your app attaches | |
+
+When you browse files, the file data flows between your browser and your app (or your storage provider, through signed links). It does not pass through Fileway. See [Security](/docs/infrastructure/security) for the details, and the [privacy policy](/privacy) for how account data is handled.
+
+## Beta limits
+
+| Limit | Value |
+|---|---|
+| Projects per organization | 5 |
+| Active API keys per project | 5 |
+| Events stored per project per month (UTC) | 1,000,000 |
+
+At the monthly limit, your app keeps working: the plugin keeps new events in its queue (up to `events.maxQueue`) and sends them once the month resets. The project's overview page shows how much of the month is used.
+
+## Requirements
+
+- `@fileway/core` **0.9.0** or later, with any driver.
+- `client.handler` mounted in your app, for the file browser (the audit log and analytics work without it).
+- Any runtime Fileway supports: Node.js, Bun, Deno, Cloudflare Workers, Vercel.
+
+Next: the [quickstart](/docs/infrastructure/quickstart).
+
+## Feedback
+
+Questions, bugs or a limit that gets in your way: [GitHub Discussions](https://github.com/Goldenhub/fileway/discussions).

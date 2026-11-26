@@ -87,8 +87,10 @@ export default function PrivacyPage() {
 
       <H3>On this website</H3>
       <P>
-        We measure visits with privacy friendly, cookieless analytics that count page views, referrers, country and
-        device type without identifying you. The site sets no advertising or tracking cookies.
+        We measure visits with Umami, an open source analytics tool we run on our own server. It counts page views,
+        referrers, country, browser and device type, and a few clicks (such as copying the install command), without
+        cookies and without identifying you; it also skips browsers that send Do Not Track. The site sets no advertising
+        or tracking cookies.
       </P>
 
       <H3>Server logs and error reports</H3>
@@ -165,11 +167,10 @@ export default function PrivacyPage() {
       <H2 id="processors">Who processes it</H2>
       <P>We use a small number of providers to run the service:</P>
       <Ul>
-        <li><Strong>Hetzner Online</Strong> (servers and database, in Finland, EU);</li>
+        <li><Strong>Hetzner Online</Strong> (servers and database, including this website and its analytics, in Finland, EU);</li>
         <li><Strong>Cloudflare</Strong> (DNS, network protection and, for database backups, R2 storage in the EU);</li>
         <li><Strong>Sentry</Strong> (error reports with personal data removed, stored in the EU);</li>
-        <li><Strong>GitHub</Strong> and <Strong>Google</Strong> (only for signing in, when you choose them);</li>
-        <li><Strong>Vercel</Strong> (hosting and analytics for this website, until it moves to our own servers).</li>
+        <li><Strong>GitHub</Strong> and <Strong>Google</Strong> (only for signing in, when you choose them).</li>
       </Ul>
       <P>
         We share information otherwise only if the law requires it, or with a successor if the project changes hands,
@@ -179,7 +180,7 @@ export default function PrivacyPage() {
       <H2 id="retention">How long we keep it</H2>
       <Ul>
         <li>Account and organization data: until you delete your account or ask us to.</li>
-        <li>File activity: until you delete the project. During the beta there is no automatic expiry; we will add one, and update this policy, before paid plans launch.</li>
+        <li>File activity: until the project or your account is deleted. During the beta there is no automatic expiry; we will add one, and update this policy, before paid plans launch.</li>
         <li>Sessions: until they expire or you sign out.</li>
         <li>Backups: deleted after 30 days.</li>
         <li>Error reports: deleted within 90 days.</li>

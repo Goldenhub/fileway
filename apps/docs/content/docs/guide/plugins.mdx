@@ -138,7 +138,9 @@ const files: FilewayPlugin = {
 
 ```ts
 // Next.js: app/api/fileway/[...all]/route.ts
-export const { GET, POST, PUT, DELETE } = client.handler;
+// Export every method your routes use. OPTIONS answers CORS preflights (app-signed
+// links, Fileway Infrastructure's file browser); without it Next answers them itself.
+export const { GET, HEAD, POST, PUT, DELETE, OPTIONS } = client.handler;
 
 // Cloudflare Workers, Bun, Deno
 export default { fetch: client.handler.fetch };

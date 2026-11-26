@@ -1,0 +1,116 @@
+---
+title: Quickstart
+description: Connect an app to Fileway Infrastructure in five minutes, and see its first events in the dashboard.
+---
+
+You need an app that already uses `@fileway/core` 0.9.0 or later. If you don't have one yet, start with the [Fileway quickstart](/docs/getting-started/quickstart).
+
+## 1. Create a project
+
+Sign in at [app.usefileway.dev](https://app.usefileway.dev) with GitHub or Google, name your organization and your first project, and pick its environment. A project is one app in one environment: staging and production are separate projects, each with its own key.
+
+The dashboard shows your **API key** once. Copy it into your app's environment:
+
+```bash
+FILEWAY_API_KEY=fwk_...
+```
+
+Treat it like any secret: keep it out of your repository and out of browser code. Lost it? Create a new key in **Settings** and revoke the old one.
+
+## 2. Install the plugin
+
+<Tabs id="package-manager" items={["npm", "pnpm", "yarn", "bun"]}>
+  <Tab value="npm">
+    ```bash
+    npm install @fileway/infra
+    ```
+  </Tab>
+  <Tab value="pnpm">
+    ```bash
+    pnpm add @fileway/infra
+    ```
+  </Tab>
+  <Tab value="yarn">
+    ```bash
+    yarn add @fileway/infra
+    ```
+  </Tab>
+  <Tab value="bun">
+    ```bash
+    bun add @fileway/infra
+    ```
+  </Tab>
+</Tabs>
+
+## 3. Add it to your client
+
+```ts title="lib/storage.ts"
+import { FilewayClient } from "@fileway/core";
+import { infra } from "@fileway/infra";
+
+export const client = new FilewayClient({
+  driver, // your existing driver
+  plugins: [infra({ apiKey: process.env.FILEWAY_API_KEY! })],
+});
+```
+
+**On Vercel or Cloudflare Workers**, also pass the platform's `waitUntil`, so events sent in the background finish after your response:
+
+```ts
+import { waitUntil } from "@vercel/functions"; // Cloudflare: from "cloudflare:workers"
+
+export const client = new FilewayClient({
+  driver,
+  plugins: [infra({ apiKey: process.env.FILEWAY_API_KEY! })],
+  waitUntil,
+});
+```
+
+On Node.js and Bun nothing else is needed: queued events are sent when the process exits.
+
+## 4. Mount `client.handler` (for the file browser)
+
+The dashboard's file browser calls routes the plugin adds under `client.handler` (`/api/fileway/infra/*` by default). Mount the handler with **every method**, including `OPTIONS`: your browser sends a CORS preflight first.
+
+```ts title="app/api/fileway/[...path]/route.ts"
+// Next.js
+import { client } from "@/lib/storage";
+
+export const { GET, HEAD, POST, PUT, OPTIONS } = client.handler;
+```
+
+```ts
+// Cloudflare Workers, Bun, Deno
+export default { fetch: client.handler.fetch };
+
+// Hono
+app.all("/api/fileway/*", (c) => client.handler.fetch(c.req.raw));
+```
+
+If you mount it somewhere else, set the client's `basePath` to match. The audit log and analytics work without this step; only the file browser needs it.
+
+## 5. Tell the dashboard where your app is
+
+The setup screen asks for your app's public URL (for example `https://myapp.com`), with the base path filled in from your client. You can change it later in **Settings**, or set it in code with `infra({ url })`, which then wins over the dashboard.
+
+**App running on your own computer?** `http://localhost:3000` works from your own browser. For teammates, or browsers that block local network access, open a tunnel to your app's port and enter the HTTPS address it prints:
+
+```bash
+npx outray http 3000                            # OutRay, open source
+ngrok http 3000                                 # ngrok
+cloudflared tunnel --url http://localhost:3000  # Cloudflare Tunnel, no account needed
+```
+
+Free tunnel addresses usually change each time the tunnel starts: update the URL in **Settings** when it does, or use a fixed domain from your tunnel provider. Use a separate project for local development (for example "my-app (development)"), so its events stay apart from production.
+
+## 6. Check it works
+
+Start your app and upload a file. Within a few seconds:
+
+- the setup screen shows your app as **connected**, with its driver and versions;
+- the upload appears in **Overview** and in the **Audit log**;
+- **Files** lists your storage, if you mounted the handler.
+
+Not seeing anything? Check your app's logs for lines starting with `fileway infra:`. A rejected key turns events off with one error there; an unreachable service is retried in the background.
+
+Next: [configuration](/docs/infrastructure/configuration) (hashing paths, sampling, limiting what the dashboard can do) and [security](/docs/infrastructure/security).

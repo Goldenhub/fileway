@@ -9,6 +9,9 @@ RUN apk add --no-cache git && corepack enable
 COPY . .
 RUN pnpm install --frozen-lockfile --filter "@fileway/docs..."
 ENV NEXT_TELEMETRY_DISABLED=1
+# Umami's website ID (public, set by CI). Empty: the site is built without analytics.
+ARG NEXT_PUBLIC_UMAMI_WEBSITE_ID=""
+ENV NEXT_PUBLIC_UMAMI_WEBSITE_ID=$NEXT_PUBLIC_UMAMI_WEBSITE_ID
 RUN pnpm --filter @fileway/docs build
 
 FROM nginx:1.27-alpine

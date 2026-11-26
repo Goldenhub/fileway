@@ -12,6 +12,7 @@ export const docs = defineDocs({
 });
 
 // `lastModified` reads each page's last commit date from git (used by the
-// sitemap and article metadata). On Vercel, set VERCEL_DEEP_CLONE=true so the
-// build has full history; with a shallow clone every page gets the same date.
+// sitemap and article metadata). The build needs full history (the docs image
+// workflow checks out with fetch-depth: 0); with a shallow clone every page
+// gets the same date.
 export default defineConfig({ plugins: [lastModified()] });

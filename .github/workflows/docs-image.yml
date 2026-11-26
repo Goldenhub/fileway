@@ -48,6 +48,8 @@ jobs:
         with:
           context: .
           file: apps/docs/Dockerfile
+          # A repository variable (not a secret): the ID is public in the page anyway.
+          build-args: NEXT_PUBLIC_UMAMI_WEBSITE_ID=${{ vars.UMAMI_WEBSITE_ID }}
           push: true
           tags: |
             ${{ steps.image.outputs.name }}:${{ github.sha }}
