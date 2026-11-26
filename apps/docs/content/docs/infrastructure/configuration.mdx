@@ -33,6 +33,8 @@ The plugin also has `plugin.flush()`, which sends queued events now (it never re
 
 Each file operation your app makes through the client becomes one event: the operation, its outcome and error code, duration, retries, driver, the path, the file's type and size, and the `actor` and `tags` you pass. See [Plugins and events](/docs/guide/plugins#events) for the full shape.
 
+File actions taken in the dashboard (opening, uploading, moving, copying, deleting) are recorded under the dashboard user's name. Browsing in the file browser (opening folders, viewing a file's details) is not: those successful `list` and `stat` calls are left out of the audit log and don't count toward the monthly limit. Your app's own `list` and `stat` calls are recorded as usual.
+
 ### Paths: `events.redact`
 
 | Value | What leaves your app | In the dashboard |
