@@ -2,7 +2,7 @@ import Link from "next/link";
 import { Menu } from "lucide-react";
 import { ThemeSwitch } from "fumadocs-ui/layouts/shared/slots/theme-switch";
 import { Logo, GitHubIcon } from "../brand";
-import { GITHUB_URL } from "@/lib/site";
+import { DASHBOARD_URL, GITHUB_URL } from "@/lib/site";
 import { Button } from "./ui";
 
 const links = [
@@ -42,6 +42,19 @@ export function Header() {
           >
             <GitHubIcon />
           </a>
+          {/* Hidden on phones, where it is the first item of the menu instead.
+              The wrapper hides it: Button's own inline-flex would win over `hidden`. */}
+          <span className="hidden sm:inline-flex">
+            <Button
+              href={DASHBOARD_URL}
+              event="cta_click"
+              data={{ target: "header-sign-in" }}
+              variant="secondary"
+              className="h-9 px-4"
+            >
+              Sign in
+            </Button>
+          </span>
           <Button href="/docs" event="cta_click" data={{ target: "header-get-started" }} className="h-9 px-4">
             Get started
           </Button>
@@ -55,7 +68,7 @@ export function Header() {
               <Menu className="size-5" />
             </summary>
             <nav className="absolute right-0 mt-2 w-48 rounded-xl border border-line bg-surface p-2 shadow-lg">
-              {[...links, { href: GITHUB_URL, label: "GitHub" }].map((l) => (
+              {[{ href: DASHBOARD_URL, label: "Sign in" }, ...links, { href: GITHUB_URL, label: "GitHub" }].map((l) => (
                 <Link
                   key={l.href}
                   href={l.href}
