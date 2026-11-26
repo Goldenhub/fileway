@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { LegalPage, H2, H3, P, Ul, A, Strong, LEGAL_EMAIL } from "@/components/landing/legal";
+import { LegalPage, H2, H3, P, Ul, A, Strong, LEGAL_EMAIL, LEGAL_OPERATOR } from "@/components/landing/legal";
 
 export const metadata: Metadata = {
   title: "Privacy policy",
@@ -27,6 +27,13 @@ export default function PrivacyPage() {
         </>
       }
     >
+      <H2 id="who">Who we are</H2>
+      <P>
+        Fileway is operated by {LEGAL_OPERATOR} ("we", "us"). We are the controller of the account information described
+        below. For the file activity your apps send to Fileway Infrastructure, you are the controller and we process it on
+        your behalf. Contact: <A href={`mailto:${LEGAL_EMAIL}`}>{LEGAL_EMAIL}</A>.
+      </P>
+
       <H2 id="summary">The short version</H2>
       <Ul>
         <li>We collect what we need to sign you in and run the dashboard, and nothing for advertising.</li>
@@ -179,7 +186,7 @@ export default function PrivacyPage() {
 
       <H2 id="retention">How long we keep it</H2>
       <Ul>
-        <li>Account and organization data: until you delete your account or ask us to.</li>
+        <li>Account and organization data: until you ask us to delete your account (see below).</li>
         <li>File activity: until the project or your account is deleted. During the beta there is no automatic expiry; we will add one, and update this policy, before paid plans launch.</li>
         <li>Sessions: until they expire or you sign out.</li>
         <li>Backups: deleted after 30 days.</li>

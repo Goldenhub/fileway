@@ -5,8 +5,10 @@ import { Footer } from "./footer";
 
 /** Contact address for privacy and legal questions. */
 export const LEGAL_EMAIL = "privacy@usefileway.dev";
+/** Who runs Fileway: named in the privacy policy (controller) and the terms. */
+export const LEGAL_OPERATOR = "Golden Azubuike, an individual in Nigeria";
 /** Date the current versions of the privacy policy and terms took effect. */
-export const LEGAL_UPDATED = "November 25, 2026";
+export const LEGAL_UPDATED = "November 26, 2026";
 
 /** Page shell for the privacy policy and terms: landing header and footer, readable column. */
 export function LegalPage({ title, intro, children }: { title: string; intro: ReactNode; children: ReactNode }) {

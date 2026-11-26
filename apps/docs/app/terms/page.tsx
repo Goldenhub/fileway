@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { LegalPage, H2, P, Ul, A, Strong, LEGAL_EMAIL } from "@/components/landing/legal";
+import { LegalPage, H2, P, Ul, A, Strong, LEGAL_EMAIL, LEGAL_OPERATOR } from "@/components/landing/legal";
 
 export const metadata: Metadata = {
   title: "Terms of service",
@@ -14,7 +14,8 @@ export default function TermsPage() {
       intro={
         <p>
           These terms apply to <Strong>Fileway Infrastructure</Strong>: the hosted dashboard at app.usefileway.dev and
-          its API at api.usefileway.dev (together, "the service"). By creating an account you agree to them. The open
+          its API at api.usefileway.dev (together, "the service"), operated by {LEGAL_OPERATOR} ("we", "us"). They are
+          an agreement between you and us; by creating an account you agree to them. The open
           source Fileway packages are not covered here; they are licensed under the{" "}
           <A href="https://github.com/Goldenhub/fileway/blob/main/LICENSE">MIT License</A>.
         </p>
@@ -60,7 +61,8 @@ export default function TermsPage() {
 
       <H2 id="suspension">Suspension and termination</H2>
       <P>
-        You can delete your account at any time. We may suspend or close an account that breaks these terms or puts the
+        You can delete a project in its settings at any time, and ask us to delete your account by emailing{" "}
+        <A href={`mailto:${LEGAL_EMAIL}`}>{LEGAL_EMAIL}</A>. We may suspend or close an account that breaks these terms or puts the
         service or others at risk, with notice where we reasonably can. If we ever shut the service down, we will give at
         least 30 days' notice so you can export your data. Your apps keep working without the service: the plugin never
         blocks file operations.
@@ -84,6 +86,13 @@ export default function TermsPage() {
         We may update these terms. We will post the new version here with a new date and, for material changes, email
         account holders at least 14 days before they take effect. Continuing to use the service after that means you
         accept the new terms.
+      </P>
+
+      <H2 id="law">Governing law</H2>
+      <P>
+        These terms are governed by the laws of the Federal Republic of Nigeria. If a provision is found unenforceable,
+        the rest of the terms remain in effect. Nothing in these terms takes away rights you have under the consumer
+        protection laws of the country where you live.
       </P>
 
       <H2 id="contact">Contact</H2>
