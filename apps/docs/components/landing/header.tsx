@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { Menu } from "lucide-react";
+import { ThemeSwitch } from "fumadocs-ui/layouts/shared/slots/theme-switch";
 import { Logo, GitHubIcon } from "../brand";
 import { GITHUB_URL } from "@/lib/site";
 import { Button } from "./ui";
@@ -30,6 +31,8 @@ export function Header() {
         </div>
 
         <div className="flex items-center gap-2">
+          {/* The docs sidebar's switch: same look, and the same saved choice. */}
+          <ThemeSwitch />
           <a
             href={GITHUB_URL}
             target="_blank"
