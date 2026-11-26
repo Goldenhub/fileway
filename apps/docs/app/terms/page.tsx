@@ -77,8 +77,8 @@ export default function TermsPage() {
       <H2 id="liability">Limitation of liability</H2>
       <P>
         To the extent the law allows, we are not liable for indirect, incidental or consequential damages, or for lost
-        profits, revenue or data, arising from your use of the service. During the free beta our total liability for any
-        claim is limited to 100 US dollars. Nothing in these terms limits liability that cannot be limited by law.
+        profits, revenue or data, arising from your use of the service. Nothing in these terms limits liability that
+        cannot be limited by law.
       </P>
 
       <H2 id="changes">Changes</H2>
